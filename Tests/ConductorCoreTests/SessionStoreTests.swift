@@ -52,6 +52,19 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertNotEqual(a.branch, b.branch)
     }
 
+    func testUpdateRepositoryPersistsSetupFields() throws {
+        let repo = try makeTempRepo()
+        let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: repo)
+        let updated = try store.updateRepository(id: r.id, setupScript: "npm install", copyAllowlist: [".env"])
+        XCTAssertEqual(updated.setupScript, "npm install")
+        XCTAssertEqual(updated.copyAllowlist, [".env"])
+        // Persisted to disk:
+        let reloaded = cfg.load().repositories.first { $0.id == r.id }
+        XCTAssertEqual(reloaded?.setupScript, "npm install")
+        XCTAssertEqual(reloaded?.copyAllowlist, [".env"])
+    }
+
     func testBranchUniquenessIsScopedPerRepo() throws {
         let repoA = try makeTempRepo()
         let repoB = try makeTempRepo()
