@@ -68,6 +68,17 @@ Throwaway spike at `spike/swiftterm-spike/`. **All five capability checks + bonu
 - **NSSplitView** leaves the first arranged subview full-width unless you `setPosition(_:ofDividerAt:)` after layout. Generic AppKit, not SwiftTerm.
 - Swift 6 strict concurrency vs. AppKit main-actor: spike used `swiftLanguageModes: [.v5]`; real app should adopt `@MainActor` / default-MainActor isolation properly.
 
+## Vertical slice (Phase 1 spine) — ✅ COMPLETE (verified 2026-06-24)
+
+End-to-end, verified in the running app: register repo → create worktree-session (branch + worktree + auto-launched `claude` in an embedded SwiftTerm) → switch between sessions → archive (worktree dir removed, branch deleted, session dropped from config) → state persists across relaunch.
+
+- **Architecture:** Swift package, two targets. `ConductorCore` (pure logic: `ProcessRunner`, `slugify`, `GitWorktree`, `Repository`/`Session`/`Config`, `SessionStore`) — 17 XCTest tests, all green. `Conductor` (AppKit shell: `AppDelegate` + `NSSplitViewController`, `SidebarController`, `TerminalSurface`).
+- **Toolchain gotcha (important for the work laptop too):** Command Line Tools ship neither XCTest nor the Testing framework — running tests requires Xcode's toolchain. Prefix every `swift build`/`run`/`test` with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`. Plan/code use XCTest, not Swift Testing. Package stays at `.macOS(.v13)`, no linker hacks.
+- **AppKit gotchas learned:** start the embedded terminal in `viewDidLayout` (not `viewDidAppear`) so zero-bounds-at-appear doesn't permanently skip it; embed surfaces as constrained subviews of a stable detail view (reassigning an `NSViewController.view` inside `NSSplitViewController` strips the pane's sizing constraints → blank).
+- **Plan:** `docs/superpowers/plans/2026-06-24-conductor-vertical-slice.md`. Built via subagent-driven development on branch `conductor-vertical-slice`.
+
+Next Phase-1 plans layer on: setupScript + copy-allowlist, theming/.itermcolors, snippets, agent-state badges, tab/surface colors, cmd+click, multi-surface, restore-running-agents.
+
 ## To verify during the spike / setup
 
 - SwiftTerm capabilities (the 5 spike checks above) — biggest technical risk.
