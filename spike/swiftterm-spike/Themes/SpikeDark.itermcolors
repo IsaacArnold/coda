@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Background Color</key>
+	<dict>
+		<key>Red Component</key><real>0.054</real>
+		<key>Green Component</key><real>0.066</real>
+		<key>Blue Component</key><real>0.105</real>
+	</dict>
+	<key>Foreground Color</key>
+	<dict>
+		<key>Red Component</key><real>0.85</real>
+		<key>Green Component</key><real>0.87</real>
+		<key>Blue Component</key><real>0.90</real>
+	</dict>
+	<key>Cursor Color</key>
+	<dict>
+		<key>Red Component</key><real>0.40</real>
+		<key>Green Component</key><real>0.90</real>
+		<key>Blue Component</key><real>0.90</real>
+	</dict>
+	<key>Ansi 0 Color</key>
+	<dict><key>Red Component</key><real>0.13</real><key>Green Component</key><real>0.14</real><key>Blue Component</key><real>0.18</real></dict>
+	<key>Ansi 1 Color</key>
+	<dict><key>Red Component</key><real>0.94</real><key>Green Component</key><real>0.38</real><key>Blue Component</key><real>0.42</real></dict>
+	<key>Ansi 2 Color</key>
+	<dict><key>Red Component</key><real>0.45</real><key>Green Component</key><real>0.83</real><key>Blue Component</key><real>0.45</real></dict>
+	<key>Ansi 3 Color</key>
+	<dict><key>Red Component</key><real>0.95</real><key>Green Component</key><real>0.78</real><key>Blue Component</key><real>0.36</real></dict>
+	<key>Ansi 4 Color</key>
+	<dict><key>Red Component</key><real>0.38</real><key>Green Component</key><real>0.62</real><key>Blue Component</key><real>0.94</real></dict>
+	<key>Ansi 5 Color</key>
+	<dict><key>Red Component</key><real>0.78</real><key>Green Component</key><real>0.52</real><key>Blue Component</key><real>0.94</real></dict>
+	<key>Ansi 6 Color</key>
+	<dict><key>Red Component</key><real>0.40</real><key>Green Component</key><real>0.85</real><key>Blue Component</key><real>0.85</real></dict>
+	<key>Ansi 7 Color</key>
+	<dict><key>Red Component</key><real>0.85</real><key>Green Component</key><real>0.87</real><key>Blue Component</key><real>0.90</real></dict>
+	<key>Ansi 8 Color</key>
+	<dict><key>Red Component</key><real>0.30</real><key>Green Component</key><real>0.32</real><key>Blue Component</key><real>0.38</real></dict>
+	<key>Ansi 9 Color</key>
+	<dict><key>Red Component</key><real>1.00</real><key>Green Component</key><real>0.50</real><key>Blue Component</key><real>0.54</real></dict>
+	<key>Ansi 10 Color</key>
+	<dict><key>Red Component</key><real>0.57</real><key>Green Component</key><real>0.93</real><key>Blue Component</key><real>0.57</real></dict>
+	<key>Ansi 11 Color</key>
+	<dict><key>Red Component</key><real>1.00</real><key>Green Component</key><real>0.87</real><key>Blue Component</key><real>0.48</real></dict>
+	<key>Ansi 12 Color</key>
+	<dict><key>Red Component</key><real>0.50</real><key>Green Component</key><real>0.72</real><key>Blue Component</key><real>1.00</real></dict>
+	<key>Ansi 13 Color</key>
+	<dict><key>Red Component</key><real>0.88</real><key>Green Component</key><real>0.62</real><key>Blue Component</key><real>1.00</real></dict>
+	<key>Ansi 14 Color</key>
+	<dict><key>Red Component</key><real>0.52</real><key>Green Component</key><real>0.95</real><key>Blue Component</key><real>0.95</real></dict>
+	<key>Ansi 15 Color</key>
+	<dict><key>Red Component</key><real>1.00</real><key>Green Component</key><real>1.00</real><key>Blue Component</key><real>1.00</real></dict>
+</dict>
+</plist>
