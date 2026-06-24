@@ -24,6 +24,16 @@ public final class SessionStore {
         return repo
     }
 
+    public func updateRepository(id: String, setupScript: String, copyAllowlist: [String]) throws -> Repository {
+        guard let idx = state.repositories.firstIndex(where: { $0.id == id }) else {
+            throw SessionStoreError.repoNotFound(id)
+        }
+        state.repositories[idx].setupScript = setupScript
+        state.repositories[idx].copyAllowlist = copyAllowlist
+        try config.save(state)
+        return state.repositories[idx]
+    }
+
     public func createSession(repoID: String, title: String) throws -> Session {
         guard let repo = state.repositories.first(where: { $0.id == repoID }) else {
             throw SessionStoreError.repoNotFound(repoID)
@@ -34,6 +44,10 @@ public final class SessionStore {
             .appendingPathComponent(repo.name)
             .appending("/").appending(branch)
         try git.add(repo: repo.path, path: worktreePath, branch: branch, base: base)
+
+        // Seed the fresh worktree with repo-configured untracked files (e.g. .env).
+        // git worktree add only brings tracked files, so these would otherwise be missing.
+        _ = try copyAllowlistedFiles(from: repo.path, to: worktreePath, allowlist: repo.copyAllowlist)
 
         let session = Session(id: UUID().uuidString, repoID: repoID,
                               title: title, branch: branch, worktreePath: worktreePath)

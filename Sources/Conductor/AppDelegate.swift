@@ -70,6 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let title = promptForText(prompt: "Session title:", defaultValue: "New Session") ?? "New Session"
         do {
             let s = try store.createSession(repoID: repo.id, title: title)
+            pendingSetupSessionIDs.insert(s.id)
             refreshSidebar(select: s.id)
             select(s)
         } catch { presentError(error) }
@@ -82,6 +83,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             select(store.state.sessions.first)
         } catch { presentError(error) }
     }
+
+    // Sessions created in THIS app run, whose first terminal should run setupScript.
+    private var pendingSetupSessionIDs: Set<String> = []
 
     private var shownSessionID: String?
 
@@ -96,7 +100,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         guard let s else { return }
 
-        let surface = TerminalSurface(workingDirectory: s.worktreePath, command: "claude")
+        let repo = store.state.repositories.first { $0.id == s.repoID }
+        let setup = pendingSetupSessionIDs.contains(s.id) ? (repo?.setupScript ?? "") : ""
+        pendingSetupSessionIDs.remove(s.id)
+        let surface = TerminalSurface(workingDirectory: s.worktreePath, command: "claude", setupScript: setup)
         detail.addChild(surface)
         surface.view.translatesAutoresizingMaskIntoConstraints = false
         detail.view.addSubview(surface.view)

@@ -52,6 +52,34 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertNotEqual(a.branch, b.branch)
     }
 
+    func testUpdateRepositoryPersistsSetupFields() throws {
+        let repo = try makeTempRepo()
+        let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: repo)
+        let updated = try store.updateRepository(id: r.id, setupScript: "npm install", copyAllowlist: [".env"])
+        XCTAssertEqual(updated.setupScript, "npm install")
+        XCTAssertEqual(updated.copyAllowlist, [".env"])
+        // Persisted to disk:
+        let reloaded = cfg.load().repositories.first { $0.id == r.id }
+        XCTAssertEqual(reloaded?.setupScript, "npm install")
+        XCTAssertEqual(reloaded?.copyAllowlist, [".env"])
+    }
+
+    func testCreateSessionCopiesAllowlistedFilesIntoWorktree() throws {
+        let repo = try makeTempRepo()
+        // An untracked, gitignored-style file that git worktree add would NOT bring over.
+        try "SECRET=1".write(toFile: repo + "/.env", atomically: true, encoding: .utf8)
+
+        let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: repo)
+        _ = try store.updateRepository(id: r.id, setupScript: "", copyAllowlist: [".env"])
+        let s = try store.createSession(repoID: r.id, title: "Needs Env")
+
+        let copiedEnv = s.worktreePath + "/.env"
+        XCTAssertTrue(FileManager.default.fileExists(atPath: copiedEnv))
+        XCTAssertEqual(try String(contentsOfFile: copiedEnv, encoding: .utf8), "SECRET=1")
+    }
+
     func testBranchUniquenessIsScopedPerRepo() throws {
         let repoA = try makeTempRepo()
         let repoB = try makeTempRepo()
