@@ -17,7 +17,8 @@ final class GitWorktreeTests: XCTestCase {
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: wt + "/README.md"))
         let list = try git.list(repo: repo)
-        XCTAssertTrue(list.contains { $0.path == wt && $0.branch == "feature-x" })
+        let wtResolved = URL(fileURLWithPath: wt).resolvingSymlinksInPath().path
+        XCTAssertTrue(list.contains { $0.path == wtResolved && $0.branch == "feature-x" })
     }
 
     func testRemoveDeletesWorktreeAndBranchCanBeDeleted() throws {
