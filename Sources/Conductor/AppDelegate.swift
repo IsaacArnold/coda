@@ -83,9 +83,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch { presentError(error) }
     }
 
-    // select() is fully implemented in Task 7; here it just clears the detail view.
+    private var shownSessionID: String?
+
     private func select(_ s: Session?) {
+        guard shownSessionID != s?.id else { return }   // idempotent: ignore redundant reselects
+        shownSessionID = s?.id
+
+        detail.children.forEach { $0.removeFromParent() }
         detail.view = NSView()
+        guard let s else { return }
+
+        let surface = TerminalSurface(workingDirectory: s.worktreePath, command: "claude")
+        detail.addChild(surface)
+        surface.view.frame = detail.view.bounds
+        surface.view.autoresizingMask = [.width, .height]
+        detail.view.addSubview(surface.view)
     }
 
     // MARK: - small helpers
