@@ -1,14 +1,16 @@
-import Testing
+import XCTest
 @testable import ConductorCore
 
-@Test func slugifyLowercasesAndHyphenates() {
-    #expect(slugify("Add Login Flow") == "add-login-flow")
-}
+final class SlugTests: XCTestCase {
+    func testSlugifyLowercasesAndHyphenates() {
+        XCTAssertEqual(slugify("Add Login Flow"), "add-login-flow")
+    }
 
-@Test func slugifyStripsPunctuationAndCollapsesDashes() {
-    #expect(slugify("Fix: the @bug!! (urgent)") == "fix-the-bug-urgent")
-}
+    func testSlugifyStripsPunctuationAndCollapsesDashes() {
+        XCTAssertEqual(slugify("Fix: the @bug!! (urgent)"), "fix-the-bug-urgent")
+    }
 
-@Test func slugifyFallsBackWhenEmpty() {
-    #expect(slugify("!!!") == "session")
+    func testSlugifyFallsBackWhenEmpty() {
+        XCTAssertEqual(slugify("!!!"), "session")
+    }
 }
