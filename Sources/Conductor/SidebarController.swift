@@ -11,14 +11,16 @@ final class SidebarController: NSViewController {
     var onAddRepo: (() -> Void)?
     var onSelect: ((Session?) -> Void)?
     var onArchive: ((Session) -> Void)?
+    var onRepoSettings: (() -> Void)?
 
     override func loadView() {
         let container = NSView()
 
         let addRepo = NSButton(title: "Add Repo…", target: self, action: #selector(addRepoAction))
+        let settings = NSButton(title: "Settings…", target: self, action: #selector(settingsAction))
         let new = NSButton(title: "New Session", target: self, action: #selector(newAction))
         let archive = NSButton(title: "Archive", target: self, action: #selector(archiveAction))
-        let bar = NSStackView(views: [addRepo, new, archive])
+        let bar = NSStackView(views: [addRepo, settings, new, archive])
         bar.orientation = .horizontal
         bar.spacing = 8
         bar.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
@@ -57,6 +59,7 @@ final class SidebarController: NSViewController {
     }
 
     @objc private func addRepoAction() { onAddRepo?() }
+    @objc private func settingsAction() { onRepoSettings?() }
     @objc private func newAction() { onNew?() }
     @objc private func archiveAction() {
         let row = table.selectedRow

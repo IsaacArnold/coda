@@ -46,10 +46,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sidebar.onNew = { [weak self] in self?.newSession() }
         sidebar.onArchive = { [weak self] s in self?.archive(s) }
         sidebar.onSelect = { [weak self] s in self?.select(s) }
+        sidebar.onRepoSettings = { [weak self] in self?.openRepoSettings() }
     }
 
     private func refreshSidebar(select id: String?) {
         sidebar.reload(sessions: store.state.sessions, selected: id)
+    }
+
+    private func openRepoSettings() {
+        guard !store.state.repositories.isEmpty else {
+            presentMessage("Add a repo first (Add Repo…).")
+            return
+        }
+        let vc = RepoSettingsController(repos: store.state.repositories)
+        vc.onSave = { [weak self] id, setup, allowlist in
+            do { _ = try self?.store.updateRepository(id: id, setupScript: setup, copyAllowlist: allowlist) }
+            catch { self?.presentError(error) }
+        }
+        splitVC.presentAsSheet(vc)
     }
 
     private func addRepo() {
