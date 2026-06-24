@@ -18,5 +18,9 @@ final class ConfigTests: XCTestCase {
         )
         try cfg.save(state)
         XCTAssertEqual(cfg.load(), state)
+
+        // A fresh Config on the same URL must read the persisted state from disk,
+        // proving persistence rather than any in-memory retention.
+        XCTAssertEqual(Config(url: url).load(), state)
     }
 }
