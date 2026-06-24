@@ -89,15 +89,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard shownSessionID != s?.id else { return }   // idempotent: ignore redundant reselects
         shownSessionID = s?.id
 
-        detail.children.forEach { $0.removeFromParent() }
-        detail.view = NSView()
+        // Tear down the current surface (remove its view AND the child VC).
+        for child in detail.children {
+            child.view.removeFromSuperview()
+            child.removeFromParent()
+        }
         guard let s else { return }
 
         let surface = TerminalSurface(workingDirectory: s.worktreePath, command: "claude")
         detail.addChild(surface)
-        surface.view.frame = detail.view.bounds
-        surface.view.autoresizingMask = [.width, .height]
+        surface.view.translatesAutoresizingMaskIntoConstraints = false
         detail.view.addSubview(surface.view)
+        NSLayoutConstraint.activate([
+            surface.view.topAnchor.constraint(equalTo: detail.view.topAnchor),
+            surface.view.bottomAnchor.constraint(equalTo: detail.view.bottomAnchor),
+            surface.view.leadingAnchor.constraint(equalTo: detail.view.leadingAnchor),
+            surface.view.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor),
+        ])
     }
 
     // MARK: - small helpers
