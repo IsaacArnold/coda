@@ -51,4 +51,18 @@ final class SessionStoreTests: XCTestCase {
         let b = try store.createSession(repoID: r.id, title: "Same")
         XCTAssertNotEqual(a.branch, b.branch)
     }
+
+    func testBranchUniquenessIsScopedPerRepo() throws {
+        let repoA = try makeTempRepo()
+        let repoB = try makeTempRepo()
+        let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let rA = try store.addRepository(path: repoA)
+        let rB = try store.addRepository(path: repoB)
+        // The same title in a different repo must NOT be bumped to a `-2` suffix:
+        // uniqueness is scoped per repo, so both branches are the plain slug.
+        let a = try store.createSession(repoID: rA.id, title: "Same")
+        let b = try store.createSession(repoID: rB.id, title: "Same")
+        XCTAssertEqual(a.branch, "same")
+        XCTAssertEqual(b.branch, "same")
+    }
 }
