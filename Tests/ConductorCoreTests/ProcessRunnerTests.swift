@@ -20,4 +20,11 @@ final class ProcessRunnerTests: XCTestCase {
         let expected = tmp.hasSuffix("/") ? String(tmp.dropLast()) : tmp
         XCTAssertTrue(r.stdout.contains(expected))
     }
+
+    func testCapturesStderrSeparatelyFromStdout() throws {
+        let r = try ProcessRunner.run("/bin/sh", ["-c", "echo out; echo err >&2"], cwd: nil)
+        XCTAssertEqual(r.stdout, "out\n")
+        XCTAssertEqual(r.stderr, "err\n")
+        XCTAssertEqual(r.exitCode, 0)
+    }
 }

@@ -16,9 +16,16 @@ public enum ProcessRunner {
         let out = Pipe(), err = Pipe()
         process.standardOutput = out
         process.standardError = err
+        var outData = Data()
+        var errData = Data()
+        let group = DispatchGroup()
+        let queue = DispatchQueue(label: "ProcessRunner.read", attributes: .concurrent)
         try process.run()
-        let outData = out.fileHandleForReading.readDataToEndOfFile()
-        let errData = err.fileHandleForReading.readDataToEndOfFile()
+        // Drain both pipes concurrently so a large write to one cannot block the
+        // child while we are reading the other (the classic pipe-buffer deadlock).
+        queue.async(group: group) { outData = out.fileHandleForReading.readDataToEndOfFile() }
+        queue.async(group: group) { errData = err.fileHandleForReading.readDataToEndOfFile() }
+        group.wait()
         process.waitUntilExit()
         return ProcessResult(
             stdout: String(decoding: outData, as: UTF8.self),
