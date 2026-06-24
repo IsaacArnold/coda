@@ -35,4 +35,24 @@ final class FileCopyTests: XCTestCase {
         XCTAssertEqual(copied, ["config"])
         XCTAssertTrue(FileManager.default.fileExists(atPath: dst + "/config/a.txt"))
     }
+
+    func testIsSafeRelativePath() {
+        XCTAssertTrue(isSafeRelativePath("a/b"))
+        XCTAssertTrue(isSafeRelativePath(".env"))
+        XCTAssertTrue(isSafeRelativePath("apps/web/.env.local"))
+        XCTAssertTrue(isSafeRelativePath("foo..bar"))      // ".." in a filename is fine (not a component)
+        XCTAssertFalse(isSafeRelativePath("/etc/hosts"))   // absolute
+        XCTAssertFalse(isSafeRelativePath("../secret"))    // escapes
+        XCTAssertFalse(isSafeRelativePath("a/../../b"))     // escapes via ..
+        XCTAssertFalse(isSafeRelativePath(""))              // empty
+    }
+
+    func testCopySkipsUnsafePaths() throws {
+        let src = try makeDir(), dst = try makeDir()
+        try "x".write(toFile: src + "/.env", atomically: true, encoding: .utf8)
+        // Absolute + parent-escape entries must be skipped; the safe one copied.
+        let copied = try copyAllowlistedFiles(from: src, to: dst, allowlist: ["/etc/hosts", "../escape", ".env"])
+        XCTAssertEqual(copied, [".env"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dst + "/.env"))
+    }
 }
