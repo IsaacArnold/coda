@@ -25,11 +25,10 @@ final class TerminalSurface: NSViewController {
 
     override func viewDidLayout() {
         super.viewDidLayout()
-        NSLog("TerminalSurface.viewDidLayout bounds=\(terminal.bounds) started=\(processStarted)")
+        // Start the PTY only once bounds are known (viewDidAppear can fire at zero size).
         guard !processStarted, terminal.bounds.width > 0 else { return }
         processStarted = true
         let line = "cd \(shellQuote(workingDirectory)) && exec \(command)"
-        NSLog("TerminalSurface starting: zsh -i -c \(line)")
         terminal.startProcess(executable: "/bin/zsh",
                               args: ["-i", "-c", line],
                               environment: nil,

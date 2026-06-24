@@ -79,6 +79,12 @@ End-to-end, verified in the running app: register repo → create worktree-sessi
 
 Next Phase-1 plans layer on: setupScript + copy-allowlist, theming/.itermcolors, snippets, agent-state badges, tab/surface colors, cmd+click, multi-surface, restore-running-agents.
 
+**Slice follow-ups (from final review, deferred — fold into next plan):**
+- `SessionStoreError` should get a `CustomStringConvertible` so `presentError` shows readable text (today it interpolates the raw enum case).
+- Sidebar lists only sessions, so "Add Repo…" gives no visible feedback — surface repos or confirm.
+- `TerminalSurface.command` is unquoted (safe today: only literal `"claude"`); quote/guard when a user-supplied command is wired in.
+- Atomicity gap: if `git.add` succeeds but `config.save` throws, an orphan worktree can remain (and vice versa on archive). Unlikely with atomic-write JSON; revisit when state grows.
+
 ## To verify during the spike / setup
 
 - SwiftTerm capabilities (the 5 spike checks above) — biggest technical risk.
