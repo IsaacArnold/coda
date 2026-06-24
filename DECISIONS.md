@@ -79,6 +79,10 @@ End-to-end, verified in the running app: register repo → create worktree-sessi
 
 Next Phase-1 plans layer on: setupScript + copy-allowlist, theming/.itermcolors, snippets, agent-state badges, tab/surface colors, cmd+click, multi-surface, restore-running-agents.
 
+**Setup behavior (2026-06-24) — ✅ shipped:** per-repo `setupScript` + `copyAllowlist` on `Repository` (backward-compat decode); `SessionStore.updateRepository`/`copyAllowlistedFiles`; `createSession` seeds the worktree; `terminalLaunchLine` runs setup visibly in the terminal before `claude`, once at creation (`pendingSetupSessionIDs`). 28 Core tests. Plan: `docs/superpowers/plans/2026-06-24-conductor-setup-behavior.md`.
+
+**⚠️ Prerequisite for Plan 2 (settings UI):** `copyAllowlistedFiles` does not yet reject `..`/absolute path-escapes. Harmless while the allowlist is hand-authored, but **add a path-escape guard + test in the same plan that exposes the allowlist to the settings UI** (that's when it becomes untrusted input).
+
 **Slice follow-ups (from final review, deferred — fold into next plan):**
 - `SessionStoreError` should get a `CustomStringConvertible` so `presentError` shows readable text (today it interpolates the raw enum case).
 - Sidebar lists only sessions, so "Add Repo…" gives no visible feedback — surface repos or confirm.
