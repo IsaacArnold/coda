@@ -6,14 +6,17 @@
 
 **Architecture:** A Swift package with two targets. `ConductorCore` holds all pure logic — running git, worktree lifecycle, session/repository models, machine-local config persistence — and is covered by unit/integration tests (TDD). `Conductor` is the AppKit executable that embeds SwiftTerm and drives `ConductorCore`; it is verified by build + manual launch, not unit tests. The split exists so the bug-prone logic is testable without a UI.
 
-**Tech Stack:** Swift 6.3 (Swift 5 language mode), Swift Package Manager, AppKit, SwiftTerm 1.13.x, Swift Testing (`import Testing`), real `git` CLI.
+**Tech Stack:** Swift (Swift 5 language mode), Swift Package Manager, AppKit, SwiftTerm 1.13.x, XCTest, real `git` CLI.
+
+> **TOOLCHAIN (read first):** Command Line Tools ship neither XCTest nor Testing frameworks — running tests requires Xcode's toolchain. Prefix **every** `swift build` / `swift run` / `swift test` command with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`. Tests use **XCTest** (`import XCTest`, `final class … : XCTestCase`, `func test…`, `XCTAssertEqual`/`XCTAssertTrue`), NOT Swift Testing. Filter syntax: `swift test --filter ConductorCoreTests.<ClassName>`.
 
 ## Global Constraints
 
 - **Engine:** embed SwiftTerm's `LocalProcessTerminalView`; never write a terminal emulator.
 - **Config split:** machine-local config (repo paths, worktree locations, sessions) lives in `~/.conductor/local.json`; it MUST contain absolute paths only here, never in any future portable config file.
 - **No absolute paths in source:** worktree root and repo paths come from config/runtime, never hardcoded.
-- **Build from source:** SwiftPM, `swift build` / `swift run` / `swift test`; no Xcode project, no signing, in this slice.
+- **Build from source:** SwiftPM, `swift build` / `swift run` / `swift test`; no Xcode project, no signing, in this slice. All swift commands MUST be prefixed with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` (CLT lacks the test frameworks).
+- **Tests use XCTest**, not Swift Testing.
 - **macOS target:** `.macOS(.v13)` minimum.
 - **Working name:** Conductor.
 - **Language mode:** `swiftLanguageModes: [.v5]` (AppKit main-actor friendliness; matches the spike).
@@ -383,38 +386,40 @@ git commit -m "feat: add ProcessRunner and slugify with tests"
 
 `Tests/ConductorCoreTests/GitWorktreeTests.swift`:
 ```swift
-import Testing
+import XCTest
 import Foundation
 @testable import ConductorCore
 
-@Test func currentBranchIsMain() throws {
-    let repo = try makeTempRepo()
-    let git = GitWorktree(gitPath: "/usr/bin/git")
-    #expect(try git.currentBranch(repo: repo) == "main")
-}
+final class GitWorktreeTests: XCTestCase {
+    func testCurrentBranchIsMain() throws {
+        let repo = try makeTempRepo()
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        XCTAssertEqual(try git.currentBranch(repo: repo), "main")
+    }
 
-@Test func addCreatesWorktreeAndBranchThenListsIt() throws {
-    let repo = try makeTempRepo()
-    let git = GitWorktree(gitPath: "/usr/bin/git")
-    let wt = NSTemporaryDirectory() + "wt-" + UUID().uuidString
-    try git.add(repo: repo, path: wt, branch: "feature-x", base: "main")
+    func testAddCreatesWorktreeAndBranchThenListsIt() throws {
+        let repo = try makeTempRepo()
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        let wt = NSTemporaryDirectory() + "wt-" + UUID().uuidString
+        try git.add(repo: repo, path: wt, branch: "feature-x", base: "main")
 
-    #expect(FileManager.default.fileExists(atPath: wt + "/README.md"))
-    let list = try git.list(repo: repo)
-    #expect(list.contains { $0.path == wt && $0.branch == "feature-x" })
-}
+        XCTAssertTrue(FileManager.default.fileExists(atPath: wt + "/README.md"))
+        let list = try git.list(repo: repo)
+        XCTAssertTrue(list.contains { $0.path == wt && $0.branch == "feature-x" })
+    }
 
-@Test func removeDeletesWorktreeAndBranchCanBeDeleted() throws {
-    let repo = try makeTempRepo()
-    let git = GitWorktree(gitPath: "/usr/bin/git")
-    let wt = NSTemporaryDirectory() + "wt-" + UUID().uuidString
-    try git.add(repo: repo, path: wt, branch: "feature-y", base: "main")
-    try git.remove(repo: repo, path: wt)
-    #expect(!FileManager.default.fileExists(atPath: wt))
+    func testRemoveDeletesWorktreeAndBranchCanBeDeleted() throws {
+        let repo = try makeTempRepo()
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        let wt = NSTemporaryDirectory() + "wt-" + UUID().uuidString
+        try git.add(repo: repo, path: wt, branch: "feature-y", base: "main")
+        try git.remove(repo: repo, path: wt)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: wt))
 
-    try git.deleteBranch(repo: repo, branch: "feature-y")
-    let branches = try ProcessRunner.run("/usr/bin/git", ["-C", repo, "branch", "--list", "feature-y"], cwd: nil)
-    #expect(branches.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        try git.deleteBranch(repo: repo, branch: "feature-y")
+        let branches = try ProcessRunner.run("/usr/bin/git", ["-C", repo, "branch", "--list", "feature-y"], cwd: nil)
+        XCTAssertTrue(branches.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
 }
 ```
 
@@ -553,25 +558,27 @@ public struct Session: Codable, Equatable, Identifiable {
 
 `Tests/ConductorCoreTests/ConfigTests.swift`:
 ```swift
-import Testing
+import XCTest
 import Foundation
 @testable import ConductorCore
 
-@Test func loadReturnsEmptyStateWhenFileMissing() {
-    let url = URL(fileURLWithPath: NSTemporaryDirectory() + "cfg-" + UUID().uuidString + ".json")
-    let cfg = Config(url: url)
-    #expect(cfg.load() == LocalState(repositories: [], sessions: []))
-}
+final class ConfigTests: XCTestCase {
+    func testLoadReturnsEmptyStateWhenFileMissing() {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory() + "cfg-" + UUID().uuidString + ".json")
+        let cfg = Config(url: url)
+        XCTAssertEqual(cfg.load(), LocalState(repositories: [], sessions: []))
+    }
 
-@Test func saveThenLoadRoundTrips() throws {
-    let url = URL(fileURLWithPath: NSTemporaryDirectory() + "cfg-" + UUID().uuidString + ".json")
-    let cfg = Config(url: url)
-    let state = LocalState(
-        repositories: [Repository(id: "r1", path: "/tmp/repo", name: "repo")],
-        sessions: [Session(id: "s1", repoID: "r1", title: "T", branch: "t", worktreePath: "/tmp/wt")]
-    )
-    try cfg.save(state)
-    #expect(cfg.load() == state)
+    func testSaveThenLoadRoundTrips() throws {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory() + "cfg-" + UUID().uuidString + ".json")
+        let cfg = Config(url: url)
+        let state = LocalState(
+            repositories: [Repository(id: "r1", path: "/tmp/repo", name: "repo")],
+            sessions: [Session(id: "s1", repoID: "r1", title: "T", branch: "t", worktreePath: "/tmp/wt")]
+        )
+        try cfg.save(state)
+        XCTAssertEqual(cfg.load(), state)
+    }
 }
 ```
 
@@ -646,57 +653,59 @@ git commit -m "feat: add Repository/Session models and machine-local Config pers
 
 `Tests/ConductorCoreTests/SessionStoreTests.swift`:
 ```swift
-import Testing
+import XCTest
 import Foundation
 @testable import ConductorCore
 
-private func makeStore(worktreeRoot: String) -> (SessionStore, Config) {
-    let cfgURL = URL(fileURLWithPath: NSTemporaryDirectory() + "store-" + UUID().uuidString + ".json")
-    let cfg = Config(url: cfgURL)
-    let store = SessionStore(config: cfg,
-                             git: GitWorktree(gitPath: "/usr/bin/git"),
-                             worktreeRoot: worktreeRoot)
-    return (store, cfg)
-}
+final class SessionStoreTests: XCTestCase {
+    private func makeStore(worktreeRoot: String) -> (SessionStore, Config) {
+        let cfgURL = URL(fileURLWithPath: NSTemporaryDirectory() + "store-" + UUID().uuidString + ".json")
+        let cfg = Config(url: cfgURL)
+        let store = SessionStore(config: cfg,
+                                 git: GitWorktree(gitPath: "/usr/bin/git"),
+                                 worktreeRoot: worktreeRoot)
+        return (store, cfg)
+    }
 
-@Test func addRepositoryDerivesNameAndPersists() throws {
-    let repo = try makeTempRepo()
-    let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
-    let r = try store.addRepository(path: repo)
-    #expect(r.path == repo)
-    #expect(!r.name.isEmpty)
-    #expect(cfg.load().repositories.contains(r))
-}
+    func testAddRepositoryDerivesNameAndPersists() throws {
+        let repo = try makeTempRepo()
+        let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: repo)
+        XCTAssertEqual(r.path, repo)
+        XCTAssertFalse(r.name.isEmpty)
+        XCTAssertTrue(cfg.load().repositories.contains(r))
+    }
 
-@Test func createSessionMakesWorktreeAndPersists() throws {
-    let repo = try makeTempRepo()
-    let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
-    let r = try store.addRepository(path: repo)
-    let s = try store.createSession(repoID: r.id, title: "Add Login Flow")
+    func testCreateSessionMakesWorktreeAndPersists() throws {
+        let repo = try makeTempRepo()
+        let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: repo)
+        let s = try store.createSession(repoID: r.id, title: "Add Login Flow")
 
-    #expect(s.branch == "add-login-flow")
-    #expect(FileManager.default.fileExists(atPath: s.worktreePath + "/README.md"))
-    #expect(cfg.load().sessions.contains(s))
-}
+        XCTAssertEqual(s.branch, "add-login-flow")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: s.worktreePath + "/README.md"))
+        XCTAssertTrue(cfg.load().sessions.contains(s))
+    }
 
-@Test func archiveSessionRemovesWorktreeAndSession() throws {
-    let repo = try makeTempRepo()
-    let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
-    let r = try store.addRepository(path: repo)
-    let s = try store.createSession(repoID: r.id, title: "Temp Work")
-    try store.archiveSession(id: s.id, deleteBranch: true)
+    func testArchiveSessionRemovesWorktreeAndSession() throws {
+        let repo = try makeTempRepo()
+        let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: repo)
+        let s = try store.createSession(repoID: r.id, title: "Temp Work")
+        try store.archiveSession(id: s.id, deleteBranch: true)
 
-    #expect(!FileManager.default.fileExists(atPath: s.worktreePath))
-    #expect(!cfg.load().sessions.contains { $0.id == s.id })
-}
+        XCTAssertFalse(FileManager.default.fileExists(atPath: s.worktreePath))
+        XCTAssertFalse(cfg.load().sessions.contains { $0.id == s.id })
+    }
 
-@Test func duplicateTitlesGetUniqueBranches() throws {
-    let repo = try makeTempRepo()
-    let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
-    let r = try store.addRepository(path: repo)
-    let a = try store.createSession(repoID: r.id, title: "Same")
-    let b = try store.createSession(repoID: r.id, title: "Same")
-    #expect(a.branch != b.branch)
+    func testDuplicateTitlesGetUniqueBranches() throws {
+        let repo = try makeTempRepo()
+        let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: repo)
+        let a = try store.createSession(repoID: r.id, title: "Same")
+        let b = try store.createSession(repoID: r.id, title: "Same")
+        XCTAssertNotEqual(a.branch, b.branch)
+    }
 }
 ```
 
@@ -1190,7 +1199,7 @@ git commit -m "docs: mark Conductor vertical slice complete"
 
 ## Notes for the implementer
 
-- **`swift test` uses Swift Testing** (`import Testing`, `@Test`, `#expect`). If the toolchain rejects it, fall back to XCTest with the same assertions.
+- **Tests use XCTest** (`import XCTest`, `XCTestCase`, `XCTAssert*`). Command Line Tools lack the test frameworks, so every `swift build`/`run`/`test` MUST be prefixed with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`. Filter by class: `swift test --filter ConductorCoreTests.GitWorktreeTests`.
 - **GitWorktree tests shell out to real `git`** against throwaway repos in `NSTemporaryDirectory()` — this is intentional integration testing; do not mock git.
 - **App tasks (6, 7) are verified by build + manual launch**, not unit tests — GUI/terminal behavior isn't cleanly unit-testable, and that's an accepted boundary for this slice.
 - **The `vscode://` / LaunchServices and cmd+click learnings from the spike are NOT in this slice** — cmd+click arrives in a later Phase-1 plan once the spine is solid.
