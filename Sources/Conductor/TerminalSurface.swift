@@ -21,11 +21,14 @@ final class TerminalSurface: NSViewController {
         view = terminal
     }
 
-    override func viewDidAppear() {
-        super.viewDidAppear()
-        guard terminal.bounds.width > 0 else { return }
+    private var processStarted = false
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        guard !processStarted, terminal.bounds.width > 0 else { return }
+        processStarted = true
         // Run an interactive zsh that execs the command, so the user keeps a shell
-        // after the command exits. `-i -c` keeps it interactive.
+        // after the command exits.
         let line = "cd \(shellQuote(workingDirectory)) && exec \(command)"
         terminal.startProcess(executable: "/bin/zsh",
                               args: ["-i", "-c", line],
