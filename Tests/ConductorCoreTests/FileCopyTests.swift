@@ -40,6 +40,7 @@ final class FileCopyTests: XCTestCase {
         XCTAssertTrue(isSafeRelativePath("a/b"))
         XCTAssertTrue(isSafeRelativePath(".env"))
         XCTAssertTrue(isSafeRelativePath("apps/web/.env.local"))
+        XCTAssertTrue(isSafeRelativePath("foo..bar"))      // ".." in a filename is fine (not a component)
         XCTAssertFalse(isSafeRelativePath("/etc/hosts"))   // absolute
         XCTAssertFalse(isSafeRelativePath("../secret"))    // escapes
         XCTAssertFalse(isSafeRelativePath("a/../../b"))     // escapes via ..
