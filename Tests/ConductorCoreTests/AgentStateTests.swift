@@ -38,37 +38,64 @@ final class AgentStateTests: XCTestCase {
         }
     }
 
-    // MARK: - 🔴 your turn (Claude open but not working: finished, asking, or a permission prompt)
+    // MARK: - 🔴 needs you (Claude stopped, awaiting your decision)
 
-    func testYourTurnWhenClaudeOpenAndWaiting() {
-        let footer = "❯ \n──────\nOpus 4.8 (1M context) | test | test | ctx: 3% | $0.11\n← for agents"
-        XCTAssertEqual(agentState(fromOutput: footer), .needsYou)
-    }
+    func testNeedsYouWhenAskingAQuestion() {
+        // Captured "brainstorming" turn: the last message line is a question.
+        let q = """
+        ● This is a clean HTML/CSS starter.
+        First question: What should this button do when clicked?
+          1. Navigate to another page
+          2. Trigger a JavaScript action
+        Which fits best?
+        ✻ Cooked for 15s
 
-    func testYourTurnWhenAskingANumberedQuestion() {
-        let q = "Which fits best?\n  1. Navigate\n  2. Trigger an action\n────\nOpus (1M context) | ctx: 3%\n← for agents"
+        ──────
+        ❯
+        ──────
+        Opus 4.8 (1M context) | test | ctx: 3% | $0.11
+        ← for agents
+        """
         XCTAssertEqual(agentState(fromOutput: q), .needsYou)
     }
 
-    func testYourTurnOnPermissionPrompt() {
+    func testNeedsYouOnNumberedPermissionPrompt() {
         let prompt = "Do you want to proceed?\n❯ 1. Yes\n  2. No\n────\nOpus (1M context) | ctx: 3%"
         XCTAssertEqual(agentState(fromOutput: prompt), .needsYou)
     }
 
-    func testYourTurnStaysWhenFooterDropsAgentsHint() {
-        // Some frames drop "← for agents" but keep the ctx footer — must not flap to idle.
-        XCTAssertEqual(agentState(fromOutput: "────\nOpus 4.8 (1M context) | test | ctx: 3% | $0.11"), .needsYou)
+    // MARK: - 🟢 done (Claude stopped after a clean finish — nothing pending)
+
+    func testDoneWhenFinishedWithoutAQuestion() {
+        // Captured sign-off turn: last message is a statement, not a question → not red.
+        let finished = """
+        ● You're welcome! Happy coding. 👋
+        ✻ Cogitated for 1s
+
+        ──────
+        ❯
+        ──────
+        Opus 4.8 (1M context) | test | test | ctx: 3% | $0.09
+        ← for agents
+        """
+        XCTAssertEqual(agentState(fromOutput: finished), .done)
     }
 
-    func testYourTurnWhenFooterSpacingCollapsed() {
-        XCTAssertEqual(agentState(fromOutput: "Opus4.8(1Mcontext) |test |ctx:3%\n←foragents"), .needsYou)
+    func testDoneAtAFreshIdlePrompt() {
+        let footer = "❯ \n──────\nOpus 4.8 (1M context) | test | ctx: 3% | $0.11\n← for agents"
+        XCTAssertEqual(agentState(fromOutput: footer), .done)
+    }
+
+    func testDoneStaysOpenWhenFooterDropsAgentsHint() {
+        // Some frames drop "← for agents" but keep the ctx footer — must not flap to idle.
+        XCTAssertEqual(agentState(fromOutput: "────\nOpus 4.8 (1M context) | test | ctx: 3% | $0.11"), .done)
     }
 
     // MARK: - ⚪️ idle / guards
 
     func testProseMentioningSecondsIsNotWorking() {
-        // "(2 seconds)" must NOT match the spinner timer; with a Claude footer it's your-turn.
-        XCTAssertEqual(agentState(fromOutput: "It ran in (2 seconds).\nOpus (1M context) | ctx: 3%"), .needsYou)
+        // "(2 seconds)" must NOT match the spinner timer; with a Claude footer it's stopped (done).
+        XCTAssertEqual(agentState(fromOutput: "It ran in (2 seconds).\nOpus (1M context) | ctx: 3%"), .done)
     }
 
     func testIdleWhenOnlyAPlainShellPrompt() {
