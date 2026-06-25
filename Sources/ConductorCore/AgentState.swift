@@ -25,8 +25,12 @@ public func agentState(fromOutput output: String) -> AgentState {
     if collapsed.contains("1.yes") {
         return .needsYou
     }
-    // 🟡 Working — Claude's "(esc to interrupt)" hint (match "interrupt"; spacing varies).
-    if collapsed.contains("interrupt") {
+    // 🟡 Working — the gerund spinner's elapsed timer, e.g. "(4s ·" / "(12s)" (collapses
+    // to "(4s·" / "(12s)"). This is present throughout active work in every Claude frame,
+    // whereas "(esc to interrupt)" isn't shown in newer versions. The `[·)]` suffix keeps
+    // prose like "(2 seconds)" from matching. Also accept the interrupt hint when shown.
+    if collapsed.range(of: #"\(\d+s[·)]"#, options: .regularExpression) != nil
+        || collapsed.contains("esctointerrupt") {
         return .working
     }
     // 🟢 Claude is open and waiting. Keyed off the always-present footer ("ctx:" context

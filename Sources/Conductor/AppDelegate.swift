@@ -367,14 +367,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var states: [String: AgentState] = [:]
         for wt in store.state.worktrees {
             let snapshot = surfaces.handle(for: wt.id)?.outputSnapshot()
-            let state = snapshot.map { agentState(fromOutput: $0) } ?? .idle
-            states[wt.id] = state
-            // TEMP DEBUG: log the focused worktree every poll with a long tail, to capture
-            // exactly what the WORKING frame prints (so we can match it).
-            if wt.id == selectedWorktree?.id {
-                let tail = String((snapshot ?? "<no surface>").suffix(500)).replacingOccurrences(of: "\n", with: "⏎")
-                FileHandle.standardError.write(Data("[agent] \(state) | \(tail)\n".utf8))
-            }
+            states[wt.id] = snapshot.map { agentState(fromOutput: $0) } ?? .idle
         }
         agentStates = states
         sidebar.updateAgentStates(states)

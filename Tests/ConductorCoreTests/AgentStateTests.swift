@@ -49,6 +49,27 @@ final class AgentStateTests: XCTestCase {
         XCTAssertEqual(agentState(fromOutput: "✻ Sautéing… (esctointerrupt)"), .working)
     }
 
+    func testWorkingFromSpinnerElapsedTimer() {
+        // Real working frame (captured): the gerund spinner shows an elapsed timer,
+        // and the ctx: footer is ALSO present — working must win over done.
+        let frame = """
+        ✽ Blanching… (4s · ↓ 125 tokens · thinking)
+        ──────
+        Opus 4.8 (1M context) | test | test | ctx: 3% | $0.11
+        ← for agents
+        """
+        XCTAssertEqual(agentState(fromOutput: frame), .working)
+    }
+
+    func testWorkingTimerWithTokensCollapsed() {
+        XCTAssertEqual(agentState(fromOutput: "✻Blanching…(6s·↑222tokens)\nctx:3%"), .working)
+    }
+
+    func testPlainProseInSecondsIsNotMistakenForWorking() {
+        // "(2 seconds)" collapses to "(2seconds)" — must NOT match the spinner timer.
+        XCTAssertEqual(agentState(fromOutput: "It ran in (2 seconds).\nOpus (1M context) | ctx: 3%"), .done)
+    }
+
     func testIdleWhenOnlyAPlainShellPrompt() {
         // A plain shell (incl. having just typed `claude` but not launched) → no badge.
         XCTAssertEqual(agentState(fromOutput: "~/.conductor/worktrees/html-css-starter/test   test  claude"), .idle)
