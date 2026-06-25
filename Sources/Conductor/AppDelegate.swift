@@ -12,8 +12,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Keeps each worktree's terminal alive across sidebar switches; the handle is
     // the TerminalSurface itself.
     private let surfaces = SurfaceRegistry<TerminalSurface>()
-    // Toolbar centre-notch: shows the focused worktree (agent badge wired in #11).
+    // Toolbar centre-notch: shows time + focused worktree (agent badge wired in #11).
     private let notchLabel = NSTextField(labelWithString: "No worktree")
+    private var notchTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         store = makeStore()
@@ -21,6 +22,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildWindow()
         wireSidebar()
         refreshSidebar(select: store.state.worktrees.first?.id)
+        // Keep the notch clock current.
+        notchTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            self?.updateNotch()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -283,8 +288,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         surface.sendCommand(launchCommand(for: repo))
     }
 
+    private static let notchTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "h:mm a"
+        return f
+    }()
+
+    private func timeEmoji(hour: Int) -> String {
+        switch hour {
+        case 5..<12: return "🌅"
+        case 12..<17: return "☀️"
+        case 17..<21: return "🌆"
+        default: return "🌙"
+        }
+    }
+
     private func updateNotch() {
-        notchLabel.stringValue = selectedWorktree.map { "\($0.title)  [\($0.branch)]" } ?? "No worktree"
+        let now = Date()
+        let time = Self.notchTimeFormatter.string(from: now).lowercased()
+        let emoji = timeEmoji(hour: Calendar.current.component(.hour, from: now))
+        let focus = selectedWorktree?.title ?? "No worktree"
+        notchLabel.stringValue = "\(emoji) \(time) — \(focus)"
         notchLabel.alignment = .center
         notchLabel.textColor = .secondaryLabelColor
     }
@@ -314,7 +338,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 // MARK: - Unified toolbar
 
 private extension NSToolbarItem.Identifier {
-    static let addWorktree = NSToolbarItem.Identifier("addWorktree")
+    static let addRepository = NSToolbarItem.Identifier("addRepository")
     static let launchClaude = NSToolbarItem.Identifier("launchClaude")
     static let notch = NSToolbarItem.Identifier("notch")
     static let openIn = NSToolbarItem.Identifier("openIn")
@@ -322,7 +346,7 @@ private extension NSToolbarItem.Identifier {
 
 extension AppDelegate: NSToolbarDelegate {
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, .addWorktree,
+        [.toggleSidebar, .sidebarTrackingSeparator, .addRepository,
          .flexibleSpace, .notch, .flexibleSpace,
          .launchClaude, .openIn]
     }
@@ -334,39 +358,46 @@ extension AppDelegate: NSToolbarDelegate {
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier,
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         switch id {
-        case .addWorktree:
+        case .addRepository:
             let item = NSToolbarItem(itemIdentifier: id)
-            item.label = "New Worktree"
-            item.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "New Worktree")
+            item.label = "Add Repository"
+            item.toolTip = "Add Repository… (⇧⌘N)"
+            item.image = NSImage(systemSymbolName: "folder.badge.plus", accessibilityDescription: "Add Repository")
             item.target = self
-            item.action = #selector(newWorktreeAction)
+            item.action = #selector(addRepoAction)
             item.isBordered = true
             return item
 
         case .launchClaude:
             let item = NSToolbarItem(itemIdentifier: id)
             item.label = "Launch Claude"
-            let button = NSButton(title: " Launch Claude",
-                                  image: NSImage(systemSymbolName: "play.fill", accessibilityDescription: nil)
-                                    ?? NSImage(), target: self, action: #selector(launchClaudeAction))
-            button.bezelStyle = .toolbar
-            button.bezelColor = .systemGreen
-            button.imagePosition = .imageLeading
-            item.view = button
+            item.toolTip = "Launch Claude (⌘R)"
+            item.image = claudeMarkImage()
+            item.target = self
+            item.action = #selector(launchClaudeAction)
+            item.isBordered = true
             return item
 
         case .notch:
             let item = NSToolbarItem(itemIdentifier: id)
             item.label = ""
-            let container = NSView()
+            // A compact centred pill (à la Supacode), sized to its content.
+            let pill = NSView()
+            pill.wantsLayer = true
+            pill.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
+            pill.layer?.cornerRadius = 7
+            notchLabel.font = .systemFont(ofSize: 12)
+            notchLabel.lineBreakMode = .byTruncatingTail
             notchLabel.translatesAutoresizingMaskIntoConstraints = false
-            container.addSubview(notchLabel)
+            pill.addSubview(notchLabel)
             NSLayoutConstraint.activate([
-                notchLabel.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-                notchLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-                container.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
+                notchLabel.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: 12),
+                notchLabel.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -12),
+                notchLabel.topAnchor.constraint(equalTo: pill.topAnchor, constant: 4),
+                notchLabel.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: -4),
+                notchLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 360),
             ])
-            item.view = container
+            item.view = pill
             return item
 
         case .openIn:
