@@ -1,16 +1,16 @@
 import AppKit
 import ConductorCore
 
-/// A simple sidebar: a table of session titles + a toolbar with New / Archive.
+/// A simple sidebar: a table of worktree titles + a toolbar with New / Archive.
 final class SidebarController: NSViewController {
     private let table = NSTableView()
     private let scroll = NSScrollView()
-    private var sessions: [Session] = []
+    private var worktrees: [Worktree] = []
 
     var onNew: (() -> Void)?
     var onAddRepo: (() -> Void)?
-    var onSelect: ((Session?) -> Void)?
-    var onArchive: ((Session) -> Void)?
+    var onSelect: ((Worktree?) -> Void)?
+    var onArchive: ((Worktree) -> Void)?
     var onRepoSettings: (() -> Void)?
 
     override func loadView() {
@@ -18,7 +18,7 @@ final class SidebarController: NSViewController {
 
         let addRepo = NSButton(title: "Add Repo…", target: self, action: #selector(addRepoAction))
         let settings = NSButton(title: "Settings…", target: self, action: #selector(settingsAction))
-        let new = NSButton(title: "New Session", target: self, action: #selector(newAction))
+        let new = NSButton(title: "New Worktree", target: self, action: #selector(newAction))
         let archive = NSButton(title: "Archive", target: self, action: #selector(archiveAction))
         let bar = NSStackView(views: [addRepo, settings, new, archive])
         bar.orientation = .horizontal
@@ -27,7 +27,7 @@ final class SidebarController: NSViewController {
         bar.translatesAutoresizingMaskIntoConstraints = false
 
         let column = NSTableColumn(identifier: .init("title"))
-        column.title = "Sessions"
+        column.title = "Worktrees"
         table.addTableColumn(column)
         table.headerView = nil
         table.dataSource = self
@@ -50,10 +50,10 @@ final class SidebarController: NSViewController {
         view = container
     }
 
-    func reload(sessions: [Session], selected: String?) {
-        self.sessions = sessions
+    func reload(worktrees: [Worktree], selected: String?) {
+        self.worktrees = worktrees
         table.reloadData()
-        if let selected, let idx = sessions.firstIndex(where: { $0.id == selected }) {
+        if let selected, let idx = worktrees.firstIndex(where: { $0.id == selected }) {
             table.selectRowIndexes(IndexSet(integer: idx), byExtendingSelection: false)
         }
     }
@@ -63,13 +63,13 @@ final class SidebarController: NSViewController {
     @objc private func newAction() { onNew?() }
     @objc private func archiveAction() {
         let row = table.selectedRow
-        guard row >= 0, row < sessions.count else { return }
-        onArchive?(sessions[row])
+        guard row >= 0, row < worktrees.count else { return }
+        onArchive?(worktrees[row])
     }
 }
 
 extension SidebarController: NSTableViewDataSource, NSTableViewDelegate {
-    func numberOfRows(in tableView: NSTableView) -> Int { sessions.count }
+    func numberOfRows(in tableView: NSTableView) -> Int { worktrees.count }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let id = NSUserInterfaceItemIdentifier("cell")
@@ -87,12 +87,12 @@ extension SidebarController: NSTableViewDataSource, NSTableViewDelegate {
             c.identifier = id
             return c
         }()
-        cell.textField?.stringValue = "\(sessions[row].title)  [\(sessions[row].branch)]"
+        cell.textField?.stringValue = "\(worktrees[row].title)  [\(worktrees[row].branch)]"
         return cell
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         let row = table.selectedRow
-        onSelect?(row >= 0 && row < sessions.count ? sessions[row] : nil)
+        onSelect?(row >= 0 && row < worktrees.count ? worktrees[row] : nil)
     }
 }

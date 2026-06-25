@@ -1,7 +1,7 @@
 import Foundation
 
 /// Turn a human title into a git-branch-safe slug: lowercase, words joined by
-/// single hyphens, only [a-z0-9-]. Falls back to "session" if nothing survives.
+/// single hyphens, only [a-z0-9-]. Falls back to "worktree" if nothing survives.
 public func slugify(_ s: String) -> String {
     let lowered = s.lowercased()
     var out = ""
@@ -16,5 +16,5 @@ public func slugify(_ s: String) -> String {
         }
     }
     let trimmed = out.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-    return trimmed.isEmpty ? "session" : trimmed
+    return trimmed.isEmpty ? "worktree" : trimmed
 }
