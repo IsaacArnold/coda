@@ -15,7 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Toolbar centre-notch: shows time + focused worktree (agent badge wired in #11).
     private let notchLabel = NSTextField(labelWithString: "No worktree")
     private let notchIcon = NSImageView()
-    private let notchBadge = NSImageView()
+    private let notchBadge = NSView()   // layer-drawn agent-state dot
     private var notchTimer: Timer?
     private var stateTimer: Timer?
     private var agentStates: [String: AgentState] = [:]
@@ -391,8 +391,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchLabel.textColor = .secondaryLabelColor
 
         if let id = selectedWorktree?.id, let color = agentBadgeColor(agentStates[id] ?? .idle) {
-            notchBadge.image = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: nil)
-            notchBadge.contentTintColor = color
+            notchBadge.layer?.backgroundColor = color.cgColor
             notchBadge.isHidden = false
         } else {
             notchBadge.isHidden = true
@@ -473,7 +472,11 @@ extension AppDelegate: NSToolbarDelegate {
             notchLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
             notchLabel.lineBreakMode = .byTruncatingTail
             notchLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 340).isActive = true
-            notchBadge.symbolConfiguration = .init(pointSize: 9, weight: .black)
+            notchBadge.wantsLayer = true
+            notchBadge.layer?.cornerRadius = 4
+            notchBadge.translatesAutoresizingMaskIntoConstraints = false
+            notchBadge.widthAnchor.constraint(equalToConstant: 8).isActive = true
+            notchBadge.heightAnchor.constraint(equalToConstant: 8).isActive = true
             let stack = NSStackView(views: [notchIcon, notchLabel, notchBadge])
             stack.orientation = .horizontal
             stack.spacing = 6

@@ -28,13 +28,15 @@ func agentBadgeColor(_ state: AgentState) -> NSColor? {
 }
 
 /// A worktree row: branch glyph + title + a trailing agent-state badge dot.
+/// The dot is a layer-drawn circle (not an SF symbol) so it always renders.
 private final class WorktreeCellView: NSTableCellView {
-    let badge = NSImageView()
+    let badge = NSView()
 
     func applyBadge(_ state: AgentState) {
+        badge.wantsLayer = true
+        badge.layer?.cornerRadius = 4
         if let color = agentBadgeColor(state) {
-            badge.image = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: state.rawValue)
-            badge.contentTintColor = color
+            badge.layer?.backgroundColor = color.cgColor
             badge.isHidden = false
         } else {
             badge.isHidden = true
@@ -175,7 +177,6 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         tf.lineBreakMode = .byTruncatingTail
         let badge = cell.badge
         badge.translatesAutoresizingMaskIntoConstraints = false
-        badge.symbolConfiguration = .init(pointSize: 8, weight: .black)
         cell.addSubview(icon); cell.addSubview(tf); cell.addSubview(badge)
         cell.imageView = icon; cell.textField = tf
         NSLayoutConstraint.activate([
@@ -185,9 +186,10 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
             tf.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 6),
             tf.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             tf.trailingAnchor.constraint(lessThanOrEqualTo: badge.leadingAnchor, constant: -6),
-            badge.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
+            badge.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
             badge.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            badge.widthAnchor.constraint(equalToConstant: 9),
+            badge.widthAnchor.constraint(equalToConstant: 8),
+            badge.heightAnchor.constraint(equalToConstant: 8),
         ])
         cell.identifier = id
         return cell

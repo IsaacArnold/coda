@@ -18,8 +18,20 @@ final class AgentStateTests: XCTestCase {
 
     func testNeedsYouTakesPriorityOverWorking() {
         // A permission prompt is the user's turn even if a stale spinner line lingers.
-        let mixed = "✻ Working (esc to interrupt)\nDo you want to proceed?\n❯ 1. Yes"
+        let mixed = "✻ Working (esc to interrupt)\nDo you want to proceed?\n❯ 1. Yes\n  2. No"
         XCTAssertEqual(agentState(fromOutput: mixed), .needsYou)
+    }
+
+    func testProseQuestionIsNotAPermissionPrompt() {
+        // Claude asking a question in prose (with its footer) is "done", not needs-you —
+        // only the numbered approve option ("1. Yes") marks a real permission prompt.
+        let prose = "Do you want me to add styling?\n────\nOpus 4.8 (1M context) | ctx: 3%\n← for agents"
+        XCTAssertEqual(agentState(fromOutput: prose), .done)
+    }
+
+    func testDoneStaysDoneWhenFooterDropsAgentsHint() {
+        // Some frames drop "← for agents" but keep the ctx footer — must not flap to idle.
+        XCTAssertEqual(agentState(fromOutput: "────\nOpus 4.8 (1M context) | test | ctx: 3% | $0.11"), .done)
     }
 
     func testDoneFromRealClaudeFooter() {

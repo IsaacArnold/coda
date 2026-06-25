@@ -20,16 +20,18 @@ public enum AgentState: String, Equatable {
 public func agentState(fromOutput output: String) -> AgentState {
     let collapsed = output.lowercased().filter { !$0.isWhitespace }
 
-    // 🔴 Permission / approval prompt — the user's turn.
-    if collapsed.contains("doyouwant") || collapsed.contains("wouldyoulike") {
+    // 🔴 Permission/approval prompt — the user's turn. Keyed off the numbered approve
+    // option ("1. Yes") that only the selection UI prints, NOT prose like "do you want…".
+    if collapsed.contains("1.yes") {
         return .needsYou
     }
     // 🟡 Working — Claude's "(esc to interrupt)" hint (match "interrupt"; spacing varies).
     if collapsed.contains("interrupt") {
         return .working
     }
-    // 🟢 Claude is open and waiting — its footer hints ("← for agents" / shortcuts).
-    if collapsed.contains("foragents") || collapsed.contains("forshortcuts") {
+    // 🟢 Claude is open and waiting. Keyed off the always-present footer ("ctx:" context
+    // gauge); "← for agents" alone flaps because Claude redraws it intermittently.
+    if collapsed.contains("ctx:") || collapsed.contains("foragents") || collapsed.contains("forshortcuts") {
         return .done
     }
     // ⚪️ No Claude markers — a plain shell.
