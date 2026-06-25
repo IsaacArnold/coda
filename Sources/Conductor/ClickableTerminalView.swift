@@ -1,5 +1,6 @@
 import AppKit
 import SwiftTerm
+import ConductorCore
 
 /// A LocalProcessTerminalView that adds iTerm-style ⌘+click-to-open-file.
 ///
@@ -14,6 +15,37 @@ final class ClickableTerminalView: LocalProcessTerminalView {
     var currentDirectory: String?
     /// Opens a resolved file (absolute path) at an optional line in the default editor.
     var onOpenFile: ((String, Int?) -> Void)?
+
+    /// Give a focused terminal first crack at ⌘-combos it owns (clear, line-kill) before
+    /// the main menu's key-equivalents see them — otherwise e.g. ⌘⌫ would hit the menu's
+    /// "Archive Worktree". AppKit consults a view's `performKeyEquivalent` ahead of the
+    /// menu, so consuming the event here (returning true) keeps it out of the menu; passing
+    /// through (returning false) lets the menu act, including when another view is focused.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.type == .keyDown, isFocusedSurface else {
+            return super.performKeyEquivalent(with: event)
+        }
+        let mods = event.modifierFlags
+        switch terminalKeyAction(charactersIgnoringModifiers: event.charactersIgnoringModifiers ?? "",
+                                 command: mods.contains(.command), shift: mods.contains(.shift)) {
+        case .clear:
+            send(txt: "\u{0c}")          // Ctrl-L: the shell clears the screen and redraws
+            return true
+        case .deleteToLineStart:
+            send(txt: "\u{15}")          // Ctrl-U: kill input line back to the prompt
+            return true
+        case .passThrough:
+            return super.performKeyEquivalent(with: event)
+        }
+    }
+
+    /// True only for the visible terminal that currently holds keyboard focus — AppKit
+    /// calls `performKeyEquivalent` on every view in the window, including hidden surfaces.
+    private var isFocusedSurface: Bool {
+        guard !isHiddenOrHasHiddenAncestor, let window, window.isKeyWindow,
+              let responder = window.firstResponder as? NSView else { return false }
+        return responder === self || responder.isDescendant(of: self)
+    }
 
     /// Whether `event`'s location falls inside this (visible) terminal. Used to gate
     /// the app's ⌘+click monitor so it only acts on the focused surface.

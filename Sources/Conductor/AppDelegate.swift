@@ -173,6 +173,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func archive(_ s: Worktree) {
+        // Archiving deletes the branch too and can't be undone — confirm first.
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Archive “\(s.title)”?"
+        alert.informativeText = "This removes the worktree and deletes its branch (\(s.branch)). This can’t be undone."
+        alert.addButton(withTitle: "Archive")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
         do {
             try store.archiveWorktree(id: s.id, deleteBranch: true)
             // Tear down the archived worktree's surface (kills its PTY, no leak).
@@ -293,6 +301,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         addItem(to: wtMenu, "New Worktree", #selector(newWorktreeAction), "n")
         addItem(to: wtMenu, "Launch Claude", #selector(launchClaudeAction), "r")
         addItem(to: wtMenu, "Open in Editor", #selector(openInAction), "o")
+        addItem(to: wtMenu, "Reveal in Finder", #selector(revealInFinderAction), "r",
+                modifiers: [.command, .option])
         wtMenu.addItem(.separator())
         addItem(to: wtMenu, "Archive Worktree", #selector(archiveSelectedAction), "\u{8}") // ⌘⌫
         wtItem.submenu = wtMenu
@@ -333,6 +343,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openInAction() {
         guard let wt = selectedWorktree else { presentMessage("Select a worktree first."); return }
         openInDefaultEditor(path: wt.worktreePath, line: nil)
+    }
+
+    @objc private func revealInFinderAction() {
+        guard let wt = selectedWorktree else { presentMessage("Select a worktree first."); return }
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: wt.worktreePath)])
     }
 
     /// Opens the focused worktree's directory in any installed app the user picks (one-off).
@@ -458,7 +473,9 @@ private extension NSToolbarItem.Identifier {
 
 extension AppDelegate: NSToolbarDelegate {
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, .addRepository,
+        // Add sits right beside the sidebar toggle (both left of the tracking separator),
+        // so they're not split apart by the full sidebar width.
+        [.toggleSidebar, .addRepository, .sidebarTrackingSeparator,
          .flexibleSpace, .notch, .flexibleSpace,
          .launchClaude, .openIn]
     }
