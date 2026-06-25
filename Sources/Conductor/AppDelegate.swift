@@ -5,10 +5,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow!
     private var splitVC: NSSplitViewController!
     private let sidebar = SidebarController()
-    private let detail = NSViewController()      // holds the terminal surface (Task 7)
+    private let detail = NSViewController()      // hosts the persistent terminal surfaces
     private var store: WorktreeStore!
     private var currentSurface: TerminalSurface?
     private var selectedWorktree: Worktree?
+    // Keeps each worktree's terminal alive across sidebar switches; the handle is
+    // the TerminalSurface itself.
+    private let surfaces = SurfaceRegistry<TerminalSurface>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         store = makeStore()
@@ -101,6 +104,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func archive(_ s: Worktree) {
         do {
             try store.archiveWorktree(id: s.id, deleteBranch: true)
+            // Tear down the archived worktree's surface (kills its PTY, no leak).
+            if let surface = surfaces.evict(worktreeID: s.id) {
+                surface.view.removeFromSuperview()
+                surface.removeFromParent()
+            }
+            if shownWorktreeID == s.id { shownWorktreeID = nil; currentSurface = nil }
             refreshSidebar(select: store.state.worktrees.first?.id)
             select(store.state.worktrees.first)
         } catch { presentError(error) }
@@ -116,32 +125,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shownWorktreeID = s?.id
         selectedWorktree = s
 
-        // Tear down the current surface (remove its view AND the child VC).
-        for child in detail.children {
-            child.view.removeFromSuperview()
-            child.removeFromParent()
+        // Hide (don't destroy) the surface we're leaving — its PTY keeps running.
+        if let activeID = surfaces.activeWorktreeID, let leaving = surfaces.handle(for: activeID) {
+            leaving.view.isHidden = true
         }
+        surfaces.setActive(s?.id)
         currentSurface = nil
         guard let s else { return }
 
-        let repo = store.state.repositories.first { $0.id == s.repoID }
-        let isNewlyCreated = pendingSetupWorktreeIDs.contains(s.id)
-        let setup = isNewlyCreated ? (repo?.setupScript ?? "") : ""
-        pendingSetupWorktreeIDs.remove(s.id)
-        // Shell-first: a worktree opens into a plain interactive shell (empty command).
-        // Only a freshly created worktree whose repo opted into auto-launch runs Claude.
-        let command = (isNewlyCreated && repo?.autoLaunchClaude == true) ? launchCommand(for: repo!) : ""
-        let surface = TerminalSurface(workingDirectory: s.worktreePath, command: command, setupScript: setup)
+        // Reuse the live surface if we've seen this worktree before; otherwise build one.
+        let surface: TerminalSurface
+        if let existing = surfaces.handle(for: s.id) {
+            surface = existing
+            surface.view.isHidden = false
+        } else {
+            let repo = store.state.repositories.first { $0.id == s.repoID }
+            let isNewlyCreated = pendingSetupWorktreeIDs.contains(s.id)
+            let setup = isNewlyCreated ? (repo?.setupScript ?? "") : ""
+            pendingSetupWorktreeIDs.remove(s.id)
+            // Shell-first: a worktree opens into a plain interactive shell (empty command).
+            // Only a freshly created worktree whose repo opted into auto-launch runs Claude.
+            let command = (isNewlyCreated && repo?.autoLaunchClaude == true) ? launchCommand(for: repo!) : ""
+            surface = TerminalSurface(workingDirectory: s.worktreePath, command: command, setupScript: setup)
+            surfaces.register(surface, for: s.id)
+            detail.addChild(surface)
+            surface.view.translatesAutoresizingMaskIntoConstraints = false
+            detail.view.addSubview(surface.view)
+            NSLayoutConstraint.activate([
+                surface.view.topAnchor.constraint(equalTo: detail.view.topAnchor),
+                surface.view.bottomAnchor.constraint(equalTo: detail.view.bottomAnchor),
+                surface.view.leadingAnchor.constraint(equalTo: detail.view.leadingAnchor),
+                surface.view.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor),
+            ])
+        }
         currentSurface = surface
-        detail.addChild(surface)
-        surface.view.translatesAutoresizingMaskIntoConstraints = false
-        detail.view.addSubview(surface.view)
-        NSLayoutConstraint.activate([
-            surface.view.topAnchor.constraint(equalTo: detail.view.topAnchor),
-            surface.view.bottomAnchor.constraint(equalTo: detail.view.bottomAnchor),
-            surface.view.leadingAnchor.constraint(equalTo: detail.view.leadingAnchor),
-            surface.view.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor),
-        ])
     }
 
     // MARK: - menu (minimal; full native chrome lands in the chrome slice)
