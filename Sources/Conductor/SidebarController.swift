@@ -42,6 +42,12 @@ private final class WorktreeCellView: NSTableCellView {
             badge.isHidden = true
         }
     }
+
+    /// Tint the branch glyph with the worktree's identity color (chrome-only signal),
+    /// falling back to the chrome glyph tint when the worktree has no color.
+    func applyIdentityColor(_ identity: NSColor?, glyphTint: NSColor?) {
+        imageView?.contentTintColor = identity ?? glyphTint ?? .secondaryLabelColor
+    }
 }
 
 /// A source-list sidebar: repositories as header rows with their worktrees nested
@@ -51,6 +57,7 @@ final class SidebarController: NSViewController {
     private let scroll = NSScrollView()
     private var repoNodes: [RepoNode] = []
     private var agentStates: [String: AgentState] = [:]
+    private var chrome: ChromeTheme?
 
     /// Selection drives the detail surface; the primary actions (add, new, launch,
     /// archive, settings) now live in the native menu bar and toolbar.
@@ -115,8 +122,12 @@ final class SidebarController: NSViewController {
         }
     }
 
-    /// Stub — real chrome theming lands in Task 12. Keep the signature stable.
-    func applyChrome(_ chrome: ChromeTheme) {}
+    /// Repaint chrome-derived colors (header/glyph tints). Triggers a reload so cells
+    /// pick up the new tints. Identity-color swatches come from each worktree's own color.
+    func applyChrome(_ chrome: ChromeTheme) {
+        self.chrome = chrome
+        outline.reloadData()
+    }
 
     /// The repository a new worktree should be added to: the selected worktree's
     /// repo, or a directly selected repo, falling back to the first repository.
@@ -178,13 +189,15 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
             let cell = makeCell(identifier: "repo", symbol: nil)
             cell.textField?.stringValue = repo.repository.name
             cell.textField?.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
-            cell.textField?.textColor = .secondaryLabelColor
+            cell.textField?.textColor = (chrome?.color(.secondaryText).nsColor) ?? .secondaryLabelColor
             return cell
         }
         if let wt = item as? WorktreeNode {
             let cell = makeWorktreeCell()
             cell.textField?.stringValue = "\(wt.worktree.title)  [\(wt.worktree.branch)]"
             cell.applyBadge(agentStates[wt.worktree.id] ?? .idle)
+            cell.applyIdentityColor(wt.worktree.color.flatMap { NSColor(hex: $0) },
+                                    glyphTint: chrome?.color(.glyphTint).nsColor)
             return cell
         }
         return nil
