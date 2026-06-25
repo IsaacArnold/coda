@@ -367,7 +367,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var states: [String: AgentState] = [:]
         for wt in store.state.worktrees {
             let snapshot = surfaces.handle(for: wt.id)?.outputSnapshot()
-            states[wt.id] = snapshot.map { agentState(fromOutput: $0) } ?? .idle
+            let state = snapshot.map { agentState(fromOutput: $0) } ?? .idle
+            states[wt.id] = state
+            // TEMP DEBUG: capture the focused worktree to see a real permission-prompt frame.
+            if wt.id == selectedWorktree?.id {
+                let tail = String((snapshot ?? "<no surface>").suffix(600)).replacingOccurrences(of: "\n", with: "⏎")
+                FileHandle.standardError.write(Data("[agent] \(state) | \(tail)\n".utf8))
+            }
         }
         agentStates = states
         sidebar.updateAgentStates(states)
