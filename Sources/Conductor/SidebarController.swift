@@ -23,25 +23,11 @@ final class SidebarController: NSViewController {
     private let scroll = NSScrollView()
     private var repoNodes: [RepoNode] = []
 
-    var onNew: (() -> Void)?
-    var onAddRepo: (() -> Void)?
+    /// Selection drives the detail surface; the primary actions (add, new, launch,
+    /// archive, settings) now live in the native menu bar and toolbar.
     var onSelect: ((Worktree?) -> Void)?
-    var onArchive: ((Worktree) -> Void)?
-    var onRepoSettings: (() -> Void)?
 
     override func loadView() {
-        let container = NSView()
-
-        let addRepo = NSButton(title: "Add Repo…", target: self, action: #selector(addRepoAction))
-        let settings = NSButton(title: "Settings…", target: self, action: #selector(settingsAction))
-        let new = NSButton(title: "New Worktree", target: self, action: #selector(newAction))
-        let archive = NSButton(title: "Archive", target: self, action: #selector(archiveAction))
-        let bar = NSStackView(views: [addRepo, settings, new, archive])
-        bar.orientation = .horizontal
-        bar.spacing = 8
-        bar.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
-        bar.translatesAutoresizingMaskIntoConstraints = false
-
         let column = NSTableColumn(identifier: .init("title"))
         outline.addTableColumn(column)
         outline.outlineTableColumn = column
@@ -53,20 +39,8 @@ final class SidebarController: NSViewController {
         outline.delegate = self
         scroll.documentView = outline
         scroll.hasVerticalScroller = true
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-
-        container.addSubview(bar)
-        container.addSubview(scroll)
-        NSLayoutConstraint.activate([
-            bar.topAnchor.constraint(equalTo: container.topAnchor),
-            bar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            bar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: bar.bottomAnchor),
-            scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            scroll.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-        ])
-        view = container
+        scroll.drawsBackground = false
+        view = scroll
     }
 
     func reload(sections: [RepositorySection], selectedWorktreeID: String?) {
@@ -101,14 +75,6 @@ final class SidebarController: NSViewController {
         return nil
     }
 
-    @objc private func addRepoAction() { onAddRepo?() }
-    @objc private func settingsAction() { onRepoSettings?() }
-    @objc private func newAction() { onNew?() }
-    @objc private func archiveAction() {
-        if let wt = outline.item(atRow: outline.selectedRow) as? WorktreeNode {
-            onArchive?(wt.worktree)
-        }
-    }
 }
 
 extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
@@ -131,19 +97,25 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         if let repo = item as? RepoNode {
-            let cell = makeCell(identifier: "repo", symbol: "folder")
+            // Repo rows are plain secondary-gray section headers (no icon), à la Supacode.
+            let cell = makeCell(identifier: "repo", symbol: nil)
             cell.textField?.stringValue = repo.repository.name
-            cell.textField?.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+            cell.textField?.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+            cell.textField?.textColor = .secondaryLabelColor
             return cell
         }
         if let wt = item as? WorktreeNode {
-            let cell = makeCell(identifier: "worktree", symbol: "arrow.triangle.branch")
+            let cell = makeCell(identifier: "worktree", symbol: Self.branchSymbol)
             cell.textField?.stringValue = "\(wt.worktree.title)  [\(wt.worktree.branch)]"
             cell.textField?.font = .systemFont(ofSize: NSFont.systemFontSize)
+            cell.textField?.textColor = .labelColor
             return cell
         }
         return nil
     }
+
+    /// Supacode's git-branch glyph; falls back to the older symbol on pre-macOS 15.
+    private static let branchSymbol = "arrow.trianglehead.branch"
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
         switch outline.item(atRow: outline.selectedRow) {
@@ -152,30 +124,42 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
     }
 
-    private func makeCell(identifier: String, symbol: String) -> NSTableCellView {
+    /// Build (or reuse) a cell. `symbol == nil` yields a text-only row (section
+    /// header); otherwise an SF Symbol icon precedes the label.
+    private func makeCell(identifier: String, symbol: String?) -> NSTableCellView {
         let id = NSUserInterfaceItemIdentifier(identifier)
         if let reused = outline.makeView(withIdentifier: id, owner: self) as? NSTableCellView {
             return reused
         }
         let cell = NSTableCellView()
-        let image = NSImageView()
-        image.translatesAutoresizingMaskIntoConstraints = false
-        image.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        image.contentTintColor = .secondaryLabelColor
         let tf = NSTextField(labelWithString: "")
         tf.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(image)
         cell.addSubview(tf)
-        cell.imageView = image
         cell.textField = tf
-        NSLayoutConstraint.activate([
-            image.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
-            image.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            image.widthAnchor.constraint(equalToConstant: 16),
-            tf.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 6),
-            tf.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
-            tf.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-        ])
+
+        if let symbol {
+            let image = NSImageView()
+            image.translatesAutoresizingMaskIntoConstraints = false
+            image.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+                ?? NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: nil)
+            image.contentTintColor = .secondaryLabelColor
+            cell.addSubview(image)
+            cell.imageView = image
+            NSLayoutConstraint.activate([
+                image.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
+                image.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                image.widthAnchor.constraint(equalToConstant: 16),
+                tf.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 6),
+                tf.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
+                tf.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            ])
+        } else {
+            NSLayoutConstraint.activate([
+                tf.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
+                tf.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
+                tf.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            ])
+        }
         cell.identifier = id
         return cell
     }
