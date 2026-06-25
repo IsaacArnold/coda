@@ -9,7 +9,10 @@ final class TerminalSurface: NSViewController {
     private let workingDirectory: String
     private let command: String
     private let setupScript: String
-    private var terminal: LocalProcessTerminalView!
+    private var terminal: ClickableTerminalView!
+
+    /// Opens a ⌘-clicked `path:line` in the default editor (wired by AppDelegate).
+    var onOpenFile: ((String, Int?) -> Void)?
 
     init(workingDirectory: String, command: String, setupScript: String = "") {
         self.workingDirectory = workingDirectory
@@ -20,8 +23,10 @@ final class TerminalSurface: NSViewController {
     required init?(coder: NSCoder) { fatalError("not used") }
 
     override func loadView() {
-        terminal = LocalProcessTerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        terminal = ClickableTerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         terminal.autoresizingMask = [.width, .height]
+        terminal.fallbackDirectory = workingDirectory
+        terminal.onOpenFile = { [weak self] path, line in self?.onOpenFile?(path, line) }
         view = terminal
     }
 
@@ -32,6 +37,12 @@ final class TerminalSurface: NSViewController {
     func sendCommand(_ command: String) {
         guard processStarted else { return }
         terminal.send(txt: command + "\r")
+    }
+
+    /// Forwarded from AppDelegate's ⌘+click monitor. Returns true if it opened something.
+    @discardableResult
+    func handleCommandClick(_ event: NSEvent) -> Bool {
+        terminal?.handleCommandClick(event) ?? false
     }
 
     override func viewDidLayout() {

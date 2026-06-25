@@ -16,9 +16,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let notchLabel = NSTextField(labelWithString: "No worktree")
     private let notchIcon = NSImageView()
     private var notchTimer: Timer?
+    private var prefsStore: PreferencesStore!
+    private var preferences = Preferences()
+    private var clickMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         store = makeStore()
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        prefsStore = PreferencesStore(url: home.appendingPathComponent(".conductor/preferences.json"))
+        preferences = prefsStore.load()
         buildMenu()
         buildWindow()
         wireSidebar()
@@ -26,6 +32,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Keep the notch clock current.
         notchTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.updateNotch()
+        }
+        // iTerm-style ⌘+click to open a path:line in the editor, routed to the focused surface.
+        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            guard let self, event.modifierFlags.contains(.command), event.window === self.window,
+                  let surface = self.currentSurface else { return event }
+            return surface.handleCommandClick(event) ? nil : event
         }
     }
 
@@ -164,6 +176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Only a freshly created worktree whose repo opted into auto-launch runs Claude.
             let command = (isNewlyCreated && repo?.autoLaunchClaude == true) ? launchCommand(for: repo!) : ""
             surface = TerminalSurface(workingDirectory: s.worktreePath, command: command, setupScript: setup)
+            surface.onOpenFile = { [weak self] path, line in self?.openInDefaultEditor(path: path, line: line) }
             surfaces.register(surface, for: s.id)
             detail.addChild(surface)
             surface.view.translatesAutoresizingMaskIntoConstraints = false
@@ -275,8 +288,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openInAction() {
-        // Wired to the default editor in the Open-in slice (#10).
-        presentMessage("Open in… is coming in the Open-in slice.")
+        guard let wt = selectedWorktree else { presentMessage("Select a worktree first."); return }
+        openInDefaultEditor(path: wt.worktreePath, line: nil)
+    }
+
+    /// Opens the focused worktree's directory in any installed app the user picks (one-off).
+    @objc private func openWithOtherAppAction() {
+        guard let wt = selectedWorktree else { presentMessage("Select a worktree first."); return }
+        let panel = NSOpenPanel()
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.allowedContentTypes = [.application]
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Open"
+        guard panel.runModal() == .OK, let appURL = panel.url else { return }
+        NSWorkspace.shared.open([URL(fileURLWithPath: wt.worktreePath)],
+                                withApplicationAt: appURL,
+                                configuration: NSWorkspace.OpenConfiguration())
+    }
+
+    /// Opens a path (worktree dir or file) in the configured default editor. Uses
+    /// `/usr/bin/open` — reliable from both `swift run` and the bundled .app, where
+    /// NSWorkspace deep-links can return -50. Line-jump via the editor's URL scheme.
+    private func openInDefaultEditor(path: String, line: Int?) {
+        let editor = preferences.defaultEditor
+        if let line, let url = editorOpenURL(scheme: editor.urlScheme, path: path, line: line) {
+            runOpen([url.absoluteString])
+        } else {
+            runOpen(["-b", editor.bundleID, path])
+        }
+    }
+
+    private func runOpen(_ args: [String]) {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        task.arguments = args
+        do { try task.run() } catch { presentError(error) }
     }
 
     @objc private func launchClaudeAction() {
@@ -398,16 +445,21 @@ extension AppDelegate: NSToolbarDelegate {
             return item
 
         case .openIn:
-            // Placeholder ▾ — opens the default editor in the Open-in slice (#10).
             let item = NSMenuToolbarItem(itemIdentifier: id)
             item.label = "Open in"
+            item.toolTip = "Open the worktree in \(preferences.defaultEditor.name) (⌘O)"
             item.image = NSImage(systemSymbolName: "arrow.up.forward.app", accessibilityDescription: "Open in")
             item.target = self
-            item.action = #selector(openInAction)
+            item.action = #selector(openInAction)   // primary click → default editor
             let menu = NSMenu()
-            let placeholder = NSMenuItem(title: "No editor configured", action: nil, keyEquivalent: "")
-            placeholder.isEnabled = false
-            menu.addItem(placeholder)
+            let openDefault = NSMenuItem(title: "Open in \(preferences.defaultEditor.name)",
+                                         action: #selector(openInAction), keyEquivalent: "")
+            openDefault.target = self
+            menu.addItem(openDefault)
+            let openOther = NSMenuItem(title: "Open with Other App…",
+                                       action: #selector(openWithOtherAppAction), keyEquivalent: "")
+            openOther.target = self
+            menu.addItem(openOther)
             item.menu = menu
             return item
 
