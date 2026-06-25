@@ -115,6 +115,9 @@ final class SidebarController: NSViewController {
         }
     }
 
+    /// Stub — real chrome theming lands in Task 12. Keep the signature stable.
+    func applyChrome(_ chrome: ChromeTheme) {}
+
     /// The repository a new worktree should be added to: the selected worktree's
     /// repo, or a directly selected repo, falling back to the first repository.
     func currentRepoID() -> String? {

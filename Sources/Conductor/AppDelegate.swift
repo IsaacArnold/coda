@@ -46,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildWindow()
         wireSidebar()
         refreshSidebar(select: store.state.worktrees.first?.id)
+        applyChromeTheme()
         // Keep the notch clock current.
         notchTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.updateNotch()
@@ -257,6 +258,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             surface = TerminalSurface(workingDirectory: s.worktreePath, command: command, setupScript: setup)
             surface.onOpenFile = { [weak self] path, line in self?.openInDefaultEditor(path: path, line: line) }
             surfaces.register(surface, for: s.id)
+            surface.applyTheme(activeTheme)
             detail.addChild(surface)
             surface.view.translatesAutoresizingMaskIntoConstraints = false
             detail.view.addSubview(surface.view)
@@ -268,6 +270,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ])
         }
         currentSurface = surface
+    }
+
+    // MARK: - theming
+
+    /// Push the active terminal theme to every live surface and repaint the chrome.
+    private func applyActiveTheme() {
+        for wt in store.state.worktrees {
+            surfaces.handle(for: wt.id)?.applyTheme(activeTheme)
+        }
+        applyChromeTheme()
+    }
+
+    /// iTerm2-style: the window blends into the terminal background and flips
+    /// light/dark by its luminance. All chrome colors read from ChromeTheme.
+    private func applyChromeTheme() {
+        let chrome = ChromeTheme(terminal: activeTheme)
+        window.appearance = chrome.appearance.nsAppearance
+        window.backgroundColor = chrome.color(.windowBackground).nsColor
+        sidebar.applyChrome(chrome)
+        updateNotch()
     }
 
     // MARK: - native menu bar
