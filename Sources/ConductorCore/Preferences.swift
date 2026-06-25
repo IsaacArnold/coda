@@ -12,6 +12,17 @@ public struct Editor: Codable, Equatable {
     public static let vsCode = Editor(name: "Visual Studio Code",
                                       bundleID: "com.microsoft.VSCode",
                                       urlScheme: "vscode")
+
+    /// Curated editors offered by the Settings picker, each with a known URL scheme so
+    /// cmd+click line-jump works out of the box. Users can still pick any other app via
+    /// the "Other…" path (bundle id only — no line-jump scheme).
+    public static let knownEditors: [Editor] = [
+        .vsCode,
+        Editor(name: "Cursor", bundleID: "com.todesktop.230313mzl4w4u92", urlScheme: "cursor"),
+        Editor(name: "VSCodium", bundleID: "com.vscodium", urlScheme: "vscodium"),
+        Editor(name: "Zed", bundleID: "dev.zed.Zed", urlScheme: "zed"),
+        Editor(name: "Sublime Text", bundleID: "com.sublimetext.4", urlScheme: "subl"),
+    ]
 }
 
 /// App-wide, portable preferences (no machine-local absolute paths). Separate from
