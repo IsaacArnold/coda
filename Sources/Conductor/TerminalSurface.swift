@@ -27,6 +27,13 @@ final class TerminalSurface: NSViewController {
 
     private var processStarted = false
 
+    /// Type `command` into the live shell (as if the user typed it + Return).
+    /// Used by "Launch Claude" to start an agent in a shell-first worktree.
+    func sendCommand(_ command: String) {
+        guard processStarted else { return }
+        terminal.send(txt: command + "\r")
+    }
+
     override func viewDidLayout() {
         super.viewDidLayout()
         // Start the PTY only once bounds are known (viewDidAppear can fire at zero size).

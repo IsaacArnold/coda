@@ -6,16 +6,21 @@ public struct Repository: Codable, Equatable, Identifiable {
     public var name: String
     public var setupScript: String
     public var copyAllowlist: [String]
+    /// When true, a newly created worktree in this repo auto-runs Claude (after the
+    /// setup script, if any). Off by default: worktrees are shell-first.
+    public var autoLaunchClaude: Bool
 
     public init(id: String, path: String, name: String,
-                setupScript: String = "", copyAllowlist: [String] = []) {
+                setupScript: String = "", copyAllowlist: [String] = [],
+                autoLaunchClaude: Bool = false) {
         self.id = id; self.path = path; self.name = name
         self.setupScript = setupScript; self.copyAllowlist = copyAllowlist
+        self.autoLaunchClaude = autoLaunchClaude
     }
 
-    private enum CodingKeys: String, CodingKey { case id, path, name, setupScript, copyAllowlist }
+    private enum CodingKeys: String, CodingKey { case id, path, name, setupScript, copyAllowlist, autoLaunchClaude }
 
-    // Custom decode so older configs without the setup fields still load.
+    // Custom decode so older configs without the setup / auto-launch fields still load.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -23,6 +28,7 @@ public struct Repository: Codable, Equatable, Identifiable {
         name = try c.decode(String.self, forKey: .name)
         setupScript = try c.decodeIfPresent(String.self, forKey: .setupScript) ?? ""
         copyAllowlist = try c.decodeIfPresent([String].self, forKey: .copyAllowlist) ?? []
+        autoLaunchClaude = try c.decodeIfPresent(Bool.self, forKey: .autoLaunchClaude) ?? false
     }
 }
 
