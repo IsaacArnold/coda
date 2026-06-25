@@ -26,7 +26,7 @@ public struct Repository: Codable, Equatable, Identifiable {
     }
 }
 
-public struct Session: Codable, Equatable, Identifiable {
+public struct Worktree: Codable, Equatable, Identifiable {
     public var id: String
     public var repoID: String
     public var title: String

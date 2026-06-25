@@ -11,6 +11,6 @@ final class SlugTests: XCTestCase {
     }
 
     func testSlugifyFallsBackWhenEmpty() {
-        XCTAssertEqual(slugify("!!!"), "session")
+        XCTAssertEqual(slugify("!!!"), "worktree")
     }
 }

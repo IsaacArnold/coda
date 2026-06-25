@@ -2,9 +2,29 @@ import Foundation
 
 public struct LocalState: Codable, Equatable {
     public var repositories: [Repository]
-    public var sessions: [Session]
-    public init(repositories: [Repository], sessions: [Session]) {
-        self.repositories = repositories; self.sessions = sessions
+    public var worktrees: [Worktree]
+    public init(repositories: [Repository], worktrees: [Worktree]) {
+        self.repositories = repositories; self.worktrees = worktrees
+    }
+
+    private enum CodingKeys: String, CodingKey { case repositories, worktrees, sessions }
+
+    // Custom decode so configs written before the Session→Worktree rename
+    // (which used the "sessions" key) still load.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        repositories = try c.decodeIfPresent([Repository].self, forKey: .repositories) ?? []
+        if let wt = try c.decodeIfPresent([Worktree].self, forKey: .worktrees) {
+            worktrees = wt
+        } else {
+            worktrees = try c.decodeIfPresent([Worktree].self, forKey: .sessions) ?? []
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(repositories, forKey: .repositories)
+        try c.encode(worktrees, forKey: .worktrees)
     }
 }
 
@@ -17,7 +37,7 @@ public final class Config {
     public func load() -> LocalState {
         guard let data = try? Data(contentsOf: url),
               let state = try? JSONDecoder().decode(LocalState.self, from: data) else {
-            return LocalState(repositories: [], sessions: [])
+            return LocalState(repositories: [], worktrees: [])
         }
         return state
     }

@@ -1,8 +1,8 @@
 import Foundation
 
-public enum SessionStoreError: Error { case repoNotFound(String); case sessionNotFound(String) }
+public enum WorktreeStoreError: Error { case repoNotFound(String); case worktreeNotFound(String) }
 
-public final class SessionStore {
+public final class WorktreeStore {
     private let config: Config
     private let git: GitWorktree
     private let worktreeRoot: String
@@ -26,7 +26,7 @@ public final class SessionStore {
 
     public func updateRepository(id: String, setupScript: String, copyAllowlist: [String]) throws -> Repository {
         guard let idx = state.repositories.firstIndex(where: { $0.id == id }) else {
-            throw SessionStoreError.repoNotFound(id)
+            throw WorktreeStoreError.repoNotFound(id)
         }
         state.repositories[idx].setupScript = setupScript
         state.repositories[idx].copyAllowlist = copyAllowlist
@@ -34,9 +34,9 @@ public final class SessionStore {
         return state.repositories[idx]
     }
 
-    public func createSession(repoID: String, title: String) throws -> Session {
+    public func createWorktree(repoID: String, title: String) throws -> Worktree {
         guard let repo = state.repositories.first(where: { $0.id == repoID }) else {
-            throw SessionStoreError.repoNotFound(repoID)
+            throw WorktreeStoreError.repoNotFound(repoID)
         }
         let base = try git.currentBranch(repo: repo.path)
         let branch = uniqueBranch(base: slugify(title), repo: repo)
@@ -49,30 +49,30 @@ public final class SessionStore {
         // git worktree add only brings tracked files, so these would otherwise be missing.
         _ = try copyAllowlistedFiles(from: repo.path, to: worktreePath, allowlist: repo.copyAllowlist)
 
-        let session = Session(id: UUID().uuidString, repoID: repoID,
-                              title: title, branch: branch, worktreePath: worktreePath)
-        state.sessions.append(session)
+        let worktree = Worktree(id: UUID().uuidString, repoID: repoID,
+                                title: title, branch: branch, worktreePath: worktreePath)
+        state.worktrees.append(worktree)
         try config.save(state)
-        return session
+        return worktree
     }
 
-    public func archiveSession(id: String, deleteBranch: Bool) throws {
-        guard let session = state.sessions.first(where: { $0.id == id }) else {
-            throw SessionStoreError.sessionNotFound(id)
+    public func archiveWorktree(id: String, deleteBranch: Bool) throws {
+        guard let worktree = state.worktrees.first(where: { $0.id == id }) else {
+            throw WorktreeStoreError.worktreeNotFound(id)
         }
-        guard let repo = state.repositories.first(where: { $0.id == session.repoID }) else {
-            throw SessionStoreError.repoNotFound(session.repoID)
+        guard let repo = state.repositories.first(where: { $0.id == worktree.repoID }) else {
+            throw WorktreeStoreError.repoNotFound(worktree.repoID)
         }
-        try git.remove(repo: repo.path, path: session.worktreePath)
+        try git.remove(repo: repo.path, path: worktree.worktreePath)
         if deleteBranch {
-            try? git.deleteBranch(repo: repo.path, branch: session.branch)
+            try? git.deleteBranch(repo: repo.path, branch: worktree.branch)
         }
-        state.sessions.removeAll { $0.id == id }
+        state.worktrees.removeAll { $0.id == id }
         try config.save(state)
     }
 
     private func uniqueBranch(base: String, repo: Repository) -> String {
-        let taken = Set(state.sessions.filter { $0.repoID == repo.id }.map { $0.branch })
+        let taken = Set(state.worktrees.filter { $0.repoID == repo.id }.map { $0.branch })
         if !taken.contains(base) { return base }
         var n = 2
         while taken.contains("\(base)-\(n)") { n += 1 }

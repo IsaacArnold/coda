@@ -6,24 +6,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var splitVC: NSSplitViewController!
     private let sidebar = SidebarController()
     private let detail = NSViewController()      // holds the terminal surface (Task 7)
-    private var store: SessionStore!
+    private var store: WorktreeStore!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         store = makeStore()
         buildWindow()
         wireSidebar()
-        refreshSidebar(select: store.state.sessions.first?.id)
+        refreshSidebar(select: store.state.worktrees.first?.id)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    private func makeStore() -> SessionStore {
+    private func makeStore() -> WorktreeStore {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let configURL = home.appendingPathComponent(".conductor/local.json")
         let worktreeRoot = home.appendingPathComponent(".conductor/worktrees").path
-        return SessionStore(config: Config(url: configURL),
-                            git: GitWorktree(gitPath: "/usr/bin/git"),
-                            worktreeRoot: worktreeRoot)
+        return WorktreeStore(config: Config(url: configURL),
+                             git: GitWorktree(gitPath: "/usr/bin/git"),
+                             worktreeRoot: worktreeRoot)
     }
 
     private func buildWindow() {
@@ -43,14 +43,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func wireSidebar() {
         sidebar.onAddRepo = { [weak self] in self?.addRepo() }
-        sidebar.onNew = { [weak self] in self?.newSession() }
+        sidebar.onNew = { [weak self] in self?.newWorktree() }
         sidebar.onArchive = { [weak self] s in self?.archive(s) }
         sidebar.onSelect = { [weak self] s in self?.select(s) }
         sidebar.onRepoSettings = { [weak self] in self?.openRepoSettings() }
     }
 
     private func refreshSidebar(select id: String?) {
-        sidebar.reload(sessions: store.state.sessions, selected: id)
+        sidebar.reload(worktrees: store.state.worktrees, selected: id)
     }
 
     private func openRepoSettings() {
@@ -76,36 +76,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         catch { presentError(error) }
     }
 
-    private func newSession() {
+    private func newWorktree() {
         guard let repo = store.state.repositories.first else {
             presentMessage("Add a repo first (Add Repo…).")
             return
         }
-        let title = promptForText(prompt: "Session title:", defaultValue: "New Session") ?? "New Session"
+        let title = promptForText(prompt: "Worktree title:", defaultValue: "New Worktree") ?? "New Worktree"
         do {
-            let s = try store.createSession(repoID: repo.id, title: title)
-            pendingSetupSessionIDs.insert(s.id)
+            let s = try store.createWorktree(repoID: repo.id, title: title)
+            pendingSetupWorktreeIDs.insert(s.id)
             refreshSidebar(select: s.id)
             select(s)
         } catch { presentError(error) }
     }
 
-    private func archive(_ s: Session) {
+    private func archive(_ s: Worktree) {
         do {
-            try store.archiveSession(id: s.id, deleteBranch: true)
-            refreshSidebar(select: store.state.sessions.first?.id)
-            select(store.state.sessions.first)
+            try store.archiveWorktree(id: s.id, deleteBranch: true)
+            refreshSidebar(select: store.state.worktrees.first?.id)
+            select(store.state.worktrees.first)
         } catch { presentError(error) }
     }
 
-    // Sessions created in THIS app run, whose first terminal should run setupScript.
-    private var pendingSetupSessionIDs: Set<String> = []
+    // Worktrees created in THIS app run, whose first terminal should run setupScript.
+    private var pendingSetupWorktreeIDs: Set<String> = []
 
-    private var shownSessionID: String?
+    private var shownWorktreeID: String?
 
-    private func select(_ s: Session?) {
-        guard shownSessionID != s?.id else { return }   // idempotent: ignore redundant reselects
-        shownSessionID = s?.id
+    private func select(_ s: Worktree?) {
+        guard shownWorktreeID != s?.id else { return }   // idempotent: ignore redundant reselects
+        shownWorktreeID = s?.id
 
         // Tear down the current surface (remove its view AND the child VC).
         for child in detail.children {
@@ -115,8 +115,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let s else { return }
 
         let repo = store.state.repositories.first { $0.id == s.repoID }
-        let setup = pendingSetupSessionIDs.contains(s.id) ? (repo?.setupScript ?? "") : ""
-        pendingSetupSessionIDs.remove(s.id)
+        let setup = pendingSetupWorktreeIDs.contains(s.id) ? (repo?.setupScript ?? "") : ""
+        pendingSetupWorktreeIDs.remove(s.id)
         let surface = TerminalSurface(workingDirectory: s.worktreePath, command: "claude", setupScript: setup)
         detail.addChild(surface)
         surface.view.translatesAutoresizingMaskIntoConstraints = false
