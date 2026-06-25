@@ -5,8 +5,9 @@ import Foundation
 public enum AgentState: String, Equatable {
     case idle      // ⚪️ no Claude running — a plain shell
     case working   // 🟡 Claude is actively working
-    case needsYou  // 🔴 Claude is waiting on the user (permission/idle prompt)
-    case done      // 🟢 Claude finished and is waiting for the next prompt
+    case needsYou  // 🔴 Claude has stopped and it's your turn (finished/asking/permission)
+    case done      // 🟢 finished cleanly — reserved for the authoritative (hook) path; the
+                   //    heuristic can't distinguish it from needsYou, so it isn't emitted here
 }
 
 /// Heuristic classification of a Claude run from a snapshot of recent terminal
@@ -21,11 +22,6 @@ public func agentState(fromOutput output: String) -> AgentState {
     let lower = output.lowercased()
     let collapsed = lower.filter { !$0.isWhitespace }
 
-    // 🔴 Permission/approval prompt — the user's turn. Keyed off the numbered approve
-    // option ("1. Yes") that only the selection UI prints, NOT prose like "do you want…".
-    if collapsed.contains("1.yes") {
-        return .needsYou
-    }
     // 🟡 Working — the gerund spinner's elapsed timer, e.g. "(4s · …)" / "(12s)". Present
     // throughout active work in every Claude frame (newer versions drop "esc to interrupt").
     // Matched on the original text with a trailing word boundary so it's independent of the
@@ -34,10 +30,11 @@ public func agentState(fromOutput output: String) -> AgentState {
         || collapsed.contains("esctointerrupt") {
         return .working
     }
-    // 🟢 Claude is open and waiting. Keyed off the always-present footer ("ctx:" context
-    // gauge); "← for agents" alone flaps because Claude redraws it intermittently.
+    // 🔴 Claude is open but not working → it's your turn (finished, asking a question, or a
+    // permission prompt). Keyed off the always-present footer ("ctx:" context gauge);
+    // "← for agents" alone flaps because Claude redraws it intermittently.
     if collapsed.contains("ctx:") || collapsed.contains("foragents") || collapsed.contains("forshortcuts") {
-        return .done
+        return .needsYou
     }
     // ⚪️ No Claude markers — a plain shell.
     return .idle
