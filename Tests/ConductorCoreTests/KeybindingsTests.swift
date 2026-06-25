@@ -43,3 +43,32 @@ final class ShortcutCommandTests: XCTestCase {
         XCTAssertEqual(ShortcutCommand.allCases.count, 8)
     }
 }
+
+final class KeybindingsResolutionTests: XCTestCase {
+    func testEffectiveChordFallsBackToDefault() {
+        let bindings = Keybindings()
+        XCTAssertEqual(bindings.effectiveChord(for: .newWorktree), KeyChord("n", command: true))
+        XCTAssertTrue(bindings.isEnabled(.newWorktree))
+    }
+
+    func testOverrideReplacesChord() {
+        var bindings = Keybindings()
+        bindings.setChord(KeyChord("j", command: true), for: .newWorktree)
+        XCTAssertEqual(bindings.effectiveChord(for: .newWorktree), KeyChord("j", command: true))
+    }
+
+    func testDisabledCommandHasNoEffectiveChordButKeepsItsChord() {
+        var bindings = Keybindings()
+        bindings.setEnabled(false, for: .archiveWorktree)
+        XCTAssertNil(bindings.effectiveChord(for: .archiveWorktree))
+        XCTAssertFalse(bindings.isEnabled(.archiveWorktree))
+        XCTAssertEqual(bindings.chord(for: .archiveWorktree), KeyChord("\u{8}", command: true))
+    }
+
+    func testResetRemovesOverride() {
+        var bindings = Keybindings()
+        bindings.setChord(KeyChord("j", command: true), for: .newWorktree)
+        bindings.reset(.newWorktree)
+        XCTAssertEqual(bindings.effectiveChord(for: .newWorktree), KeyChord("n", command: true))
+    }
+}

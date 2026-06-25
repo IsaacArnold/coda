@@ -124,3 +124,44 @@ public enum ShortcutCommand: String, Codable, CaseIterable, Sendable {
         }
     }
 }
+
+public struct ShortcutOverride: Codable, Equatable, Sendable {
+    public var chord: KeyChord
+    public var isEnabled: Bool
+    public init(chord: KeyChord, isEnabled: Bool = true) {
+        self.chord = chord; self.isEnabled = isEnabled
+    }
+}
+
+/// User overrides keyed by `ShortcutCommand.rawValue`. A command with no override uses its
+/// default chord; an override may change the chord and/or disable it entirely.
+public struct Keybindings: Codable, Equatable, Sendable {
+    public var overrides: [String: ShortcutOverride]
+    public init(overrides: [String: ShortcutOverride] = [:]) { self.overrides = overrides }
+
+    public func effectiveChord(for command: ShortcutCommand) -> KeyChord? {
+        if let o = overrides[command.rawValue] { return o.isEnabled ? o.chord : nil }
+        return command.defaultChord
+    }
+
+    public func isEnabled(_ command: ShortcutCommand) -> Bool {
+        overrides[command.rawValue]?.isEnabled ?? true
+    }
+
+    public func chord(for command: ShortcutCommand) -> KeyChord {
+        overrides[command.rawValue]?.chord ?? command.defaultChord
+    }
+
+    public mutating func setChord(_ chord: KeyChord, for command: ShortcutCommand) {
+        let enabled = overrides[command.rawValue]?.isEnabled ?? true
+        overrides[command.rawValue] = ShortcutOverride(chord: chord, isEnabled: enabled)
+    }
+
+    public mutating func setEnabled(_ enabled: Bool, for command: ShortcutCommand) {
+        let chord = overrides[command.rawValue]?.chord ?? command.defaultChord
+        overrides[command.rawValue] = ShortcutOverride(chord: chord, isEnabled: enabled)
+    }
+
+    public mutating func reset(_ command: ShortcutCommand) { overrides[command.rawValue] = nil }
+    public mutating func resetAll() { overrides = [:] }
+}
