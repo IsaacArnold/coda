@@ -340,22 +340,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 // MARK: - Unified toolbar
 
-/// The toolbar centre-notch background: a single opaque rounded fill that adapts
-/// to light/dark (no translucency, so the toolbar gradient can't band through).
-final class NotchPillView: NSView {
-    override init(frame: NSRect) { super.init(frame: frame); wantsLayer = true }
-    required init?(coder: NSCoder) { super.init(coder: coder); wantsLayer = true }
-
-    override var wantsUpdateLayer: Bool { true }
-
-    override func updateLayer() {
-        layer?.cornerRadius = 7
-        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        layer?.backgroundColor = (dark ? NSColor(white: 0.26, alpha: 1)
-                                        : NSColor(white: 0.90, alpha: 1)).cgColor
-    }
-}
-
 private extension NSToolbarItem.Identifier {
     static let addRepository = NSToolbarItem.Identifier("addRepository")
     static let launchClaude = NSToolbarItem.Identifier("launchClaude")
@@ -400,9 +384,8 @@ extension AppDelegate: NSToolbarDelegate {
         case .notch:
             let item = NSToolbarItem(itemIdentifier: id)
             item.label = ""
-            // A compact centred pill (à la Supacode), sized to its content. Uses a
-            // single opaque fill so the toolbar's gradient can't show through as a band.
-            let pill = NotchPillView()
+            // The toolbar already gives each item a single rounded background, so the
+            // notch content sits directly in it — no extra fill (that caused doubling).
             notchIcon.symbolConfiguration = .init(pointSize: 12, weight: .regular)
             notchLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
             notchLabel.lineBreakMode = .byTruncatingTail
@@ -410,15 +393,8 @@ extension AppDelegate: NSToolbarDelegate {
             let stack = NSStackView(views: [notchIcon, notchLabel])
             stack.orientation = .horizontal
             stack.spacing = 6
-            stack.translatesAutoresizingMaskIntoConstraints = false
-            pill.addSubview(stack)
-            NSLayoutConstraint.activate([
-                stack.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: 12),
-                stack.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -12),
-                stack.topAnchor.constraint(equalTo: pill.topAnchor, constant: 4),
-                stack.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: -4),
-            ])
-            item.view = pill
+            stack.edgeInsets = NSEdgeInsets(top: 2, left: 6, bottom: 2, right: 8)
+            item.view = stack
             return item
 
         case .openIn:
