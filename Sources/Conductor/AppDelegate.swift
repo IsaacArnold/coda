@@ -116,6 +116,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.setContentSize(NSSize(width: 1100, height: 700))
         window.title = "Conductor"
         window.titleVisibility = .hidden
+        // Let the themed window background flow up through the titlebar/unified toolbar so the
+        // toolbar blends into the terminal theme (spec: "toolbar adopts the terminal background").
+        // Without this the unified toolbar keeps macOS's default material and reads as default-gray.
+        window.titlebarAppearsTransparent = true
 
         let toolbar = NSToolbar(identifier: "MainToolbar")
         toolbar.delegate = self
