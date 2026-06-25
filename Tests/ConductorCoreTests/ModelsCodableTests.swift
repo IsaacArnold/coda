@@ -18,4 +18,20 @@ final class ModelsCodableTests: XCTestCase {
         let back = try JSONDecoder().decode(Repository.self, from: data)
         XCTAssertEqual(back, repo)
     }
+
+    func testRepositoryAutoLaunchClaudeDefaultsFalseForOldJSON() throws {
+        // Configs written before the auto-launch flag existed must still decode,
+        // defaulting the flag off (shell-first).
+        let json = #"{"id":"r1","path":"/tmp/repo","name":"repo"}"#
+        let repo = try JSONDecoder().decode(Repository.self, from: Data(json.utf8))
+        XCTAssertFalse(repo.autoLaunchClaude)
+    }
+
+    func testRepositoryRoundTripsAutoLaunchClaude() throws {
+        let repo = Repository(id: "r1", path: "/tmp/repo", name: "repo", autoLaunchClaude: true)
+        let data = try JSONEncoder().encode(repo)
+        let back = try JSONDecoder().decode(Repository.self, from: data)
+        XCTAssertTrue(back.autoLaunchClaude)
+        XCTAssertEqual(back, repo)
+    }
 }
