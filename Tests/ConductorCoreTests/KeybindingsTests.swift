@@ -23,3 +23,23 @@ final class KeyChordTests: XCTestCase {
         XCTAssertFalse(json.contains("rawValue"))
     }
 }
+
+final class ShortcutCommandTests: XCTestCase {
+    func testEveryCommandHasDisplayNameAndCategory() {
+        for command in ShortcutCommand.allCases {
+            XCTAssertFalse(command.displayName.isEmpty)
+            XCTAssertFalse(command.category.displayName.isEmpty)
+        }
+    }
+
+    func testDefaultChordsMatchTheMenu() {
+        XCTAssertEqual(ShortcutCommand.newWorktree.defaultChord, KeyChord("n", command: true))
+        XCTAssertEqual(ShortcutCommand.revealInFinder.defaultChord, KeyChord("r", command: true, option: true))
+        XCTAssertEqual(ShortcutCommand.archiveWorktree.defaultChord, KeyChord("\u{8}", command: true))
+        XCTAssertEqual(ShortcutCommand.toggleSidebar.defaultChord, KeyChord("s", command: true, control: true))
+    }
+
+    func testThereAreEightBindableCommands() {
+        XCTAssertEqual(ShortcutCommand.allCases.count, 8)
+    }
+}
