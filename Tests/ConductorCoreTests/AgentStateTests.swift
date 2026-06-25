@@ -22,13 +22,24 @@ final class AgentStateTests: XCTestCase {
         XCTAssertEqual(agentState(fromOutput: mixed), .needsYou)
     }
 
-    func testDoneWhenClaudeIsWaitingIdle() {
-        // After finishing, Claude's input box footer shows the shortcuts hint and no spinner.
-        XCTAssertEqual(agentState(fromOutput: "│ > \n⏵⏵ ? for shortcuts"), .done)
+    func testDoneFromRealClaudeFooter() {
+        // Real Claude Code v2.x footer when finished/waiting (captured from a session).
+        // Spacing is collapsed in the terminal snapshot, so matching must be space-insensitive.
+        let footer = "❯ \n──────\nOpus 4.8 (1M context) | test | test | ctx: 3% | $0.11\n← for agents"
+        XCTAssertEqual(agentState(fromOutput: footer), .done)
+    }
+
+    func testDoneEvenWhenFooterSpacingIsCollapsed() {
+        XCTAssertEqual(agentState(fromOutput: "Opus4.8(1Mcontext) |test |ctx:3%\n←foragents"), .done)
+    }
+
+    func testWorkingMatchesInterruptEvenIfSpacingCollapsed() {
+        XCTAssertEqual(agentState(fromOutput: "✻ Sautéing… (esctointerrupt)"), .working)
     }
 
     func testIdleWhenOnlyAPlainShellPrompt() {
-        XCTAssertEqual(agentState(fromOutput: "isaac@mac terminal-snippets % "), .idle)
+        // A plain shell (incl. having just typed `claude` but not launched) → no badge.
+        XCTAssertEqual(agentState(fromOutput: "~/.conductor/worktrees/html-css-starter/test   test  claude"), .idle)
     }
 
     func testIdleOnEmptyOutput() {

@@ -369,10 +369,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let snapshot = surfaces.handle(for: wt.id)?.outputSnapshot()
             let state = snapshot.map { agentState(fromOutput: $0) } ?? .idle
             states[wt.id] = state
-            // TEMP DEBUG: surface what we captured + classified, to find why badges don't update.
-            if let id = selectedWorktree?.id, id == wt.id {
-                let tail = String((snapshot ?? "<no surface>").suffix(200)).replacingOccurrences(of: "\n", with: "⏎")
-                FileHandle.standardError.write(Data("[agent] \(wt.title): len=\(snapshot?.count ?? -1) state=\(state) tail=\(tail)\n".utf8))
+            // TEMP DEBUG: log only on state CHANGE, to confirm the working/needs-you/done transitions.
+            if agentStates[wt.id] != state {
+                let tail = String((snapshot ?? "<no surface>").suffix(160)).replacingOccurrences(of: "\n", with: "⏎")
+                FileHandle.standardError.write(Data("[agent] \(wt.title): \(agentStates[wt.id].map { "\($0)" } ?? "—") → \(state) | tail=\(tail)\n".utf8))
             }
         }
         agentStates = states
