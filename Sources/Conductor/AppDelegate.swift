@@ -366,7 +366,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func pollAgentStates() {
         var states: [String: AgentState] = [:]
         for wt in store.state.worktrees {
-            states[wt.id] = surfaces.handle(for: wt.id).map { agentState(fromOutput: $0.outputSnapshot()) } ?? .idle
+            let snapshot = surfaces.handle(for: wt.id)?.outputSnapshot()
+            let state = snapshot.map { agentState(fromOutput: $0) } ?? .idle
+            states[wt.id] = state
+            // TEMP DEBUG: surface what we captured + classified, to find why badges don't update.
+            if let id = selectedWorktree?.id, id == wt.id {
+                let tail = String((snapshot ?? "<no surface>").suffix(200)).replacingOccurrences(of: "\n", with: "⏎")
+                FileHandle.standardError.write(Data("[agent] \(wt.title): len=\(snapshot?.count ?? -1) state=\(state) tail=\(tail)\n".utf8))
+            }
         }
         agentStates = states
         sidebar.updateAgentStates(states)
