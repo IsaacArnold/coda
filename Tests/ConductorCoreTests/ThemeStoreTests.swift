@@ -42,7 +42,17 @@ final class ThemeStoreTests: XCTestCase {
         let b = try writeTheme("B", in: tmpDir())
         let store = ThemeStore(directory: dir)
         try store.seedIfEmpty(from: [a, b])
-        XCTAssertEqual(Set(store.themeNames()), ["A", "B"])
+        XCTAssertEqual(store.themeNames(), ["A", "B"])
+    }
+
+    func testImportOverwritesSameNamedTheme() throws {
+        let dir = tmpDir()
+        let first = try writeTheme("Nord", in: tmpDir())
+        let second = try writeTheme("Nord", in: tmpDir())  // same name, different source dir
+        let store = ThemeStore(directory: dir)
+        try store.importTheme(from: first)
+        try store.importTheme(from: second)   // must not throw
+        XCTAssertEqual(store.themeNames(), ["Nord"], "re-import overwrites, no duplicate")
     }
 
     func testSeedIfEmptyDoesNothingWhenNotEmpty() throws {
