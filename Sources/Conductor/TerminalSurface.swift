@@ -50,6 +50,22 @@ final class TerminalSurface: NSViewController {
         terminal?.containsClick(event) ?? false
     }
 
+    /// Snapshot of the *visible* terminal text, for heuristic agent-state classification.
+    /// Uses `getLine` (screen-relative, applies the scroll offset) — NOT `getText` with
+    /// absolute rows, which would read the top of scrollback, not the live status line.
+    func outputSnapshot() -> String {
+        guard let term = terminal?.getTerminal() else { return "" }
+        let rows = term.rows
+        guard rows > 0 else { return "" }
+        var out = ""
+        for row in 0..<rows {
+            if let line = term.getLine(row: row) {
+                out += line.translateToString(trimRight: true) + "\n"
+            }
+        }
+        return out
+    }
+
     override func viewDidLayout() {
         super.viewDidLayout()
         // Start the PTY only once bounds are known (viewDidAppear can fire at zero size).

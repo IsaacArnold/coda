@@ -15,7 +15,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Toolbar centre-notch: shows time + focused worktree (agent badge wired in #11).
     private let notchLabel = NSTextField(labelWithString: "No worktree")
     private let notchIcon = NSImageView()
+    private let notchBadge = NSView()   // layer-drawn agent-state dot
     private var notchTimer: Timer?
+    private var stateTimer: Timer?
+    private var agentStates: [String: AgentState] = [:]
     private var prefsStore: PreferencesStore!
     private var preferences = Preferences()
     private var clickMonitor: Any?
@@ -32,6 +35,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Keep the notch clock current.
         notchTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.updateNotch()
+        }
+        // Poll each live surface's output to drive the heuristic agent-state badges.
+        stateTimer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: true) { [weak self] _ in
+            self?.pollAgentStates()
         }
         // iTerm-style ⌘+click to open a path:line in the editor, routed to the focused
         // surface. We swallow BOTH the down and up: SwiftTerm activates its own link
@@ -356,6 +363,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func pollAgentStates() {
+        var states: [String: AgentState] = [:]
+        for wt in store.state.worktrees {
+            let snapshot = surfaces.handle(for: wt.id)?.outputSnapshot()
+            states[wt.id] = snapshot.map { agentState(fromOutput: $0) } ?? .idle
+        }
+        agentStates = states
+        sidebar.updateAgentStates(states)
+        updateNotch()
+    }
+
     private func updateNotch() {
         let now = Date()
         let style = notchTimeStyle(hour: Calendar.current.component(.hour, from: now))
@@ -365,6 +383,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let focus = selectedWorktree?.title ?? "No worktree"
         notchLabel.stringValue = "\(time) — \(focus)"
         notchLabel.textColor = .secondaryLabelColor
+
+        if let id = selectedWorktree?.id, let color = agentBadgeColor(agentStates[id] ?? .idle) {
+            notchBadge.layer?.backgroundColor = color.cgColor
+            notchBadge.isHidden = false
+        } else {
+            notchBadge.isHidden = true
+        }
     }
 
     // MARK: - small helpers
@@ -441,7 +466,12 @@ extension AppDelegate: NSToolbarDelegate {
             notchLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
             notchLabel.lineBreakMode = .byTruncatingTail
             notchLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 340).isActive = true
-            let stack = NSStackView(views: [notchIcon, notchLabel])
+            notchBadge.wantsLayer = true
+            notchBadge.layer?.cornerRadius = 4
+            notchBadge.translatesAutoresizingMaskIntoConstraints = false
+            notchBadge.widthAnchor.constraint(equalToConstant: 8).isActive = true
+            notchBadge.heightAnchor.constraint(equalToConstant: 8).isActive = true
+            let stack = NSStackView(views: [notchIcon, notchLabel, notchBadge])
             stack.orientation = .horizontal
             stack.spacing = 6
             stack.edgeInsets = NSEdgeInsets(top: 2, left: 6, bottom: 2, right: 8)
