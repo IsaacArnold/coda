@@ -29,6 +29,27 @@ final class PreferencesTests: XCTestCase {
     }
 }
 
+final class KnownEditorsTests: XCTestCase {
+    func testIncludesVSCodeTheDefault() {
+        // The picker shows a curated list; the default editor must be selectable in it.
+        XCTAssertTrue(Editor.knownEditors.contains(.vsCode))
+    }
+
+    func testEveryKnownEditorHasASchemeForLineJump() {
+        // Curated entries carry a real URL scheme so cmd+click line-jump works for each.
+        for editor in Editor.knownEditors {
+            XCTAssertFalse(editor.name.isEmpty)
+            XCTAssertFalse(editor.bundleID.isEmpty)
+            XCTAssertFalse(editor.urlScheme.isEmpty, "\(editor.name) needs a scheme")
+        }
+    }
+
+    func testBundleIDsAreUnique() {
+        let ids = Editor.knownEditors.map(\.bundleID)
+        XCTAssertEqual(ids.count, Set(ids).count, "duplicate editor in the curated list")
+    }
+}
+
 final class EditorURLTests: XCTestCase {
     func testBuildsLineJumpURLWhenGivenALine() {
         let url = editorOpenURL(path: "/Users/me/Project/main.swift", line: 42)

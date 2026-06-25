@@ -65,6 +65,19 @@ final class WorktreeStoreTests: XCTestCase {
         XCTAssertEqual(reloaded?.copyAllowlist, [".env"])
     }
 
+    func testUpdateRepositoryPersistsAutoLaunchClaude() throws {
+        let repo = try makeTempRepo()
+        let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: repo)
+        XCTAssertFalse(r.autoLaunchClaude, "repos default to shell-first")
+
+        let updated = try store.updateRepository(id: r.id, setupScript: "",
+                                                 copyAllowlist: [], autoLaunchClaude: true)
+        XCTAssertTrue(updated.autoLaunchClaude)
+        // Persisted to disk, so newly created worktrees in this repo will auto-run Claude.
+        XCTAssertEqual(cfg.load().repositories.first { $0.id == r.id }?.autoLaunchClaude, true)
+    }
+
     func testCreateWorktreeCopiesAllowlistedFilesIntoWorktree() throws {
         let repo = try makeTempRepo()
         // An untracked, gitignored-style file that git worktree add would NOT bring over.

@@ -22,6 +22,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var prefsStore: PreferencesStore!
     private var preferences = Preferences()
     private var clickMonitor: Any?
+    private var settingsWC: NSWindowController?
+    // Open-in toolbar item refs, so its label/tooltip track the chosen default editor.
+    private weak var openInItem: NSMenuToolbarItem?
+    private weak var openInDefaultMenuItem: NSMenuItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         store = makeStore()
@@ -92,6 +96,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func wireSidebar() {
         sidebar.onSelect = { [weak self] s in self?.select(s) }
+        sidebar.onRepoSettings = { [weak self] repoID in self?.openRepoSettings(repoID: repoID) }
+        sidebar.onNewWorktree = { [weak self] repoID in self?.newWorktree(repoID: repoID) }
     }
 
     private func refreshSidebar(select id: String?) {
@@ -100,17 +106,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sidebar.reload(sections: sections, selectedWorktreeID: id)
     }
 
-    private func openRepoSettings() {
-        guard !store.state.repositories.isEmpty else {
-            presentMessage("Add a repo first (Add Repo…).")
-            return
-        }
-        let vc = RepoSettingsController(repos: store.state.repositories)
-        vc.onSave = { [weak self] id, setup, allowlist in
-            do { _ = try self?.store.updateRepository(id: id, setupScript: setup, copyAllowlist: allowlist) }
-            catch { self?.presentError(error) }
+    /// Per-repo settings, opened as a sheet from that repo in the sidebar (right-click).
+    private func openRepoSettings(repoID: String) {
+        guard let repo = store.state.repositories.first(where: { $0.id == repoID }) else { return }
+        let vc = RepoSettingsController(repo: repo)
+        vc.onSave = { [weak self] id, setup, allowlist, autoLaunch in
+            do {
+                _ = try self?.store.updateRepository(id: id, setupScript: setup,
+                                                     copyAllowlist: allowlist, autoLaunchClaude: autoLaunch)
+            } catch { self?.presentError(error) }
         }
         splitVC.presentAsSheet(vc)
+    }
+
+    /// App-wide Settings window (⌘,) — currently the default-editor picker. Reuses one
+    /// window instance across opens.
+    private func openSettings() {
+        if settingsWC == nil {
+            let vc = SettingsController(editor: preferences.defaultEditor)
+            vc.onChangeEditor = { [weak self] editor in self?.setDefaultEditor(editor) }
+            let win = NSWindow(contentViewController: vc)
+            win.title = "Settings"
+            win.styleMask = [.titled, .closable]
+            win.isReleasedWhenClosed = false
+            settingsWC = NSWindowController(window: win)
+        }
+        settingsWC?.window?.center()
+        settingsWC?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func setDefaultEditor(_ editor: Editor) {
+        preferences.defaultEditor = editor
+        do { try prefsStore.save(preferences) } catch { presentError(error) }
+        // Keep the Open-in control's label/tooltip in sync with the chosen editor.
+        openInItem?.toolTip = "Open the worktree in \(editor.name) (⌘O)"
+        openInDefaultMenuItem?.title = "Open in \(editor.name)"
     }
 
     private func addRepo() {
@@ -123,9 +154,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         catch { presentError(error) }
     }
 
-    private func newWorktree() {
-        // Add to the repo implied by the sidebar selection, else the first repo.
-        let targetRepoID = sidebar.currentRepoID()
+    private func newWorktree(repoID: String? = nil) {
+        // Add to the given repo (sidebar right-click), else the one implied by the
+        // selection, else the first repo.
+        let targetRepoID = repoID ?? sidebar.currentRepoID()
         guard let repo = store.state.repositories.first(where: { $0.id == targetRepoID })
                 ?? store.state.repositories.first else {
             presentMessage("Add a repo first (Add Repo…).")
@@ -215,7 +247,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         let settingsItem = NSMenuItem(title: "Settings…",
-                                      action: #selector(openRepoSettingsAction), keyEquivalent: ",")
+                                      action: #selector(openSettingsAction), keyEquivalent: ",")
         settingsItem.target = self
         appMenu.addItem(settingsItem)
         appMenu.addItem(.separator())
@@ -291,7 +323,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func newWorktreeAction() { newWorktree() }
     @objc private func addRepoAction() { addRepo() }
-    @objc private func openRepoSettingsAction() { openRepoSettings() }
+    @objc private func openSettingsAction() { openSettings() }
 
     @objc private func archiveSelectedAction() {
         guard let wt = selectedWorktree else { presentMessage("Select a worktree first."); return }
@@ -323,7 +355,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// NSWorkspace deep-links can return -50. Line-jump via the editor's URL scheme.
     private func openInDefaultEditor(path: String, line: Int?) {
         let editor = preferences.defaultEditor
-        if let line, let url = editorOpenURL(scheme: editor.urlScheme, path: path, line: line) {
+        if let line, !editor.urlScheme.isEmpty,
+           let url = editorOpenURL(scheme: editor.urlScheme, path: path, line: line) {
             runOpen([url.absoluteString])
         } else {
             runOpen(["-b", editor.bundleID, path])
@@ -495,6 +528,8 @@ extension AppDelegate: NSToolbarDelegate {
             openOther.target = self
             menu.addItem(openOther)
             item.menu = menu
+            openInItem = item
+            openInDefaultMenuItem = openDefault
             return item
 
         default:

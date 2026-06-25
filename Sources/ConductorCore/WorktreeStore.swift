@@ -24,12 +24,14 @@ public final class WorktreeStore {
         return repo
     }
 
-    public func updateRepository(id: String, setupScript: String, copyAllowlist: [String]) throws -> Repository {
+    public func updateRepository(id: String, setupScript: String, copyAllowlist: [String],
+                                 autoLaunchClaude: Bool = false) throws -> Repository {
         guard let idx = state.repositories.firstIndex(where: { $0.id == id }) else {
             throw WorktreeStoreError.repoNotFound(id)
         }
         state.repositories[idx].setupScript = setupScript
         state.repositories[idx].copyAllowlist = copyAllowlist
+        state.repositories[idx].autoLaunchClaude = autoLaunchClaude
         try config.save(state)
         return state.repositories[idx]
     }
