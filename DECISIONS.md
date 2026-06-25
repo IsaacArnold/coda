@@ -30,6 +30,27 @@ _Living document — updated during the `/grill-me` design session. Last updated
 | 17 | Build sequencing | **Spike SwiftTerm first** (prove: render shell, inject text, cmd+click→VS Code, `.itermcolors`, 2 instances in splits), **then a vertical slice** (create worktree → SwiftTerm surface running `claude` → archive). Breadth after. |
 | 18 | Distribution | **Build from source on each Mac** for now; escalate to Developer ID + notarization only if the work laptop blocks unsigned local builds. ⚠️ Brew-installing notarized Supacode ≠ permission to run an unsigned local build — verify Xcode + unsigned-run on the work Mac. |
 
+## Re-grill — 2026-06-25 (native shell + launch model)
+
+A step-back re-grill before theming, triggered by "it doesn't look like a Mac app" + "I don't want a bare terminal that always launches Claude." Glossary captured in `CONTEXT.md` (primary unit renamed **Session → Worktree**). These **supersede #6, refine #3/#8, and add the chrome decisions** below.
+
+| # | Decision | Choice |
+|---|----------|--------|
+| R1 | Launch model (**supersedes #6**) | **Shell-first.** Opening a worktree drops into a plain shell in the worktree; **Claude is launched on demand** via a prominent **Launch Claude ▶** action (toolbar + keybind). Claude-first auto-launch becomes a per-repo *option*, **off by default**. |
+| R2 | Surface lifecycle | **Persist surfaces.** Switching worktrees keeps each worktree's terminal **alive** (hidden), reattaching the same live PTY on return — a running Claude/shell survives switching. One live PTY per open worktree. |
+| R3 | Primary-unit naming (**refines #3**) | Rename `Session` → **`Worktree`** in code + UI. "Session" freed up to mean an actual Claude run. Scratch (worktree-less) terminals remain the escape hatch, named distinctly. |
+| R4 | Native chrome | **Native macOS menu bar** (incl. a **Worktree** menu) + **unified toolbar**: add ＋, sidebar toggle, **centre notch** (focused-worktree status), **Launch Claude ▶**, **Open in ▾**. **Source-list sidebar** grouped repo → worktree (branch glyph, selection). Modeled on Supacode's chrome. |
+| R5 | "Open in" control (**generalizes #8**) | Configurable **default app** to open the focused **worktree's directory** (Supacode's "Xcode ▾" analogue). **Global default + per-repo override later**; ▾ for one-off pick of any installed `.app` via `NSWorkspace`. **Unified with cmd+click editor target** — one notion of "my editor"; `file:line` jump is best-effort per app. |
+| R6 | Centre notch | Shows **focused-worktree status + agent-state badge** now (heuristic, from #5); **palette-capable later**. No command palette in this milestone. |
+| R7 | Settings placement | **Native Settings window (⌘,)** for app-wide/portable prefs (themes, keybinds, snippets, defaults); **per-repo settings move to a sheet opened from the repo** in the sidebar (off the split view). Matches the portable-vs-local split (#9). |
+| R8 | Agent badge scope | **Heuristic badge in MVP** (feeds sidebar rows + notch); **diff stats (`+N -M`) deferred** (needs a base-branch / recompute design). |
+
+**Milestone:** R1–R8 = the "native shell + launch model" milestone, sequenced: (1) rename Session→Worktree, (2) shell-first + Launch Claude + persist surfaces, (3) native chrome, (4) heuristic badge → sidebar + notch, (5) Settings window + per-repo sheet + Open-in default. **Theming (#11) is the very next milestone after this lands.** One persisted terminal per worktree this milestone.
+
+**Deferred to later milestones:** theming/`.itermcolors` (#11), sidebar diff stats, command palette, multi-surface splits/tabs (#4), scratch terminals (#3), snippets/keybinds, diff surface (Phase 2).
+
+**Plan & issues:** PRD = GitHub issue [#4](https://github.com/IsaacArnold/conductor/issues/4); broken into vertical-slice issues #5–#12 (all `ready-for-agent`): #5 rename → #6 source-list sidebar → #7 shell-first + Launch Claude → #8 persist surfaces (`SurfaceRegistry`) → #9 native chrome → #10 Open-in + cmd+click → #11 agent badge + notch → #12 Settings window + per-repo sheet. Start with #5. Implement one issue per fresh session via `/implement` (PRD #4 + the single issue).
+
 ## Remaining small defaults (assumed unless changed)
 
 - **Working name:** Conductor (matches repo dir; rename anytime).
