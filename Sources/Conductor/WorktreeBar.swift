@@ -14,6 +14,7 @@ final class WorktreeBar: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+        layer?.cornerRadius = 6   // rounded so the inset identity bar reads as a floating chip
         translatesAutoresizingMaskIntoConstraints = false
         heightAnchor.constraint(equalToConstant: Self.height).isActive = true
 

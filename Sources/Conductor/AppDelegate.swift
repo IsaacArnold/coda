@@ -99,9 +99,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         detail.view = NSView()
         detail.view.addSubview(worktreeBar)
         NSLayoutConstraint.activate([
-            worktreeBar.topAnchor.constraint(equalTo: detail.view.topAnchor),
-            worktreeBar.leadingAnchor.constraint(equalTo: detail.view.leadingAnchor),
-            worktreeBar.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor),
+            // Inset from the sidebar, right edge, and toolbar so the identity bar floats
+            // with breathing room rather than butting up against the window chrome.
+            worktreeBar.topAnchor.constraint(equalTo: detail.view.topAnchor, constant: 8),
+            worktreeBar.leadingAnchor.constraint(equalTo: detail.view.leadingAnchor, constant: 8),
+            // Right edge pulled in slightly more than the surface's -8 so the chip lines up with
+            // the terminal's visible content edge (SwiftTerm reserves a gutter on the right).
+            worktreeBar.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor, constant: -16),
         ])
         worktreeBar.isHidden = true
         let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebar)
@@ -279,10 +283,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             surface.view.translatesAutoresizingMaskIntoConstraints = false
             detail.view.addSubview(surface.view)
             NSLayoutConstraint.activate([
-                surface.view.topAnchor.constraint(equalTo: worktreeBar.bottomAnchor),
+                surface.view.topAnchor.constraint(equalTo: worktreeBar.bottomAnchor, constant: 8),
                 surface.view.bottomAnchor.constraint(equalTo: detail.view.bottomAnchor),
-                surface.view.leadingAnchor.constraint(equalTo: detail.view.leadingAnchor),
-                surface.view.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor),
+                // Match the identity chip's horizontal inset so the terminal aligns with the
+                // bar above it (left edge in line with the chip; right edge pulled off the window edge).
+                surface.view.leadingAnchor.constraint(equalTo: detail.view.leadingAnchor, constant: 8),
+                surface.view.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor, constant: -8),
             ])
         }
         currentSurface = surface
@@ -617,7 +623,7 @@ extension AppDelegate: NSToolbarDelegate {
             let stack = NSStackView(views: [notchIcon, notchLabel, notchBadge])
             stack.orientation = .horizontal
             stack.spacing = 6
-            stack.edgeInsets = NSEdgeInsets(top: 2, left: 6, bottom: 2, right: 8)
+            stack.edgeInsets = NSEdgeInsets(top: 3, left: 12, bottom: 3, right: 12)
             item.view = stack
             return item
 
