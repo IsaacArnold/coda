@@ -369,10 +369,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let snapshot = surfaces.handle(for: wt.id)?.outputSnapshot()
             let state = snapshot.map { agentState(fromOutput: $0) } ?? .idle
             states[wt.id] = state
-            // TEMP DEBUG: log only on state CHANGE, to confirm the working/needs-you/done transitions.
-            if agentStates[wt.id] != state {
-                let tail = String((snapshot ?? "<no surface>").suffix(160)).replacingOccurrences(of: "\n", with: "⏎")
-                FileHandle.standardError.write(Data("[agent] \(wt.title): \(agentStates[wt.id].map { "\($0)" } ?? "—") → \(state) | tail=\(tail)\n".utf8))
+            // TEMP DEBUG: log the focused worktree every poll with a long tail, to capture
+            // exactly what the WORKING frame prints (so we can match it).
+            if wt.id == selectedWorktree?.id {
+                let tail = String((snapshot ?? "<no surface>").suffix(500)).replacingOccurrences(of: "\n", with: "⏎")
+                FileHandle.standardError.write(Data("[agent] \(state) | \(tail)\n".utf8))
             }
         }
         agentStates = states
