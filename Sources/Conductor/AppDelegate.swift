@@ -160,7 +160,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 editor: preferences.defaultEditor,
                 onChangeEditor: { [weak self] editor in self?.setDefaultEditor(editor) },
                 keybindings: keybindings,
-                onChange: { [weak self] bindings in self?.applyKeybindings(bindings) })
+                onChange: { [weak self] bindings in self?.applyKeybindings(bindings) },
+                themeNames: themeStore.themeNames(),
+                activeTheme: preferences.activeTheme ?? defaultThemeName,
+                onApplyTheme: { [weak self] name in self?.setActiveTheme(named: name) },
+                onImportTheme: { [weak self] url in try? self?.themeStore.importTheme(from: url) })
             let win = NSWindow(contentViewController: tab)
             win.title = "Settings"
             win.styleMask = [.titled, .closable]
@@ -283,6 +287,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - theming
+
+    /// Switch the global terminal theme: persist the choice, reload it, re-theme
+    /// every live terminal and the chrome.
+    private func setActiveTheme(named name: String) {
+        guard let theme = themeStore.loadTheme(named: name) else { return }
+        activeTheme = theme
+        preferences.activeTheme = name
+        do { try prefsStore.save(preferences) } catch { presentError(error) }
+        applyActiveTheme()
+    }
 
     /// Push the active terminal theme to every live surface and repaint the chrome.
     private func applyActiveTheme() {
