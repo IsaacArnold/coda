@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let surfaces = SurfaceRegistry<TerminalSurface>()
     // Toolbar centre-notch: shows time + focused worktree (agent badge wired in #11).
     private let notchLabel = NSTextField(labelWithString: "No worktree")
+    private let notchIcon = NSImageView()
     private var notchTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -294,22 +295,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return f
     }()
 
-    private func timeEmoji(hour: Int) -> String {
+    // Matches Supacode's MotivationalStatusView time-of-day glyphs.
+    private func notchTimeStyle(hour: Int) -> (symbol: String, color: NSColor) {
         switch hour {
-        case 5..<12: return "🌅"
-        case 12..<17: return "☀️"
-        case 17..<21: return "🌆"
-        default: return "🌙"
+        case 6..<12: return ("sunrise.fill", .systemOrange)
+        case 12..<17: return ("sun.max.fill", .systemYellow)
+        case 17..<21: return ("sunset.fill", .systemPink)
+        default: return ("moon.stars.fill", .systemIndigo)
         }
     }
 
     private func updateNotch() {
         let now = Date()
+        let style = notchTimeStyle(hour: Calendar.current.component(.hour, from: now))
+        notchIcon.image = NSImage(systemSymbolName: style.symbol, accessibilityDescription: nil)
+        notchIcon.contentTintColor = style.color
         let time = Self.notchTimeFormatter.string(from: now).lowercased()
-        let emoji = timeEmoji(hour: Calendar.current.component(.hour, from: now))
         let focus = selectedWorktree?.title ?? "No worktree"
-        notchLabel.stringValue = "\(emoji) \(time) — \(focus)"
-        notchLabel.alignment = .center
+        notchLabel.stringValue = "\(time) — \(focus)"
         notchLabel.textColor = .secondaryLabelColor
     }
 
@@ -386,16 +389,20 @@ extension AppDelegate: NSToolbarDelegate {
             pill.wantsLayer = true
             pill.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
             pill.layer?.cornerRadius = 7
-            notchLabel.font = .systemFont(ofSize: 12)
+            notchIcon.symbolConfiguration = .init(pointSize: 12, weight: .regular)
+            notchLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
             notchLabel.lineBreakMode = .byTruncatingTail
-            notchLabel.translatesAutoresizingMaskIntoConstraints = false
-            pill.addSubview(notchLabel)
+            notchLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 340).isActive = true
+            let stack = NSStackView(views: [notchIcon, notchLabel])
+            stack.orientation = .horizontal
+            stack.spacing = 6
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            pill.addSubview(stack)
             NSLayoutConstraint.activate([
-                notchLabel.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: 12),
-                notchLabel.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -12),
-                notchLabel.topAnchor.constraint(equalTo: pill.topAnchor, constant: 4),
-                notchLabel.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: -4),
-                notchLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 360),
+                stack.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: 12),
+                stack.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -12),
+                stack.topAnchor.constraint(equalTo: pill.topAnchor, constant: 4),
+                stack.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: -4),
             ])
             item.view = pill
             return item
