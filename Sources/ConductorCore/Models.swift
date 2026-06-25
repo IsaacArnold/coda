@@ -38,8 +38,26 @@ public struct Worktree: Codable, Equatable, Identifiable {
     public var title: String
     public var branch: String
     public var worktreePath: String
-    public init(id: String, repoID: String, title: String, branch: String, worktreePath: String) {
+    /// Identity color (hex, e.g. "#4CAF50") driving the full-width bar + sidebar accent.
+    /// Chrome only — never the terminal grid. Auto-assigned at creation, manually overridable.
+    public var color: String?
+
+    public init(id: String, repoID: String, title: String, branch: String,
+                worktreePath: String, color: String? = nil) {
         self.id = id; self.repoID = repoID; self.title = title
-        self.branch = branch; self.worktreePath = worktreePath
+        self.branch = branch; self.worktreePath = worktreePath; self.color = color
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, repoID, title, branch, worktreePath, color }
+
+    // Custom decode so worktrees written before identity colors still load (color → nil).
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        repoID = try c.decode(String.self, forKey: .repoID)
+        title = try c.decode(String.self, forKey: .title)
+        branch = try c.decode(String.self, forKey: .branch)
+        worktreePath = try c.decode(String.self, forKey: .worktreePath)
+        color = try c.decodeIfPresent(String.self, forKey: .color)
     }
 }

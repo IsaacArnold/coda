@@ -34,4 +34,18 @@ final class ModelsCodableTests: XCTestCase {
         XCTAssertTrue(back.autoLaunchClaude)
         XCTAssertEqual(back, repo)
     }
+
+    func testWorktreeDecodesOldJSONWithoutColor() throws {
+        let json = #"{"id":"w1","repoID":"r1","title":"T","branch":"t","worktreePath":"/tmp/wt"}"#
+        let wt = try JSONDecoder().decode(Worktree.self, from: Data(json.utf8))
+        XCTAssertNil(wt.color)
+    }
+
+    func testWorktreeRoundTripsColor() throws {
+        var wt = Worktree(id: "w1", repoID: "r1", title: "T", branch: "t", worktreePath: "/tmp/wt")
+        wt.color = "#4CAF50"
+        let back = try JSONDecoder().decode(Worktree.self, from: JSONEncoder().encode(wt))
+        XCTAssertEqual(back.color, "#4CAF50")
+        XCTAssertEqual(back, wt)
+    }
 }

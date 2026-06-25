@@ -52,7 +52,8 @@ public final class WorktreeStore {
         _ = try copyAllowlistedFiles(from: repo.path, to: worktreePath, allowlist: repo.copyAllowlist)
 
         let worktree = Worktree(id: UUID().uuidString, repoID: repoID,
-                                title: title, branch: branch, worktreePath: worktreePath)
+                                title: title, branch: branch, worktreePath: worktreePath,
+                                color: IdentityPalette.color(at: state.worktrees.count))
         state.worktrees.append(worktree)
         try config.save(state)
         return worktree
@@ -71,6 +72,17 @@ public final class WorktreeStore {
         }
         state.worktrees.removeAll { $0.id == id }
         try config.save(state)
+    }
+
+    /// Override a worktree's identity color (chrome only). Pass nil to clear.
+    @discardableResult
+    public func setWorktreeColor(id: String, color: String?) throws -> Worktree {
+        guard let idx = state.worktrees.firstIndex(where: { $0.id == id }) else {
+            throw WorktreeStoreError.worktreeNotFound(id)
+        }
+        state.worktrees[idx].color = color
+        try config.save(state)
+        return state.worktrees[idx]
     }
 
     private func uniqueBranch(base: String, repo: Repository) -> String {
