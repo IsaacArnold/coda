@@ -14,6 +14,7 @@ final class IdentityPaletteTests: XCTestCase {
         let n = IdentityPalette.colors.count
         XCTAssertEqual(IdentityPalette.color(at: n), IdentityPalette.colors[0], "wraps around")
         XCTAssertEqual(IdentityPalette.color(at: n + 1), IdentityPalette.colors[1])
+        XCTAssertEqual(IdentityPalette.color(at: -1), IdentityPalette.colors[IdentityPalette.colors.count - 1], "negative wraps to last")
     }
 
     func testConsecutiveColorsDiffer() {
