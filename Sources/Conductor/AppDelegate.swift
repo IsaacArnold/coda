@@ -21,6 +21,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var agentStates: [String: AgentState] = [:]
     private var prefsStore: PreferencesStore!
     private var preferences = Preferences()
+    private var themeStore: ThemeStore!
+    private var activeTheme: TerminalTheme!
+    private let defaultThemeName = "Dracula"
     private var kbStore: KeybindingsStore!
     private var keybindings = Keybindings()
     private var clickMonitor: Any?
@@ -34,6 +37,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let home = FileManager.default.homeDirectoryForCurrentUser
         prefsStore = PreferencesStore(url: home.appendingPathComponent(".conductor/preferences.json"))
         preferences = prefsStore.load()
+        themeStore = ThemeStore(directory: home.appendingPathComponent(".conductor/themes"))
+        try? themeStore.seedIfEmpty(from: bundledThemeURLs())
+        activeTheme = loadActiveTheme()
         kbStore = KeybindingsStore(url: home.appendingPathComponent(".conductor/keybindings.json"))
         keybindings = kbStore.load()
         buildMenu()
@@ -61,6 +67,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// The bundled starter `.itermcolors` shipped as app resources.
+    private func bundledThemeURLs() -> [URL] {
+        Bundle.module.urls(forResourcesWithExtension: "itermcolors", subdirectory: "Themes") ?? []
+    }
+
+    /// The active terminal theme: the user's chosen one, else the default, else a hard
+    /// fallback so the app always has a theme to draw.
+    private func loadActiveTheme() -> TerminalTheme {
+        if let name = preferences.activeTheme, let theme = themeStore.loadTheme(named: name) { return theme }
+        if let theme = themeStore.loadTheme(named: defaultThemeName) { return theme }
+        // Last-resort fallback (themes dir empty / unreadable): plain black-on-white.
+        return TerminalTheme(name: "Default",
+                             ansi: Array(repeating: .black, count: 16),
+                             foreground: .black, background: .white, cursor: .black)
+    }
 
     private func makeStore() -> WorktreeStore {
         let home = FileManager.default.homeDirectoryForCurrentUser
