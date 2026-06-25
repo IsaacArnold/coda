@@ -1,22 +1,24 @@
 import AppKit
 import ConductorCore
 
-/// Sheet to edit a repository's setupScript + copyAllowlist. Choose a repo from the
-/// popup, edit the fields, then Save: it parses the allowlist, validates each path
-/// (no absolute or `..` paths), and calls `onSave(repoID, setupScript, allowlist)`.
+/// Sheet to edit one repository's settings, opened from that repo in the sidebar. Edits
+/// the setup script, copy-allowlist, and the auto-launch-Claude flag, then on Save parses
+/// the allowlist, validates each path (no absolute or `..` paths), and calls
+/// `onSave(repoID, setupScript, allowlist, autoLaunchClaude)`.
 final class RepoSettingsController: NSViewController {
-    private let repos: [Repository]
-    private let popup = NSPopUpButton()
+    private let repo: Repository
     private let setupScroll = NSScrollView()
     private let setupTextView = NSTextView(frame: NSRect(x: 0, y: 0, width: 480, height: 80))
     private let allowlistScroll = NSScrollView()
     private let allowlistTextView = NSTextView(frame: NSRect(x: 0, y: 0, width: 480, height: 120))
+    private let autoLaunchCheckbox = NSButton(checkboxWithTitle: "Auto-launch Claude in new worktrees",
+                                              target: nil, action: nil)
     private let errorLabel = NSTextField(labelWithString: "")
 
-    var onSave: ((String, String, [String]) -> Void)?
+    var onSave: ((String, String, [String], Bool) -> Void)?
 
-    init(repos: [Repository]) {
-        self.repos = repos
+    init(repo: Repository) {
+        self.repo = repo
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -24,9 +26,8 @@ final class RepoSettingsController: NSViewController {
     override func loadView() {
         let container = NSView()
 
-        popup.target = self
-        popup.action = #selector(repoChanged)
-        for r in repos { popup.addItem(withTitle: r.name) }
+        let titleLabel = NSTextField(labelWithString: repo.name)
+        titleLabel.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
 
         configureEditor(setupScroll, setupTextView)
         configureEditor(allowlistScroll, allowlistTextView)
@@ -45,7 +46,8 @@ final class RepoSettingsController: NSViewController {
         buttons.orientation = .horizontal
         buttons.spacing = 8
 
-        let stack = NSStackView(views: [popup, setupLabel, setupScroll, allowlistLabel, allowlistScroll, buttons])
+        let stack = NSStackView(views: [titleLabel, setupLabel, setupScroll,
+                                        allowlistLabel, allowlistScroll, autoLaunchCheckbox, buttons])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 8
@@ -82,29 +84,22 @@ final class RepoSettingsController: NSViewController {
         scroll.documentView = tv
     }
 
-    private var selectedRepo: Repository? {
-        let i = popup.indexOfSelectedItem
-        return (i >= 0 && i < repos.count) ? repos[i] : nil
-    }
-
     private func loadFields() {
-        guard let r = selectedRepo else { return }
-        setupTextView.string = r.setupScript
-        allowlistTextView.string = r.copyAllowlist.joined(separator: "\n")
+        setupTextView.string = repo.setupScript
+        allowlistTextView.string = repo.copyAllowlist.joined(separator: "\n")
+        autoLaunchCheckbox.state = repo.autoLaunchClaude ? .on : .off
         errorLabel.stringValue = ""
     }
 
-    @objc private func repoChanged() { loadFields() }
     @objc private func cancelAction() { dismiss(self) }
 
     @objc private func saveAction() {
-        guard let r = selectedRepo else { dismiss(self); return }
         let allowlist = parseAllowlist(allowlistTextView.string)
         if let bad = allowlist.first(where: { !isSafeRelativePath($0) }) {
             errorLabel.stringValue = "Invalid path \u{201c}\(bad)\u{201d} — must be relative, no \u{201c}..\u{201d}."
             return
         }
-        onSave?(r.id, setupTextView.string, allowlist)
+        onSave?(repo.id, setupTextView.string, allowlist, autoLaunchCheckbox.state == .on)
         dismiss(self)
     }
 }

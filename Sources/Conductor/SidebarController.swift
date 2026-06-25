@@ -56,6 +56,13 @@ final class SidebarController: NSViewController {
     /// archive, settings) now live in the native menu bar and toolbar.
     var onSelect: ((Worktree?) -> Void)?
 
+    /// Right-clicking a repo (or one of its worktrees) offers per-repo actions, keyed by
+    /// the repo's id: open its settings sheet, or add a worktree to it.
+    var onRepoSettings: ((String) -> Void)?
+    var onNewWorktree: ((String) -> Void)?
+
+    private let rowMenu = NSMenu()
+
     override func loadView() {
         let column = NSTableColumn(identifier: .init("title"))
         outline.addTableColumn(column)
@@ -66,10 +73,31 @@ final class SidebarController: NSViewController {
         outline.indentationPerLevel = 14
         outline.dataSource = self
         outline.delegate = self
+        rowMenu.delegate = self
+        outline.menu = rowMenu
         scroll.documentView = outline
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
         view = scroll
+    }
+
+    /// The repo the right-clicked row belongs to (a repo header, or a worktree's parent repo).
+    private func clickedRepoID() -> String? {
+        let row = outline.clickedRow
+        guard row >= 0 else { return nil }
+        switch outline.item(atRow: row) {
+        case let repo as RepoNode: return repo.repository.id
+        case let wt as WorktreeNode: return wt.worktree.repoID
+        default: return nil
+        }
+    }
+
+    @objc private func contextRepoSettings(_ sender: NSMenuItem) {
+        (sender.representedObject as? String).map { onRepoSettings?($0) }
+    }
+
+    @objc private func contextNewWorktree(_ sender: NSMenuItem) {
+        (sender.representedObject as? String).map { onNewWorktree?($0) }
     }
 
     func reload(sections: [RepositorySection], selectedWorktreeID: String?) {
@@ -104,6 +132,23 @@ final class SidebarController: NSViewController {
         return nil
     }
 
+}
+
+extension SidebarController: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        guard let repoID = clickedRepoID() else { return }
+        let settings = NSMenuItem(title: "Repository Settings…",
+                                  action: #selector(contextRepoSettings(_:)), keyEquivalent: "")
+        settings.target = self
+        settings.representedObject = repoID
+        menu.addItem(settings)
+        let newWorktree = NSMenuItem(title: "New Worktree",
+                                     action: #selector(contextNewWorktree(_:)), keyEquivalent: "")
+        newWorktree.target = self
+        newWorktree.representedObject = repoID
+        menu.addItem(newWorktree)
+    }
 }
 
 extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
