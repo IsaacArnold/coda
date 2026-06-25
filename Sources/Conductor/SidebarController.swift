@@ -23,25 +23,11 @@ final class SidebarController: NSViewController {
     private let scroll = NSScrollView()
     private var repoNodes: [RepoNode] = []
 
-    var onNew: (() -> Void)?
-    var onAddRepo: (() -> Void)?
+    /// Selection drives the detail surface; the primary actions (add, new, launch,
+    /// archive, settings) now live in the native menu bar and toolbar.
     var onSelect: ((Worktree?) -> Void)?
-    var onArchive: ((Worktree) -> Void)?
-    var onRepoSettings: (() -> Void)?
 
     override func loadView() {
-        let container = NSView()
-
-        let addRepo = NSButton(title: "Add Repo…", target: self, action: #selector(addRepoAction))
-        let settings = NSButton(title: "Settings…", target: self, action: #selector(settingsAction))
-        let new = NSButton(title: "New Worktree", target: self, action: #selector(newAction))
-        let archive = NSButton(title: "Archive", target: self, action: #selector(archiveAction))
-        let bar = NSStackView(views: [addRepo, settings, new, archive])
-        bar.orientation = .horizontal
-        bar.spacing = 8
-        bar.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
-        bar.translatesAutoresizingMaskIntoConstraints = false
-
         let column = NSTableColumn(identifier: .init("title"))
         outline.addTableColumn(column)
         outline.outlineTableColumn = column
@@ -53,20 +39,8 @@ final class SidebarController: NSViewController {
         outline.delegate = self
         scroll.documentView = outline
         scroll.hasVerticalScroller = true
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-
-        container.addSubview(bar)
-        container.addSubview(scroll)
-        NSLayoutConstraint.activate([
-            bar.topAnchor.constraint(equalTo: container.topAnchor),
-            bar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            bar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: bar.bottomAnchor),
-            scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            scroll.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-        ])
-        view = container
+        scroll.drawsBackground = false
+        view = scroll
     }
 
     func reload(sections: [RepositorySection], selectedWorktreeID: String?) {
@@ -101,14 +75,6 @@ final class SidebarController: NSViewController {
         return nil
     }
 
-    @objc private func addRepoAction() { onAddRepo?() }
-    @objc private func settingsAction() { onRepoSettings?() }
-    @objc private func newAction() { onNew?() }
-    @objc private func archiveAction() {
-        if let wt = outline.item(atRow: outline.selectedRow) as? WorktreeNode {
-            onArchive?(wt.worktree)
-        }
-    }
 }
 
 extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
