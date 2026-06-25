@@ -123,15 +123,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         splitVC.presentAsSheet(vc)
     }
 
-    /// App-wide Settings window (⌘,) — currently the default-editor picker. Reuses one
-    /// window instance across opens.
     private func openSettings() {
         if settingsWC == nil {
-            let vc = SettingsController(editor: preferences.defaultEditor)
-            vc.onChangeEditor = { [weak self] editor in self?.setDefaultEditor(editor) }
-            let win = NSWindow(contentViewController: vc)
+            let tab = SettingsTabController(
+                editor: preferences.defaultEditor,
+                onChangeEditor: { [weak self] editor in self?.setDefaultEditor(editor) },
+                keybindings: keybindings,
+                onChange: { [weak self] bindings in self?.applyKeybindings(bindings) })
+            let win = NSWindow(contentViewController: tab)
             win.title = "Settings"
             win.styleMask = [.titled, .closable]
+            win.toolbarStyle = .preference
             win.isReleasedWhenClosed = false
             settingsWC = NSWindowController(window: win)
         }
