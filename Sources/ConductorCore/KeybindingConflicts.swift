@@ -1,5 +1,3 @@
-import Foundation
-
 public struct ReservedChord: Equatable, Sendable {
     public let chord: KeyChord
     public let label: String
@@ -31,7 +29,9 @@ public extension Keybindings {
         ReservedChord(chord: KeyChord("a", command: true), label: "Select All"),
         ReservedChord(chord: KeyChord("q", command: true), label: "Quit"),
         ReservedChord(chord: KeyChord("h", command: true), label: "Hide"),
-        ReservedChord(chord: KeyChord("w", command: true), label: "Close"),
+        ReservedChord(chord: KeyChord("m", command: true), label: "Minimize"),
+        ReservedChord(chord: KeyChord("z", command: true), label: "Undo"),
+        ReservedChord(chord: KeyChord("z", command: true, shift: true), label: "Redo"),
     ]
 }
 

@@ -27,6 +27,9 @@ extension KeyChord {
         if f.contains(.option)  { m.insert(.option) }
         if f.contains(.control) { m.insert(.control) }
         guard !m.isEmpty else { return nil }
+        // A shifted symbol/number (e.g. ⇧1 → "!") can't match as a menu keyEquivalent; only
+        // shifted letters (⇧N → "n"+shift) are valid. Reject the rest so the recorder waits.
+        if m.contains(.shift), key.count == 1, let c = key.first, !c.isLetter { return nil }
         self.init(key: key, modifiers: m)
     }
 }

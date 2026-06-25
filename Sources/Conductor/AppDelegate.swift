@@ -314,9 +314,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let viewItem = NSMenuItem()
         mainMenu.addItem(viewItem)
         let viewMenu = NSMenu(title: "View")
-        addItem(to: viewMenu, "Toggle Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)),
-                command: .toggleSidebar)
-        viewMenu.items.last?.target = nil
+        let sidebarItem = addItem(to: viewMenu, "Toggle Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)),
+                                  command: .toggleSidebar)
+        sidebarItem.target = nil
         viewItem.submenu = viewMenu
 
         // Worktree menu — the primary actions, mirroring the toolbar
@@ -349,16 +349,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
         item.target = self
         apply(command, to: item)
-        menu.addItem(item)
-        return item
-    }
-
-    @discardableResult
-    private func addItem(to menu: NSMenu, _ title: String, _ action: Selector, _ key: String,
-                         modifiers: NSEvent.ModifierFlags = .command) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
-        item.keyEquivalentModifierMask = modifiers
-        item.target = self
         menu.addItem(item)
         return item
     }
