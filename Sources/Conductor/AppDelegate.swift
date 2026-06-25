@@ -33,11 +33,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.updateNotch()
         }
-        // iTerm-style ⌘+click to open a path:line in the editor, routed to the focused surface.
-        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+        // iTerm-style ⌘+click to open a path:line in the editor, routed to the focused
+        // surface. We swallow BOTH the down and up: SwiftTerm activates its own link
+        // handler on mouseUp (default NSWorkspace.open → a -50 dialog for non-URL
+        // tokens), so consuming the up keeps our editor open as the only handler.
+        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
             guard let self, event.modifierFlags.contains(.command), event.window === self.window,
-                  let surface = self.currentSurface else { return event }
-            return surface.handleCommandClick(event) ? nil : event
+                  let surface = self.currentSurface, surface.containsClick(event) else { return event }
+            if event.type == .leftMouseDown { surface.handleCommandClick(event) }
+            return nil
         }
     }
 

@@ -45,6 +45,11 @@ final class TerminalSurface: NSViewController {
         terminal?.handleCommandClick(event) ?? false
     }
 
+    /// Whether a ⌘+click event lands inside this surface's visible terminal.
+    func containsClick(_ event: NSEvent) -> Bool {
+        terminal?.containsClick(event) ?? false
+    }
+
     override func viewDidLayout() {
         super.viewDidLayout()
         // Start the PTY only once bounds are known (viewDidAppear can fire at zero size).

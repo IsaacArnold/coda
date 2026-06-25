@@ -15,13 +15,20 @@ final class ClickableTerminalView: LocalProcessTerminalView {
     /// Opens a resolved file (absolute path) at an optional line in the default editor.
     var onOpenFile: ((String, Int?) -> Void)?
 
-    /// Called by the app's ⌘+click monitor (SwiftTerm's `mouseDown` is `public` but
-    /// not `open`, so we can't override it). Returns true if it opened something.
+    /// Whether `event`'s location falls inside this (visible) terminal. Used to gate
+    /// the app's ⌘+click monitor so it only acts on the focused surface.
+    func containsClick(_ event: NSEvent) -> Bool {
+        guard !isHiddenOrHasHiddenAncestor, window != nil else { return false }
+        return bounds.contains(convert(event.locationInWindow, from: nil))
+    }
+
+    /// Called by the app's ⌘+click monitor (SwiftTerm's `mouseDown`/`requestOpenLink`
+    /// are `public` but not `open`, so we can't override them). Returns true if it
+    /// opened something.
     @discardableResult
     func handleCommandClick(_ event: NSEvent) -> Bool {
-        guard !isHiddenOrHasHiddenAncestor, window != nil else { return false }
+        guard containsClick(event) else { return false }
         let point = convert(event.locationInWindow, from: nil)
-        guard bounds.contains(point) else { return false }
 
         let term = getTerminal()
         let cols = term.cols, rows = term.rows
