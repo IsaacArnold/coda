@@ -31,9 +31,18 @@ final class TerminalThemeTests: XCTestCase {
     }
 
     func testNameComesFromFilename() throws {
-        let url = try writeITermColors(name: "Dracula")
+        func comp(_ v: Double) -> [String: Any] { ["Red Component": v, "Green Component": v, "Blue Component": v] }
+        var dict: [String: Any] = [
+            "Foreground Color": comp(1), "Background Color": comp(0), "Cursor Color": comp(0.5),
+        ]
+        for i in 0..<16 { dict["Ansi \(i) Color"] = comp(0) }
+        let data = try PropertyListSerialization.data(fromPropertyList: dict, format: .xml, options: 0)
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("Dracula.itermcolors")
+        try data.write(to: url)
         let theme = try TerminalTheme.load(from: url)
-        XCTAssertTrue(theme.name.hasPrefix("Dracula"))
+        XCTAssertEqual(theme.name, "Dracula")
     }
 
     func testThrowsOnNonPlist() throws {
@@ -46,6 +55,17 @@ final class TerminalThemeTests: XCTestCase {
         let dict: [String: Any] = ["Foreground Color": ["Red Component": 1.0]]  // missing the rest
         let data = try PropertyListSerialization.data(fromPropertyList: dict, format: .xml, options: 0)
         let url = URL(fileURLWithPath: NSTemporaryDirectory() + "partial-" + UUID().uuidString + ".itermcolors")
+        try data.write(to: url)
+        XCTAssertThrowsError(try TerminalTheme.load(from: url))
+    }
+
+    func testThrowsWhenTopLevelKeyIsAbsent() throws {
+        // A plist missing "Background Color" entirely (not just its components).
+        func comp(_ v: Double) -> [String: Any] { ["Red Component": v, "Green Component": v, "Blue Component": v] }
+        var dict: [String: Any] = ["Foreground Color": comp(1), "Cursor Color": comp(0.5)]
+        for i in 0..<16 { dict["Ansi \(i) Color"] = comp(0) }
+        let data = try PropertyListSerialization.data(fromPropertyList: dict, format: .xml, options: 0)
+        let url = URL(fileURLWithPath: NSTemporaryDirectory() + "nobg-" + UUID().uuidString + ".itermcolors")
         try data.write(to: url)
         XCTAssertThrowsError(try TerminalTheme.load(from: url))
     }

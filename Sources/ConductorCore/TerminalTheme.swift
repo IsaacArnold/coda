@@ -28,8 +28,13 @@ public struct TerminalTheme: Equatable {
 
     public static func load(from url: URL) throws -> TerminalTheme {
         let data = try Data(contentsOf: url)
-        guard let plist = try? PropertyListSerialization.propertyList(from: data, format: nil),
-              let dict = plist as? [String: Any] else {
+        let plist: Any
+        do {
+            plist = try PropertyListSerialization.propertyList(from: data, format: nil)
+        } catch {
+            throw ThemeError.notAPlist(url.lastPathComponent)
+        }
+        guard let dict = plist as? [String: Any] else {
             throw ThemeError.notAPlist(url.lastPathComponent)
         }
 
