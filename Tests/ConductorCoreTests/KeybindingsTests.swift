@@ -72,3 +72,21 @@ final class KeybindingsResolutionTests: XCTestCase {
         XCTAssertEqual(bindings.effectiveChord(for: .newWorktree), KeyChord("n", command: true))
     }
 }
+
+final class NormalizedKeyEquivalentTests: XCTestCase {
+    func testMapsDeleteToBackspaceEquivalent() {
+        XCTAssertEqual(normalizedKeyEquivalent(charactersIgnoringModifiers: "\u{7f}"), "\u{8}")
+    }
+    func testLowercasesOrdinaryKeys() {
+        XCTAssertEqual(normalizedKeyEquivalent(charactersIgnoringModifiers: "A"), "a")
+        XCTAssertEqual(normalizedKeyEquivalent(charactersIgnoringModifiers: ","), ",")
+    }
+    func testPassesThroughArrowsAndSpace() {
+        XCTAssertEqual(normalizedKeyEquivalent(charactersIgnoringModifiers: " "), " ")
+        XCTAssertEqual(normalizedKeyEquivalent(charactersIgnoringModifiers: "\u{f702}"), "\u{f702}")
+    }
+    func testRejectsEmptyAndControlChars() {
+        XCTAssertNil(normalizedKeyEquivalent(charactersIgnoringModifiers: ""))
+        XCTAssertNil(normalizedKeyEquivalent(charactersIgnoringModifiers: "\u{1}"))
+    }
+}

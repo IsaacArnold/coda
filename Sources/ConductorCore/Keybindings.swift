@@ -165,3 +165,21 @@ public struct Keybindings: Codable, Equatable, Sendable {
     public mutating func reset(_ command: ShortcutCommand) { overrides[command.rawValue] = nil }
     public mutating func resetAll() { overrides = [:] }
 }
+
+/// Maps a recorded event's `charactersIgnoringModifiers` to the keyEquivalent form an
+/// NSMenuItem expects, or nil for keys we don't allow binding (empty / control chars).
+public func normalizedKeyEquivalent(charactersIgnoringModifiers chars: String) -> String? {
+    guard let first = chars.first else { return nil }
+    switch first {
+    case "\u{7f}", "\u{8}": return "\u{8}"     // Delete → backspace (⌫)
+    case "\r", "\u{3}": return "\r"            // Return / Enter
+    case "\u{1b}": return "\u{1b}"             // Escape
+    case " ": return " "
+    case "\u{f700}", "\u{f701}", "\u{f702}", "\u{f703}": return String(first)  // arrows
+    default:
+        let lower = String(first).lowercased()
+        guard lower.unicodeScalars.count == 1,
+              let scalar = lower.unicodeScalars.first, scalar.value >= 0x20 else { return nil }
+        return lower
+    }
+}
