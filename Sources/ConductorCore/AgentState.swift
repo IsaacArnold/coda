@@ -18,18 +18,19 @@ public enum AgentState: String, Equatable {
 /// Priority: a pending prompt (needs-you) wins over a lingering spinner, then a
 /// working indicator, then an idle-but-open Claude (done), else a plain shell (idle).
 public func agentState(fromOutput output: String) -> AgentState {
-    let collapsed = output.lowercased().filter { !$0.isWhitespace }
+    let lower = output.lowercased()
+    let collapsed = lower.filter { !$0.isWhitespace }
 
     // 🔴 Permission/approval prompt — the user's turn. Keyed off the numbered approve
     // option ("1. Yes") that only the selection UI prints, NOT prose like "do you want…".
     if collapsed.contains("1.yes") {
         return .needsYou
     }
-    // 🟡 Working — the gerund spinner's elapsed timer, e.g. "(4s ·" / "(12s)" (collapses
-    // to "(4s·" / "(12s)"). This is present throughout active work in every Claude frame,
-    // whereas "(esc to interrupt)" isn't shown in newer versions. The `[·)]` suffix keeps
-    // prose like "(2 seconds)" from matching. Also accept the interrupt hint when shown.
-    if collapsed.range(of: #"\(\d+s[·)]"#, options: .regularExpression) != nil
+    // 🟡 Working — the gerund spinner's elapsed timer, e.g. "(4s · …)" / "(12s)". Present
+    // throughout active work in every Claude frame (newer versions drop "esc to interrupt").
+    // Matched on the original text with a trailing word boundary so it's independent of the
+    // separator glyph and rejects prose like "(2 seconds)"; the interrupt hint still counts.
+    if lower.range(of: #"\(\d+s\b"#, options: .regularExpression) != nil
         || collapsed.contains("esctointerrupt") {
         return .working
     }

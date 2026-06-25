@@ -65,6 +65,17 @@ final class AgentStateTests: XCTestCase {
         XCTAssertEqual(agentState(fromOutput: "✻Blanching…(6s·↑222tokens)\nctx:3%"), .working)
     }
 
+    func testWorkingFromExactCapturedFrames() {
+        // Exact frames captured from a live session (various separators/spacing).
+        for frame in [
+            "✽ Blanching… (10s · ↑ 254 tokens)\nctx: 3%",
+            "✻Blanching…(7s·↑233tokens)\nctx:3%",
+            "· Blanching… (2s · thinking)\n← for agents\nctx: --%",
+        ] {
+            XCTAssertEqual(agentState(fromOutput: frame), .working, "frame: \(frame)")
+        }
+    }
+
     func testPlainProseInSecondsIsNotMistakenForWorking() {
         // "(2 seconds)" collapses to "(2seconds)" — must NOT match the spinner timer.
         XCTAssertEqual(agentState(fromOutput: "It ran in (2 seconds).\nOpus (1M context) | ctx: 3%"), .done)
