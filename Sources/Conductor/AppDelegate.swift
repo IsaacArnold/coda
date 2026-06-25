@@ -21,6 +21,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var agentStates: [String: AgentState] = [:]
     private var prefsStore: PreferencesStore!
     private var preferences = Preferences()
+    private var kbStore: KeybindingsStore!
+    private var keybindings = Keybindings()
     private var clickMonitor: Any?
     private var settingsWC: NSWindowController?
     // Open-in toolbar item refs, so its label/tooltip track the chosen default editor.
@@ -32,6 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let home = FileManager.default.homeDirectoryForCurrentUser
         prefsStore = PreferencesStore(url: home.appendingPathComponent(".conductor/preferences.json"))
         preferences = prefsStore.load()
+        kbStore = KeybindingsStore(url: home.appendingPathComponent(".conductor/keybindings.json"))
+        keybindings = kbStore.load()
         buildMenu()
         buildWindow()
         wireSidebar()
@@ -119,15 +123,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         splitVC.presentAsSheet(vc)
     }
 
-    /// App-wide Settings window (⌘,) — currently the default-editor picker. Reuses one
-    /// window instance across opens.
     private func openSettings() {
         if settingsWC == nil {
-            let vc = SettingsController(editor: preferences.defaultEditor)
-            vc.onChangeEditor = { [weak self] editor in self?.setDefaultEditor(editor) }
-            let win = NSWindow(contentViewController: vc)
+            let tab = SettingsTabController(
+                editor: preferences.defaultEditor,
+                onChangeEditor: { [weak self] editor in self?.setDefaultEditor(editor) },
+                keybindings: keybindings,
+                onChange: { [weak self] bindings in self?.applyKeybindings(bindings) })
+            let win = NSWindow(contentViewController: tab)
             win.title = "Settings"
             win.styleMask = [.titled, .closable]
+            win.toolbarStyle = .preference
             win.isReleasedWhenClosed = false
             settingsWC = NSWindowController(window: win)
         }
@@ -244,6 +250,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - native menu bar
 
+    /// Set an NSMenuItem's key equivalent from the command's effective chord (none if disabled).
+    private func apply(_ command: ShortcutCommand, to item: NSMenuItem) {
+        if let chord = keybindings.effectiveChord(for: command) {
+            item.keyEquivalent = chord.key
+            item.keyEquivalentModifierMask = chord.modifiers.eventModifierFlags
+        } else {
+            item.keyEquivalent = ""
+            item.keyEquivalentModifierMask = []
+        }
+    }
+
+    /// Persist new bindings and rebuild the menu so shortcuts update live.
+    func applyKeybindings(_ bindings: Keybindings) {
+        keybindings = bindings
+        do { try kbStore.save(bindings) } catch { presentError(error) }
+        rebuildMenu()
+    }
+
+    private func rebuildMenu() { buildMenu() }
+
     private func buildMenu() {
         let mainMenu = NSMenu()
 
@@ -254,10 +280,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appMenu.addItem(withTitle: "About Conductor",
                         action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        let settingsItem = NSMenuItem(title: "Settings…",
-                                      action: #selector(openSettingsAction), keyEquivalent: ",")
-        settingsItem.target = self
-        appMenu.addItem(settingsItem)
+        let settingsItem = addItem(to: appMenu, "Settings…", #selector(openSettingsAction),
+                                   command: .openSettings)
+        _ = settingsItem
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Conductor",
                         action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
@@ -269,7 +294,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let fileItem = NSMenuItem()
         mainMenu.addItem(fileItem)
         let fileMenu = NSMenu(title: "File")
-        addItem(to: fileMenu, "Add Repository…", #selector(addRepoAction), "n", modifiers: [.command, .shift])
+        addItem(to: fileMenu, "Add Repository…", #selector(addRepoAction), command: .addRepository)
         fileItem.submenu = fileMenu
 
         // Edit menu — standard text editing (terminal copy/paste, etc.)
@@ -289,22 +314,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let viewItem = NSMenuItem()
         mainMenu.addItem(viewItem)
         let viewMenu = NSMenu(title: "View")
-        viewMenu.addItem(withTitle: "Toggle Sidebar",
-                         action: #selector(NSSplitViewController.toggleSidebar(_:)), keyEquivalent: "s")
-            .keyEquivalentModifierMask = [.command, .control]
+        let sidebarItem = addItem(to: viewMenu, "Toggle Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)),
+                                  command: .toggleSidebar)
+        sidebarItem.target = nil
         viewItem.submenu = viewMenu
 
         // Worktree menu — the primary actions, mirroring the toolbar
         let wtItem = NSMenuItem()
         mainMenu.addItem(wtItem)
         let wtMenu = NSMenu(title: "Worktree")
-        addItem(to: wtMenu, "New Worktree", #selector(newWorktreeAction), "n")
-        addItem(to: wtMenu, "Launch Claude", #selector(launchClaudeAction), "r")
-        addItem(to: wtMenu, "Open in Editor", #selector(openInAction), "o")
-        addItem(to: wtMenu, "Reveal in Finder", #selector(revealInFinderAction), "r",
-                modifiers: [.command, .option])
+        addItem(to: wtMenu, "New Worktree", #selector(newWorktreeAction), command: .newWorktree)
+        addItem(to: wtMenu, "Launch Claude", #selector(launchClaudeAction), command: .launchClaude)
+        addItem(to: wtMenu, "Open in Editor", #selector(openInAction), command: .openInEditor)
+        addItem(to: wtMenu, "Reveal in Finder", #selector(revealInFinderAction), command: .revealInFinder)
         wtMenu.addItem(.separator())
-        addItem(to: wtMenu, "Archive Worktree", #selector(archiveSelectedAction), "\u{8}") // ⌘⌫
+        addItem(to: wtMenu, "Archive Worktree", #selector(archiveSelectedAction), command: .archiveWorktree)
         wtItem.submenu = wtMenu
 
         // Window menu
@@ -320,11 +344,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @discardableResult
-    private func addItem(to menu: NSMenu, _ title: String, _ action: Selector, _ key: String,
-                         modifiers: NSEvent.ModifierFlags = .command) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
-        item.keyEquivalentModifierMask = modifiers
+    private func addItem(to menu: NSMenu, _ title: String, _ action: Selector,
+                         command: ShortcutCommand) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
         item.target = self
+        apply(command, to: item)
         menu.addItem(item)
         return item
     }

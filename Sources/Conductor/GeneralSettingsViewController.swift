@@ -6,7 +6,7 @@ import ConductorCore
 /// The picker offers a curated list of editors with known URL schemes, plus "Other…" to
 /// pick any installed app (bundle-id open only — no line-jump scheme). Edits are reported
 /// via `onChangeEditor`; the app persists them to `PreferencesStore`.
-final class SettingsController: NSViewController {
+final class GeneralSettingsViewController: NSViewController {
     private let editorPopup = NSPopUpButton()
     private var editor: Editor
 
