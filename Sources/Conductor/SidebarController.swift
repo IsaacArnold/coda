@@ -97,19 +97,25 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         if let repo = item as? RepoNode {
-            let cell = makeCell(identifier: "repo", symbol: "folder")
+            // Repo rows are plain secondary-gray section headers (no icon), à la Supacode.
+            let cell = makeCell(identifier: "repo", symbol: nil)
             cell.textField?.stringValue = repo.repository.name
-            cell.textField?.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+            cell.textField?.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+            cell.textField?.textColor = .secondaryLabelColor
             return cell
         }
         if let wt = item as? WorktreeNode {
-            let cell = makeCell(identifier: "worktree", symbol: "arrow.triangle.branch")
+            let cell = makeCell(identifier: "worktree", symbol: Self.branchSymbol)
             cell.textField?.stringValue = "\(wt.worktree.title)  [\(wt.worktree.branch)]"
             cell.textField?.font = .systemFont(ofSize: NSFont.systemFontSize)
+            cell.textField?.textColor = .labelColor
             return cell
         }
         return nil
     }
+
+    /// Supacode's git-branch glyph; falls back to the older symbol on pre-macOS 15.
+    private static let branchSymbol = "arrow.trianglehead.branch"
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
         switch outline.item(atRow: outline.selectedRow) {
@@ -118,30 +124,42 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
     }
 
-    private func makeCell(identifier: String, symbol: String) -> NSTableCellView {
+    /// Build (or reuse) a cell. `symbol == nil` yields a text-only row (section
+    /// header); otherwise an SF Symbol icon precedes the label.
+    private func makeCell(identifier: String, symbol: String?) -> NSTableCellView {
         let id = NSUserInterfaceItemIdentifier(identifier)
         if let reused = outline.makeView(withIdentifier: id, owner: self) as? NSTableCellView {
             return reused
         }
         let cell = NSTableCellView()
-        let image = NSImageView()
-        image.translatesAutoresizingMaskIntoConstraints = false
-        image.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        image.contentTintColor = .secondaryLabelColor
         let tf = NSTextField(labelWithString: "")
         tf.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(image)
         cell.addSubview(tf)
-        cell.imageView = image
         cell.textField = tf
-        NSLayoutConstraint.activate([
-            image.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
-            image.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            image.widthAnchor.constraint(equalToConstant: 16),
-            tf.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 6),
-            tf.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
-            tf.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-        ])
+
+        if let symbol {
+            let image = NSImageView()
+            image.translatesAutoresizingMaskIntoConstraints = false
+            image.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+                ?? NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: nil)
+            image.contentTintColor = .secondaryLabelColor
+            cell.addSubview(image)
+            cell.imageView = image
+            NSLayoutConstraint.activate([
+                image.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
+                image.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                image.widthAnchor.constraint(equalToConstant: 16),
+                tf.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 6),
+                tf.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
+                tf.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            ])
+        } else {
+            NSLayoutConstraint.activate([
+                tf.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
+                tf.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
+                tf.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            ])
+        }
         cell.identifier = id
         return cell
     }
