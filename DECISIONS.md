@@ -49,6 +49,8 @@ A step-back re-grill before theming, triggered by "it doesn't look like a Mac ap
 
 **Deferred to later milestones:** theming/`.itermcolors` (#11), sidebar diff stats, command palette, multi-surface splits/tabs (#4), scratch terminals (#3), snippets/keybinds, diff surface (Phase 2).
 
+**Plan & issues:** PRD = GitHub issue [#4](https://github.com/IsaacArnold/conductor/issues/4); broken into vertical-slice issues #5–#12 (all `ready-for-agent`): #5 rename → #6 source-list sidebar → #7 shell-first + Launch Claude → #8 persist surfaces (`SurfaceRegistry`) → #9 native chrome → #10 Open-in + cmd+click → #11 agent badge + notch → #12 Settings window + per-repo sheet. Start with #5. Implement one issue per fresh session via `/implement` (PRD #4 + the single issue).
+
 ## Remaining small defaults (assumed unless changed)
 
 - **Working name:** Conductor (matches repo dir; rename anytime).
