@@ -106,4 +106,31 @@ final class WorktreeStoreTests: XCTestCase {
         XCTAssertEqual(a.branch, "same")
         XCTAssertEqual(b.branch, "same")
     }
+
+    func testCreateWorktreeAutoAssignsFirstPaletteColor() throws {
+        let repo = try makeTempRepo()
+        let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: repo)
+        let wt = try store.createWorktree(repoID: r.id, title: "First")
+        XCTAssertEqual(wt.color, IdentityPalette.color(at: 0))
+    }
+
+    func testSecondWorktreeGetsNextPaletteColor() throws {
+        let repo = try makeTempRepo()
+        let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: repo)
+        _ = try store.createWorktree(repoID: r.id, title: "First")
+        let second = try store.createWorktree(repoID: r.id, title: "Second")
+        XCTAssertEqual(second.color, IdentityPalette.color(at: 1))
+    }
+
+    func testSetWorktreeColorPersists() throws {
+        let repo = try makeTempRepo()
+        let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: repo)
+        let wt = try store.createWorktree(repoID: r.id, title: "First")
+        _ = try store.setWorktreeColor(id: wt.id, color: "#E91E63")
+        // Persisted to disk: a fresh load of the same config sees the override.
+        XCTAssertEqual(cfg.load().worktrees.first(where: { $0.id == wt.id })?.color, "#E91E63")
+    }
 }

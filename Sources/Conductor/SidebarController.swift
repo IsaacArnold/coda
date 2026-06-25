@@ -42,6 +42,12 @@ private final class WorktreeCellView: NSTableCellView {
             badge.isHidden = true
         }
     }
+
+    /// Tint the branch glyph with the worktree's identity color (chrome-only signal),
+    /// falling back to the chrome glyph tint when the worktree has no color.
+    func applyIdentityColor(_ identity: NSColor?, glyphTint: NSColor?) {
+        imageView?.contentTintColor = identity ?? glyphTint ?? .secondaryLabelColor
+    }
 }
 
 /// A source-list sidebar: repositories as header rows with their worktrees nested
@@ -51,6 +57,7 @@ final class SidebarController: NSViewController {
     private let scroll = NSScrollView()
     private var repoNodes: [RepoNode] = []
     private var agentStates: [String: AgentState] = [:]
+    private var chrome: ChromeTheme?
 
     /// Selection drives the detail surface; the primary actions (add, new, launch,
     /// archive, settings) now live in the native menu bar and toolbar.
@@ -60,6 +67,9 @@ final class SidebarController: NSViewController {
     /// the repo's id: open its settings sheet, or add a worktree to it.
     var onRepoSettings: ((String) -> Void)?
     var onNewWorktree: ((String) -> Void)?
+
+    /// Right-click a worktree → pick a palette color for its identity bar/accent.
+    var onSetWorktreeColor: ((String, String) -> Void)?
 
     private let rowMenu = NSMenu()
 
@@ -92,6 +102,19 @@ final class SidebarController: NSViewController {
         }
     }
 
+    /// The worktree id of the right-clicked row, or nil if a repo header was clicked.
+    private func clickedWorktreeID() -> String? {
+        let row = outline.clickedRow
+        guard row >= 0, let wt = outline.item(atRow: row) as? WorktreeNode else { return nil }
+        return wt.worktree.id
+    }
+
+    @objc private func contextSetColor(_ sender: NSMenuItem) {
+        guard let info = sender.representedObject as? [String: String],
+              let id = info["id"], let hex = info["hex"] else { return }
+        onSetWorktreeColor?(id, hex)
+    }
+
     @objc private func contextRepoSettings(_ sender: NSMenuItem) {
         (sender.representedObject as? String).map { onRepoSettings?($0) }
     }
@@ -115,6 +138,13 @@ final class SidebarController: NSViewController {
         }
     }
 
+    /// Repaint chrome-derived colors (header/glyph tints). Triggers a reload so cells
+    /// pick up the new tints. Identity-color swatches come from each worktree's own color.
+    func applyChrome(_ chrome: ChromeTheme) {
+        self.chrome = chrome
+        outline.reloadData()
+    }
+
     /// The repository a new worktree should be added to: the selected worktree's
     /// repo, or a directly selected repo, falling back to the first repository.
     func currentRepoID() -> String? {
@@ -130,6 +160,17 @@ final class SidebarController: NSViewController {
             if let match = repo.children.first(where: { $0.worktree.id == id }) { return match }
         }
         return nil
+    }
+
+    /// A small filled square for a color menu item.
+    private static func swatchImage(_ color: NSColor) -> NSImage {
+        let size = NSSize(width: 12, height: 12)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        color.setFill()
+        NSBezierPath(roundedRect: NSRect(origin: .zero, size: size), xRadius: 2, yRadius: 2).fill()
+        image.unlockFocus()
+        return image
     }
 
 }
@@ -148,6 +189,23 @@ extension SidebarController: NSMenuDelegate {
         newWorktree.target = self
         newWorktree.representedObject = repoID
         menu.addItem(newWorktree)
+
+        if let worktreeID = clickedWorktreeID() {
+            menu.addItem(.separator())
+            let colorItem = NSMenuItem(title: "Set Color", action: nil, keyEquivalent: "")
+            let colorMenu = NSMenu()
+            for hex in IdentityPalette.colors {
+                let swatch = NSMenuItem(title: hex, action: #selector(contextSetColor(_:)), keyEquivalent: "")
+                swatch.target = self
+                swatch.representedObject = ["id": worktreeID, "hex": hex]
+                if let color = NSColor(hex: hex) {
+                    swatch.image = Self.swatchImage(color)
+                }
+                colorMenu.addItem(swatch)
+            }
+            colorItem.submenu = colorMenu
+            menu.addItem(colorItem)
+        }
     }
 }
 
@@ -175,13 +233,15 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
             let cell = makeCell(identifier: "repo", symbol: nil)
             cell.textField?.stringValue = repo.repository.name
             cell.textField?.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
-            cell.textField?.textColor = .secondaryLabelColor
+            cell.textField?.textColor = (chrome?.color(.secondaryText).nsColor) ?? .secondaryLabelColor
             return cell
         }
         if let wt = item as? WorktreeNode {
             let cell = makeWorktreeCell()
             cell.textField?.stringValue = "\(wt.worktree.title)  [\(wt.worktree.branch)]"
             cell.applyBadge(agentStates[wt.worktree.id] ?? .idle)
+            cell.applyIdentityColor(wt.worktree.color.flatMap { NSColor(hex: $0) },
+                                    glyphTint: chrome?.color(.glyphTint).nsColor)
             return cell
         }
         return nil

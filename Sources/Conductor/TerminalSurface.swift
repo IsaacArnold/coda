@@ -10,6 +10,7 @@ final class TerminalSurface: NSViewController {
     private let command: String
     private let setupScript: String
     private var terminal: ClickableTerminalView!
+    private var pendingTheme: TerminalTheme?
 
     /// Opens a ⌘-clicked `path:line` in the default editor (wired by AppDelegate).
     var onOpenFile: ((String, Int?) -> Void)?
@@ -37,6 +38,17 @@ final class TerminalSurface: NSViewController {
     func sendCommand(_ command: String) {
         guard processStarted else { return }
         terminal.send(txt: command + "\r")
+    }
+
+    /// Apply a terminal color scheme: 16 ANSI colors + native fg/bg/cursor. Safe to call
+    /// before the PTY starts — the theme is cached and applied once the view lays out.
+    func applyTheme(_ theme: TerminalTheme) {
+        pendingTheme = theme
+        guard terminal != nil else { return }
+        terminal.installColors(theme.ansi.map { $0.swiftTermColor })
+        terminal.nativeForegroundColor = theme.foreground.nsColor
+        terminal.nativeBackgroundColor = theme.background.nsColor
+        terminal.caretColor = theme.cursor.nsColor
     }
 
     /// Forwarded from AppDelegate's ⌘+click monitor. Returns true if it opened something.
@@ -79,5 +91,6 @@ final class TerminalSurface: NSViewController {
                               environment: nil,
                               execName: "-zsh",
                               currentDirectory: workingDirectory)
+        if let pendingTheme { applyTheme(pendingTheme) }
     }
 }

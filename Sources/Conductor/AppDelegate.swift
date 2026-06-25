@@ -6,13 +6,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var splitVC: NSSplitViewController!
     private let sidebar = SidebarController()
     private let detail = NSViewController()      // hosts the persistent terminal surfaces
+    private let worktreeBar = WorktreeBar()
     private var store: WorktreeStore!
     private var currentSurface: TerminalSurface?
     private var selectedWorktree: Worktree?
     // Keeps each worktree's terminal alive across sidebar switches; the handle is
     // the TerminalSurface itself.
     private let surfaces = SurfaceRegistry<TerminalSurface>()
-    // Toolbar centre-notch: shows time + focused worktree (agent badge wired in #11).
+    // Toolbar centre-notch: time-of-day glyph + time only (worktree name/badge live in the identity bar).
     private let notchLabel = NSTextField(labelWithString: "No worktree")
     private let notchIcon = NSImageView()
     private let notchBadge = NSView()   // layer-drawn agent-state dot
@@ -21,6 +22,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var agentStates: [String: AgentState] = [:]
     private var prefsStore: PreferencesStore!
     private var preferences = Preferences()
+    private var themeStore: ThemeStore!
+    private var activeTheme: TerminalTheme!
+    private let defaultThemeName = "Dracula"
     private var kbStore: KeybindingsStore!
     private var keybindings = Keybindings()
     private var clickMonitor: Any?
@@ -34,12 +38,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let home = FileManager.default.homeDirectoryForCurrentUser
         prefsStore = PreferencesStore(url: home.appendingPathComponent(".conductor/preferences.json"))
         preferences = prefsStore.load()
+        themeStore = ThemeStore(directory: home.appendingPathComponent(".conductor/themes"))
+        try? themeStore.seedIfEmpty(from: bundledThemeURLs())
+        activeTheme = loadActiveTheme()
         kbStore = KeybindingsStore(url: home.appendingPathComponent(".conductor/keybindings.json"))
         keybindings = kbStore.load()
         buildMenu()
         buildWindow()
         wireSidebar()
         refreshSidebar(select: store.state.worktrees.first?.id)
+        applyChromeTheme()
         // Keep the notch clock current.
         notchTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.updateNotch()
@@ -62,6 +70,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    /// The bundled starter `.itermcolors` shipped as app resources.
+    private func bundledThemeURLs() -> [URL] {
+        Bundle.module.urls(forResourcesWithExtension: "itermcolors", subdirectory: "Themes") ?? []
+    }
+
+    /// The active terminal theme: the user's chosen one, else the default, else a hard
+    /// fallback so the app always has a theme to draw.
+    private func loadActiveTheme() -> TerminalTheme {
+        if let name = preferences.activeTheme, let theme = themeStore.loadTheme(named: name) { return theme }
+        if let theme = themeStore.loadTheme(named: defaultThemeName) { return theme }
+        // Last-resort fallback (themes dir empty / unreadable): plain black-on-white.
+        return TerminalTheme(name: "Default",
+                             ansi: Array(repeating: .black, count: 16),
+                             foreground: .black, background: .white, cursor: .black)
+    }
+
     private func makeStore() -> WorktreeStore {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let configURL = home.appendingPathComponent(".conductor/local.json")
@@ -73,6 +97,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func buildWindow() {
         detail.view = NSView()
+        detail.view.addSubview(worktreeBar)
+        NSLayoutConstraint.activate([
+            // Inset from the sidebar, right edge, and toolbar so the identity bar floats
+            // with breathing room rather than butting up against the window chrome.
+            worktreeBar.topAnchor.constraint(equalTo: detail.view.topAnchor, constant: 8),
+            worktreeBar.leadingAnchor.constraint(equalTo: detail.view.leadingAnchor, constant: 8),
+            // Right edge pulled in slightly more than the surface's -8 so the chip lines up with
+            // the terminal's visible content edge (SwiftTerm reserves a gutter on the right).
+            worktreeBar.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor, constant: -16),
+        ])
+        worktreeBar.isHidden = true
         let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebar)
         sidebarItem.canCollapse = true
         sidebarItem.minimumThickness = 180
@@ -85,6 +120,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.setContentSize(NSSize(width: 1100, height: 700))
         window.title = "Conductor"
         window.titleVisibility = .hidden
+        // Let the themed window background flow up through the titlebar/unified toolbar so the
+        // toolbar blends into the terminal theme (spec: "toolbar adopts the terminal background").
+        // Without this the unified toolbar keeps macOS's default material and reads as default-gray.
+        window.titlebarAppearsTransparent = true
 
         let toolbar = NSToolbar(identifier: "MainToolbar")
         toolbar.delegate = self
@@ -102,6 +141,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sidebar.onSelect = { [weak self] s in self?.select(s) }
         sidebar.onRepoSettings = { [weak self] repoID in self?.openRepoSettings(repoID: repoID) }
         sidebar.onNewWorktree = { [weak self] repoID in self?.newWorktree(repoID: repoID) }
+        sidebar.onSetWorktreeColor = { [weak self] worktreeID, hex in self?.setWorktreeColor(worktreeID, hex) }
+    }
+
+    /// Override a worktree's identity color and repaint its bar + sidebar row.
+    private func setWorktreeColor(_ worktreeID: String, _ hex: String) {
+        do {
+            _ = try store.setWorktreeColor(id: worktreeID, color: hex)
+            refreshSidebar(select: selectedWorktree?.id)
+            if let s = store.state.worktrees.first(where: { $0.id == worktreeID }), s.id == selectedWorktree?.id {
+                selectedWorktree = s
+                worktreeBar.update(title: s.title, branch: s.branch, colorHex: s.color,
+                                   agentState: agentStates[s.id] ?? .idle)
+            }
+        } catch { presentError(error) }
     }
 
     private func refreshSidebar(select id: String?) {
@@ -129,7 +182,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 editor: preferences.defaultEditor,
                 onChangeEditor: { [weak self] editor in self?.setDefaultEditor(editor) },
                 keybindings: keybindings,
-                onChange: { [weak self] bindings in self?.applyKeybindings(bindings) })
+                onChange: { [weak self] bindings in self?.applyKeybindings(bindings) },
+                themeNames: themeStore.themeNames(),
+                activeTheme: preferences.activeTheme ?? defaultThemeName,
+                onApplyTheme: { [weak self] name in self?.setActiveTheme(named: name) },
+                onImportTheme: { [weak self] url in try? self?.themeStore.importTheme(from: url) })
             let win = NSWindow(contentViewController: tab)
             win.title = "Settings"
             win.styleMask = [.titled, .closable]
@@ -217,7 +274,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         surfaces.setActive(s?.id)
         currentSurface = nil
-        guard let s else { return }
+        guard let s else { worktreeBar.update(title: nil, branch: nil, colorHex: nil, agentState: .idle); return }
 
         // Reuse the live surface if we've seen this worktree before; otherwise build one.
         let surface: TerminalSurface
@@ -235,17 +292,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             surface = TerminalSurface(workingDirectory: s.worktreePath, command: command, setupScript: setup)
             surface.onOpenFile = { [weak self] path, line in self?.openInDefaultEditor(path: path, line: line) }
             surfaces.register(surface, for: s.id)
+            surface.applyTheme(activeTheme)
             detail.addChild(surface)
             surface.view.translatesAutoresizingMaskIntoConstraints = false
             detail.view.addSubview(surface.view)
             NSLayoutConstraint.activate([
-                surface.view.topAnchor.constraint(equalTo: detail.view.topAnchor),
+                surface.view.topAnchor.constraint(equalTo: worktreeBar.bottomAnchor, constant: 8),
                 surface.view.bottomAnchor.constraint(equalTo: detail.view.bottomAnchor),
-                surface.view.leadingAnchor.constraint(equalTo: detail.view.leadingAnchor),
-                surface.view.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor),
+                // Match the identity chip's horizontal inset so the terminal aligns with the
+                // bar above it (left edge in line with the chip; right edge pulled off the window edge).
+                surface.view.leadingAnchor.constraint(equalTo: detail.view.leadingAnchor, constant: 8),
+                surface.view.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor, constant: -8),
             ])
         }
         currentSurface = surface
+        worktreeBar.update(title: s.title, branch: s.branch, colorHex: s.color,
+                           agentState: agentStates[s.id] ?? .idle)
+    }
+
+    // MARK: - theming
+
+    /// Switch the global terminal theme: persist the choice, reload it, re-theme
+    /// every live terminal and the chrome.
+    private func setActiveTheme(named name: String) {
+        guard let theme = themeStore.loadTheme(named: name) else { return }
+        activeTheme = theme
+        preferences.activeTheme = name
+        do { try prefsStore.save(preferences) } catch { presentError(error) }
+        applyActiveTheme()
+    }
+
+    /// Push the active terminal theme to every live surface and repaint the chrome.
+    private func applyActiveTheme() {
+        for wt in store.state.worktrees {
+            surfaces.handle(for: wt.id)?.applyTheme(activeTheme)
+        }
+        applyChromeTheme()
+    }
+
+    /// iTerm2-style: the window blends into the terminal background and flips
+    /// light/dark by its luminance. All chrome colors read from ChromeTheme.
+    private func applyChromeTheme() {
+        let chrome = ChromeTheme(terminal: activeTheme)
+        window.appearance = chrome.appearance.nsAppearance
+        window.backgroundColor = chrome.color(.windowBackground).nsColor
+        sidebar.applyChrome(chrome)
+        updateNotch()
     }
 
     // MARK: - native menu bar
@@ -444,6 +536,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         agentStates = states
         sidebar.updateAgentStates(states)
         updateNotch()
+        if let s = selectedWorktree {
+            worktreeBar.update(title: s.title, branch: s.branch, colorHex: s.color,
+                               agentState: agentStates[s.id] ?? .idle)
+        }
     }
 
     private func updateNotch() {
@@ -452,16 +548,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchIcon.image = NSImage(systemSymbolName: style.symbol, accessibilityDescription: nil)
         notchIcon.contentTintColor = style.color
         let time = Self.notchTimeFormatter.string(from: now).lowercased()
-        let focus = selectedWorktree?.title ?? "No worktree"
-        notchLabel.stringValue = "\(time) — \(focus)"
-        notchLabel.textColor = .secondaryLabelColor
-
-        if let id = selectedWorktree?.id, let color = agentBadgeColor(agentStates[id] ?? .idle) {
-            notchBadge.layer?.backgroundColor = color.cgColor
-            notchBadge.isHidden = false
-        } else {
-            notchBadge.isHidden = true
-        }
+        notchLabel.stringValue = time
+        notchLabel.textColor = (ChromeTheme(terminal: activeTheme).color(.secondaryText).nsColor)
+        notchBadge.isHidden = true
     }
 
     // MARK: - small helpers
@@ -548,7 +637,7 @@ extension AppDelegate: NSToolbarDelegate {
             let stack = NSStackView(views: [notchIcon, notchLabel, notchBadge])
             stack.orientation = .horizontal
             stack.spacing = 6
-            stack.edgeInsets = NSEdgeInsets(top: 2, left: 6, bottom: 2, right: 8)
+            stack.edgeInsets = NSEdgeInsets(top: 3, left: 12, bottom: 3, right: 12)
             item.view = stack
             return item
 

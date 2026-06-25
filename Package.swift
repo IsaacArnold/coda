@@ -14,7 +14,8 @@ let package = Package(
             dependencies: [
                 "ConductorCore",
                 .product(name: "SwiftTerm", package: "SwiftTerm")
-            ]
+            ],
+            resources: [.copy("Themes")]
         ),
         .testTarget(name: "ConductorCoreTests", dependencies: ["ConductorCore"])
     ],

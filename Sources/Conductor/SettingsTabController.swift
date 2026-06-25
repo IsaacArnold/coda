@@ -7,7 +7,11 @@ final class SettingsTabController: NSTabViewController {
     init(editor: Editor,
          onChangeEditor: @escaping (Editor) -> Void,
          keybindings: Keybindings,
-         onChange: @escaping (Keybindings) -> Void) {
+         onChange: @escaping (Keybindings) -> Void,
+         themeNames: [String],
+         activeTheme: String?,
+         onApplyTheme: @escaping (String) -> Void,
+         onImportTheme: @escaping (URL) -> Void) {
         super.init(nibName: nil, bundle: nil)
         tabStyle = .toolbar
 
@@ -17,6 +21,13 @@ final class SettingsTabController: NSTabViewController {
         generalItem.label = "General"
         generalItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "General")
         addTabViewItem(generalItem)
+
+        let themes = ThemeSettingsViewController(themeNames: themeNames, active: activeTheme,
+                                                 onApply: onApplyTheme, onImport: onImportTheme)
+        let themesItem = NSTabViewItem(viewController: themes)
+        themesItem.label = "Themes"
+        themesItem.image = NSImage(systemSymbolName: "paintpalette", accessibilityDescription: "Themes")
+        addTabViewItem(themesItem)
 
         let keys = KeybindingsViewController(bindings: keybindings)
         keys.onChange = onChange
