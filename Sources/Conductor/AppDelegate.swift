@@ -53,7 +53,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshSidebar(select id: String?) {
-        sidebar.reload(worktrees: store.state.worktrees, selected: id)
+        let sections = groupWorktreesByRepository(repositories: store.state.repositories,
+                                                  worktrees: store.state.worktrees)
+        sidebar.reload(sections: sections, selectedWorktreeID: id)
     }
 
     private func openRepoSettings() {
@@ -80,7 +82,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func newWorktree() {
-        guard let repo = store.state.repositories.first else {
+        // Add to the repo implied by the sidebar selection, else the first repo.
+        let targetRepoID = sidebar.currentRepoID()
+        guard let repo = store.state.repositories.first(where: { $0.id == targetRepoID })
+                ?? store.state.repositories.first else {
             presentMessage("Add a repo first (Add Repo…).")
             return
         }
