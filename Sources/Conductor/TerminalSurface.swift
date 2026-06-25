@@ -50,6 +50,14 @@ final class TerminalSurface: NSViewController {
         terminal?.containsClick(event) ?? false
     }
 
+    /// Snapshot of the visible terminal text, for heuristic agent-state classification.
+    func outputSnapshot() -> String {
+        guard let term = terminal?.getTerminal() else { return "" }
+        let rows = term.rows, cols = term.cols
+        guard rows > 0, cols > 0 else { return "" }
+        return term.getText(start: Position(col: 0, row: 0), end: Position(col: cols - 1, row: rows - 1))
+    }
+
     override func viewDidLayout() {
         super.viewDidLayout()
         // Start the PTY only once bounds are known (viewDidAppear can fire at zero size).

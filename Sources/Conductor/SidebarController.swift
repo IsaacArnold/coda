@@ -16,12 +16,39 @@ private final class WorktreeNode: NSObject {
     init(_ worktree: Worktree) { self.worktree = worktree }
 }
 
+/// Maps an agent state to its badge tint (nil → no badge). Shared by the sidebar
+/// rows and the toolbar notch.
+func agentBadgeColor(_ state: AgentState) -> NSColor? {
+    switch state {
+    case .idle: return nil
+    case .working: return .systemYellow
+    case .needsYou: return .systemRed
+    case .done: return .systemGreen
+    }
+}
+
+/// A worktree row: branch glyph + title + a trailing agent-state badge dot.
+private final class WorktreeCellView: NSTableCellView {
+    let badge = NSImageView()
+
+    func applyBadge(_ state: AgentState) {
+        if let color = agentBadgeColor(state) {
+            badge.image = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: state.rawValue)
+            badge.contentTintColor = color
+            badge.isHidden = false
+        } else {
+            badge.isHidden = true
+        }
+    }
+}
+
 /// A source-list sidebar: repositories as header rows with their worktrees nested
 /// underneath, plus a toolbar with Add Repo / Settings / New Worktree / Archive.
 final class SidebarController: NSViewController {
     private let outline = NSOutlineView()
     private let scroll = NSScrollView()
     private var repoNodes: [RepoNode] = []
+    private var agentStates: [String: AgentState] = [:]
 
     /// Selection drives the detail surface; the primary actions (add, new, launch,
     /// archive, settings) now live in the native menu bar and toolbar.
@@ -105,13 +132,20 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
             return cell
         }
         if let wt = item as? WorktreeNode {
-            let cell = makeCell(identifier: "worktree", symbol: Self.branchSymbol)
+            let cell = makeWorktreeCell()
             cell.textField?.stringValue = "\(wt.worktree.title)  [\(wt.worktree.branch)]"
-            cell.textField?.font = .systemFont(ofSize: NSFont.systemFontSize)
-            cell.textField?.textColor = .labelColor
+            cell.applyBadge(agentStates[wt.worktree.id] ?? .idle)
             return cell
         }
         return nil
+    }
+
+    /// Live agent-state badges, keyed by worktree id. Redraws only when changed,
+    /// so the 1s poll doesn't churn the outline (or fight selection) every tick.
+    func updateAgentStates(_ states: [String: AgentState]) {
+        guard states != agentStates else { return }
+        agentStates = states
+        outline.reloadData()
     }
 
     /// Supacode's git-branch glyph; falls back to the older symbol on pre-macOS 15.
@@ -122,6 +156,41 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         case let wt as WorktreeNode: onSelect?(wt.worktree)
         default: onSelect?(nil)   // a repo row (or nothing) clears the detail surface
         }
+    }
+
+    private func makeWorktreeCell() -> WorktreeCellView {
+        let id = NSUserInterfaceItemIdentifier("worktree")
+        if let reused = outline.makeView(withIdentifier: id, owner: self) as? WorktreeCellView {
+            return reused
+        }
+        let cell = WorktreeCellView()
+        let icon = NSImageView()
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.image = NSImage(systemSymbolName: Self.branchSymbol, accessibilityDescription: nil)
+            ?? NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: nil)
+        icon.contentTintColor = .secondaryLabelColor
+        let tf = NSTextField(labelWithString: "")
+        tf.translatesAutoresizingMaskIntoConstraints = false
+        tf.font = .systemFont(ofSize: NSFont.systemFontSize)
+        tf.lineBreakMode = .byTruncatingTail
+        let badge = cell.badge
+        badge.translatesAutoresizingMaskIntoConstraints = false
+        badge.symbolConfiguration = .init(pointSize: 8, weight: .black)
+        cell.addSubview(icon); cell.addSubview(tf); cell.addSubview(badge)
+        cell.imageView = icon; cell.textField = tf
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
+            icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 16),
+            tf.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 6),
+            tf.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            tf.trailingAnchor.constraint(lessThanOrEqualTo: badge.leadingAnchor, constant: -6),
+            badge.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
+            badge.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            badge.widthAnchor.constraint(equalToConstant: 9),
+        ])
+        cell.identifier = id
+        return cell
     }
 
     /// Build (or reuse) a cell. `symbol == nil` yields a text-only row (section
