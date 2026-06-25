@@ -13,7 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Keeps each worktree's terminal alive across sidebar switches; the handle is
     // the TerminalSurface itself.
     private let surfaces = SurfaceRegistry<TerminalSurface>()
-    // Toolbar centre-notch: shows time + focused worktree (agent badge wired in #11).
+    // Toolbar centre-notch: time-of-day glyph + time only (worktree name/badge live in the identity bar).
     private let notchLabel = NSTextField(labelWithString: "No worktree")
     private let notchIcon = NSImageView()
     private let notchBadge = NSView()   // layer-drawn agent-state dot
