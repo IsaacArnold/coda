@@ -141,6 +141,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sidebar.onSelect = { [weak self] s in self?.select(s) }
         sidebar.onRepoSettings = { [weak self] repoID in self?.openRepoSettings(repoID: repoID) }
         sidebar.onNewWorktree = { [weak self] repoID in self?.newWorktree(repoID: repoID) }
+        sidebar.onSetWorktreeColor = { [weak self] worktreeID, hex in self?.setWorktreeColor(worktreeID, hex) }
+    }
+
+    /// Override a worktree's identity color and repaint its bar + sidebar row.
+    private func setWorktreeColor(_ worktreeID: String, _ hex: String) {
+        do {
+            _ = try store.setWorktreeColor(id: worktreeID, color: hex)
+            refreshSidebar(select: selectedWorktree?.id)
+            if let s = store.state.worktrees.first(where: { $0.id == worktreeID }), s.id == selectedWorktree?.id {
+                selectedWorktree = s
+                worktreeBar.update(title: s.title, branch: s.branch, colorHex: s.color,
+                                   agentState: agentStates[s.id] ?? .idle)
+            }
+        } catch { presentError(error) }
     }
 
     private func refreshSidebar(select id: String?) {

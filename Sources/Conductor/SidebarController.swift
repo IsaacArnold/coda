@@ -68,6 +68,9 @@ final class SidebarController: NSViewController {
     var onRepoSettings: ((String) -> Void)?
     var onNewWorktree: ((String) -> Void)?
 
+    /// Right-click a worktree → pick a palette color for its identity bar/accent.
+    var onSetWorktreeColor: ((String, String) -> Void)?
+
     private let rowMenu = NSMenu()
 
     override func loadView() {
@@ -97,6 +100,19 @@ final class SidebarController: NSViewController {
         case let wt as WorktreeNode: return wt.worktree.repoID
         default: return nil
         }
+    }
+
+    /// The worktree id of the right-clicked row, or nil if a repo header was clicked.
+    private func clickedWorktreeID() -> String? {
+        let row = outline.clickedRow
+        guard row >= 0, let wt = outline.item(atRow: row) as? WorktreeNode else { return nil }
+        return wt.worktree.id
+    }
+
+    @objc private func contextSetColor(_ sender: NSMenuItem) {
+        guard let info = sender.representedObject as? [String: String],
+              let id = info["id"], let hex = info["hex"] else { return }
+        onSetWorktreeColor?(id, hex)
     }
 
     @objc private func contextRepoSettings(_ sender: NSMenuItem) {
@@ -146,6 +162,17 @@ final class SidebarController: NSViewController {
         return nil
     }
 
+    /// A small filled square for a color menu item.
+    private static func swatchImage(_ color: NSColor) -> NSImage {
+        let size = NSSize(width: 12, height: 12)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        color.setFill()
+        NSBezierPath(roundedRect: NSRect(origin: .zero, size: size), xRadius: 2, yRadius: 2).fill()
+        image.unlockFocus()
+        return image
+    }
+
 }
 
 extension SidebarController: NSMenuDelegate {
@@ -162,6 +189,23 @@ extension SidebarController: NSMenuDelegate {
         newWorktree.target = self
         newWorktree.representedObject = repoID
         menu.addItem(newWorktree)
+
+        if let worktreeID = clickedWorktreeID() {
+            menu.addItem(.separator())
+            let colorItem = NSMenuItem(title: "Set Color", action: nil, keyEquivalent: "")
+            let colorMenu = NSMenu()
+            for hex in IdentityPalette.colors {
+                let swatch = NSMenuItem(title: hex, action: #selector(contextSetColor(_:)), keyEquivalent: "")
+                swatch.target = self
+                swatch.representedObject = ["id": worktreeID, "hex": hex]
+                if let color = NSColor(hex: hex) {
+                    swatch.image = Self.swatchImage(color)
+                }
+                colorMenu.addItem(swatch)
+            }
+            colorItem.submenu = colorMenu
+            menu.addItem(colorItem)
+        }
     }
 }
 
