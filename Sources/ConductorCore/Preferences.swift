@@ -29,8 +29,13 @@ public struct Editor: Codable, Equatable {
 /// `Config`, which is the only place absolute paths are allowed.
 public struct Preferences: Codable, Equatable {
     public var defaultEditor: Editor
-    public init(defaultEditor: Editor = .vsCode) {
+    /// Name of the active terminal theme (a file in ~/.conductor/themes/). nil → the
+    /// app falls back to its default bundled theme. Synthesized Codable decodes a
+    /// missing key to nil, so older prefs files still load.
+    public var activeTheme: String?
+    public init(defaultEditor: Editor = .vsCode, activeTheme: String? = nil) {
         self.defaultEditor = defaultEditor
+        self.activeTheme = activeTheme
     }
 }
 

@@ -27,6 +27,20 @@ final class PreferencesTests: XCTestCase {
         let json = String(data: data, encoding: .utf8) ?? ""
         XCTAssertFalse(json.contains("/"), "Preferences must not persist absolute paths: \(json)")
     }
+
+    func testActiveThemeDefaultsNilForOldPrefs() throws {
+        // Prefs written before theming carried only defaultEditor.
+        let json = #"{"defaultEditor":{"name":"Visual Studio Code","bundleID":"com.microsoft.VSCode","urlScheme":"vscode"}}"#
+        let prefs = try JSONDecoder().decode(Preferences.self, from: Data(json.utf8))
+        XCTAssertNil(prefs.activeTheme)
+    }
+
+    func testActiveThemeRoundTrips() throws {
+        var prefs = Preferences()
+        prefs.activeTheme = "Dracula"
+        let back = try JSONDecoder().decode(Preferences.self, from: JSONEncoder().encode(prefs))
+        XCTAssertEqual(back.activeTheme, "Dracula")
+    }
 }
 
 final class KnownEditorsTests: XCTestCase {
