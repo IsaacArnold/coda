@@ -16,6 +16,11 @@ final class HotkeyRecorderView: NSView {
         return true
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        window?.makeFirstResponder(self)
+    }
+
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 { onCancel?(); return }   // Esc
         if let chord = KeyChord(event: event) { onRecorded?(chord) }

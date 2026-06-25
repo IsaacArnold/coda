@@ -161,6 +161,5 @@ final class KeybindingsViewController: NSViewController {
         }
 
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
-        recorder.window?.makeFirstResponder(recorder)
     }
 }
