@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var splitVC: NSSplitViewController!
     private let sidebar = SidebarController()
     private let detail = NSViewController()      // hosts the persistent terminal surfaces
+    private let worktreeBar = WorktreeBar()
     private var store: WorktreeStore!
     private var currentSurface: TerminalSurface?
     private var selectedWorktree: Worktree?
@@ -96,6 +97,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func buildWindow() {
         detail.view = NSView()
+        detail.view.addSubview(worktreeBar)
+        NSLayoutConstraint.activate([
+            worktreeBar.topAnchor.constraint(equalTo: detail.view.topAnchor),
+            worktreeBar.leadingAnchor.constraint(equalTo: detail.view.leadingAnchor),
+            worktreeBar.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor),
+        ])
+        worktreeBar.isHidden = true
         let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebar)
         sidebarItem.canCollapse = true
         sidebarItem.minimumThickness = 180
@@ -240,7 +248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         surfaces.setActive(s?.id)
         currentSurface = nil
-        guard let s else { return }
+        guard let s else { worktreeBar.update(title: nil, branch: nil, colorHex: nil, agentState: .idle); return }
 
         // Reuse the live surface if we've seen this worktree before; otherwise build one.
         let surface: TerminalSurface
@@ -263,13 +271,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             surface.view.translatesAutoresizingMaskIntoConstraints = false
             detail.view.addSubview(surface.view)
             NSLayoutConstraint.activate([
-                surface.view.topAnchor.constraint(equalTo: detail.view.topAnchor),
+                surface.view.topAnchor.constraint(equalTo: worktreeBar.bottomAnchor),
                 surface.view.bottomAnchor.constraint(equalTo: detail.view.bottomAnchor),
                 surface.view.leadingAnchor.constraint(equalTo: detail.view.leadingAnchor),
                 surface.view.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor),
             ])
         }
         currentSurface = surface
+        worktreeBar.update(title: s.title, branch: s.branch, colorHex: s.color,
+                           agentState: agentStates[s.id] ?? .idle)
     }
 
     // MARK: - theming
@@ -488,6 +498,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         agentStates = states
         sidebar.updateAgentStates(states)
         updateNotch()
+        if let s = selectedWorktree {
+            worktreeBar.update(title: s.title, branch: s.branch, colorHex: s.color,
+                               agentState: agentStates[s.id] ?? .idle)
+        }
     }
 
     private func updateNotch() {
@@ -496,16 +510,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchIcon.image = NSImage(systemSymbolName: style.symbol, accessibilityDescription: nil)
         notchIcon.contentTintColor = style.color
         let time = Self.notchTimeFormatter.string(from: now).lowercased()
-        let focus = selectedWorktree?.title ?? "No worktree"
-        notchLabel.stringValue = "\(time) — \(focus)"
-        notchLabel.textColor = .secondaryLabelColor
-
-        if let id = selectedWorktree?.id, let color = agentBadgeColor(agentStates[id] ?? .idle) {
-            notchBadge.layer?.backgroundColor = color.cgColor
-            notchBadge.isHidden = false
-        } else {
-            notchBadge.isHidden = true
-        }
+        notchLabel.stringValue = time
+        notchLabel.textColor = (ChromeTheme(terminal: activeTheme).color(.secondaryText).nsColor)
+        notchBadge.isHidden = true
     }
 
     // MARK: - small helpers
