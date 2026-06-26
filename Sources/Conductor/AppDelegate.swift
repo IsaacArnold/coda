@@ -7,6 +7,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let sidebar = SidebarController()
     private let detail = NSViewController()      // hosts the persistent terminal surfaces
     private let worktreeBar = WorktreeBar()
+    private let surfaceTabBar = SurfaceTabBar()
+    private var surfaceSeq = 0   // monotonic id source for new surfaces
     private var store: WorktreeStore!
     private var currentSurface: TerminalSurface?
     private var selectedWorktree: Worktree?
@@ -107,6 +109,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             worktreeBar.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor, constant: -16),
         ])
         worktreeBar.isHidden = true
+        detail.view.addSubview(surfaceTabBar)
+        NSLayoutConstraint.activate([
+            surfaceTabBar.topAnchor.constraint(equalTo: worktreeBar.bottomAnchor, constant: 6),
+            surfaceTabBar.leadingAnchor.constraint(equalTo: detail.view.leadingAnchor, constant: 8),
+            surfaceTabBar.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor, constant: -8),
+        ])
+        surfaceTabBar.isHidden = true
+        surfaceTabBar.onNew = { [weak self] in self?.newSurface() }
+        surfaceTabBar.onSelect = { [weak self] id in self?.activateSurface(id) }
+        surfaceTabBar.onClose = { [weak self] id in self?.closeSurface(id) }
+        surfaceTabBar.onContext = { [weak self] id, view in self?.showSurfaceContextMenu(id, anchor: view) }
         let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebar)
         sidebarItem.canCollapse = true
         sidebarItem.minimumThickness = 180
@@ -160,10 +173,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             _ = try store.setWorktreeColor(id: worktreeID, color: hex)
             refreshSidebar(select: selectedWorktree?.id)
-            if let s = store.state.worktrees.first(where: { $0.id == worktreeID }), s.id == selectedWorktree?.id {
-                selectedWorktree = s
-                worktreeBar.update(title: s.title, branch: s.branch, colorHex: s.color,
-                                   agentState: agentStates[s.id] ?? .idle)
+            if worktreeID == selectedWorktree?.id {
+                selectedWorktree = store.state.worktrees.first { $0.id == worktreeID }
+                refreshChromeForActiveSurface()
             }
         } catch { presentError(error) }
     }
@@ -338,9 +350,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         do {
             try store.archiveWorktree(id: s.id, deleteBranch: true)
-            // TODO: Task 8 - update to handle array from new API
-            let evicted = surfaces.evict(worktreeID: s.id)
-            for surface in evicted {
+            // Tear down all of the archived worktree's surfaces (kills every PTY, no leak).
+            for surface in surfaces.evict(worktreeID: s.id) {
                 surface.view.removeFromSuperview()
                 surface.removeFromParent()
             }
@@ -356,58 +367,203 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var shownWorktreeID: String?
 
     private func select(_ s: Worktree?) {
-        guard shownWorktreeID != s?.id else { return }   // idempotent: ignore redundant reselects
+        guard shownWorktreeID != s?.id else { return }   // idempotent
         shownWorktreeID = s?.id
         selectedWorktree = s
         updateNotch()
 
-        // TODO: Task 8 - update to new two-level API
-        // Hide (don't destroy) the surface we're leaving — its PTY keeps running.
-        if let activeID = surfaces.activeWorktreeID, let list = surfaces.existingSurfaces(for: activeID) {
-            for entry in list.entries {
-                entry.handle.view.isHidden = true
-            }
+        // Hide (don't destroy) the leaving worktree's active surface — its PTY keeps running.
+        if let leavingID = surfaces.activeWorktreeID,
+           let leaving = surfaces.existingSurfaces(for: leavingID)?.activeHandle {
+            leaving.view.isHidden = true
         }
         surfaces.setActive(s?.id)
         currentSurface = nil
-        guard let s else { worktreeBar.update(title: nil, branch: nil, colorHex: nil, agentState: .idle); return }
 
-        // TODO: Task 8 - update to new two-level API
-        // Reuse the live surface if we've seen this worktree before; otherwise build one.
-        let surface: TerminalSurface
-        if let list = surfaces.existingSurfaces(for: s.id), let entry = list.entries.first {
-            surface = entry.handle
-            surface.view.isHidden = false
-        } else {
-            let repo = store.state.repositories.first { $0.id == s.repoID }
-            let isNewlyCreated = pendingSetupWorktreeIDs.contains(s.id)
-            let setup = isNewlyCreated ? (repo?.setupScript ?? "") : ""
-            pendingSetupWorktreeIDs.remove(s.id)
-            // Shell-first: a worktree opens into a plain interactive shell (empty command).
-            // Only a freshly created worktree whose repo opted into auto-launch runs Claude.
-            let command = (isNewlyCreated && repo?.autoLaunchClaude == true) ? launchCommand(for: repo!) : ""
-            surface = TerminalSurface(workingDirectory: s.worktreePath, command: command, setupScript: setup)
-            surface.onOpenFile = { [weak self] path, line in self?.openInDefaultEditor(path: path, line: line) }
-            // TODO: Task 8 - Add surface using new two-level API
-            surfaces.surfaces(for: s.id).add(surface, surface: Surface(id: "primary"))
-            surface.applyTheme(activeTheme)
-            surface.applyFont(resolvedTerminalFont())
-            detail.addChild(surface)
-            surface.view.translatesAutoresizingMaskIntoConstraints = false
-            detail.view.addSubview(surface.view)
-            NSLayoutConstraint.activate([
-                surface.view.topAnchor.constraint(equalTo: worktreeBar.bottomAnchor, constant: 8),
-                surface.view.bottomAnchor.constraint(equalTo: detail.view.bottomAnchor),
-                // Match the identity chip's horizontal inset so the terminal aligns with the
-                // bar above it (left edge in line with the chip; right edge pulled off the window edge).
-                surface.view.leadingAnchor.constraint(equalTo: detail.view.leadingAnchor, constant: 8),
-                surface.view.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor, constant: -8),
-            ])
+        guard let s else {
+            worktreeBar.update(title: nil, branch: nil, colorHex: nil, agentState: .idle)
+            surfaceTabBar.isHidden = true
+            return
         }
-        currentSurface = surface
-        worktreeBar.update(title: s.title, branch: s.branch, colorHex: s.color,
-                           agentState: agentStates[s.id] ?? .idle)
+
+        let list = surfaces.surfaces(for: s.id)
+        if list.isEmpty {
+            // First open (or re-focus after the last tab was closed): spawn one shell.
+            createSurface(in: s, runSetupAndAutoLaunch: true)
+        } else if let active = list.activeHandle {
+            active.view.isHidden = false
+            currentSurface = active
+        }
+        refreshChromeForActiveSurface()
+        refreshTabBar()
     }
+
+    /// Build a fresh TerminalSurface for `wt`, register it, install it in the detail view,
+    /// make it the active surface, and focus it. `runSetupAndAutoLaunch` is true only for the
+    /// worktree's very first surface (mirrors the old first-open behavior: setupScript +
+    /// optional auto-launch Claude); additional tabs are always plain shells.
+    @discardableResult
+    private func createSurface(in wt: Worktree, runSetupAndAutoLaunch: Bool) -> TerminalSurface {
+        let repo = store.state.repositories.first { $0.id == wt.repoID }
+        let isNewlyCreated = runSetupAndAutoLaunch && pendingSetupWorktreeIDs.contains(wt.id)
+        let setup = isNewlyCreated ? (repo?.setupScript ?? "") : ""
+        pendingSetupWorktreeIDs.remove(wt.id)
+        let command = (isNewlyCreated && repo?.autoLaunchClaude == true) ? launchCommand(for: repo!) : ""
+
+        let surface = TerminalSurface(workingDirectory: wt.worktreePath, command: command, setupScript: setup)
+        surface.onOpenFile = { [weak self] path, line in self?.openInDefaultEditor(path: path, line: line) }
+        surface.onTitleChange = { [weak self] _ in self?.refreshTabBar() }
+        surface.applyTheme(activeTheme)
+        surface.applyFont(resolvedTerminalFont())
+
+        surfaceSeq += 1
+        let id = "surface-\(surfaceSeq)"
+        let list = surfaces.surfaces(for: wt.id)
+        // Hide the current active surface (we're inserting after it and switching to the new one).
+        list.activeHandle?.view.isHidden = true
+        list.add(surface, surface: Surface(id: id))
+
+        detail.addChild(surface)
+        surface.view.translatesAutoresizingMaskIntoConstraints = false
+        detail.view.addSubview(surface.view)
+        NSLayoutConstraint.activate([
+            surface.view.topAnchor.constraint(equalTo: surfaceTabBar.bottomAnchor, constant: 6),
+            surface.view.bottomAnchor.constraint(equalTo: detail.view.bottomAnchor),
+            surface.view.leadingAnchor.constraint(equalTo: detail.view.leadingAnchor, constant: 8),
+            surface.view.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor, constant: -8),
+        ])
+        currentSurface = surface
+        view(focus: surface)
+        refreshChromeForActiveSurface()
+        refreshTabBar()
+        return surface
+    }
+
+    /// Switch the shown worktree's active surface to `id`: hide the old, show the new, focus it.
+    private func activateSurface(_ id: String) {
+        guard let wtID = shownWorktreeID, let list = surfaces.existingSurfaces(for: wtID),
+              list.activeSurfaceID != id, let handle = list.handle(for: id) else { return }
+        list.activeHandle?.view.isHidden = true
+        list.setActive(id: id)
+        handle.view.isHidden = false
+        currentSurface = handle
+        view(focus: handle)
+        refreshChromeForActiveSurface()
+        refreshTabBar()
+    }
+
+    private func view(focus surface: TerminalSurface) {
+        window.makeFirstResponder(surface.view)
+    }
+
+    /// Rebuild the tab bar from the shown worktree's surface list.
+    private func refreshTabBar() {
+        guard let wtID = shownWorktreeID, let list = surfaces.existingSurfaces(for: wtID),
+              !list.isEmpty else {
+            surfaceTabBar.isHidden = true
+            return
+        }
+        surfaceTabBar.isHidden = false
+        let worktreeColor = selectedWorktree?.color.flatMap { RGB(hex: $0) }
+        let items: [SurfaceTabItem] = list.entries.enumerated().map { idx, entry in
+            let effective = entry.surface.effectiveColor(worktreeColor: worktreeColor)
+            return SurfaceTabItem(
+                id: entry.surface.id,
+                label: surfaceLabel(nameOverride: entry.surface.nameOverride,
+                                    terminalTitle: entry.handle.terminalTitle, index: idx),
+                state: agentStates[surfaceKey(wtID, entry.surface.id)] ?? .idle,
+                isActive: entry.surface.id == list.activeSurfaceID,
+                tint: effective?.nsColor)
+        }
+        surfaceTabBar.update(items: items)
+    }
+
+    /// Composite key for the per-surface agent-state map (Task 10 populates it).
+    private func surfaceKey(_ worktreeID: String, _ surfaceID: String) -> String {
+        "\(worktreeID)#\(surfaceID)"
+    }
+
+    private func newSurface() {
+        guard let wt = selectedWorktree else { presentMessage("Select a worktree first."); return }
+        createSurface(in: wt, runSetupAndAutoLaunch: false)
+    }
+
+    /// Close a specific surface (defaults to the active one). Confirms if it looks busy
+    /// (non-idle agent state). Closing the last surface leaves the worktree empty.
+    private func closeSurface(_ id: String? = nil) {
+        guard let wtID = shownWorktreeID, let list = surfaces.existingSurfaces(for: wtID) else { return }
+        guard let targetID = id ?? list.activeSurfaceID else { return }
+        let state = agentStates[surfaceKey(wtID, targetID)] ?? .idle
+        if state != .idle {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Close this tab?"
+            alert.informativeText = "A process is still running in this tab. Closing it ends that process."
+            alert.addButton(withTitle: "Close Tab")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        if let removed = list.close(id: targetID) {
+            removed.view.removeFromSuperview()
+            removed.removeFromParent()
+        }
+        if let newActive = list.activeHandle {
+            newActive.view.isHidden = false
+            currentSurface = newActive
+            view(focus: newActive)
+        } else {
+            // Last tab closed: worktree is now empty. Allow re-focus to spawn a fresh shell.
+            currentSurface = nil
+            shownWorktreeID = nil
+            surfaces.setActive(nil)
+        }
+        refreshChromeForActiveSurface()
+        refreshTabBar()
+    }
+
+    private func nextSurface() {
+        guard let wtID = shownWorktreeID, let list = surfaces.existingSurfaces(for: wtID),
+              let id = list.next() else { return }
+        activateSurfaceAfterListMove(id, in: list)
+    }
+
+    private func prevSurface() {
+        guard let wtID = shownWorktreeID, let list = surfaces.existingSurfaces(for: wtID),
+              let id = list.prev() else { return }
+        activateSurfaceAfterListMove(id, in: list)
+    }
+
+    private func goToSurface(_ oneBased: Int) {
+        guard let wtID = shownWorktreeID, let list = surfaces.existingSurfaces(for: wtID),
+              let id = list.goTo(index: oneBased - 1) else { return }
+        activateSurfaceAfterListMove(id, in: list)
+    }
+
+    /// `next/prev/goTo` already moved the list's active id; reflect it in the views.
+    private func activateSurfaceAfterListMove(_ id: String, in list: WorktreeSurfaces<TerminalSurface>) {
+        for entry in list.entries { entry.handle.view.isHidden = (entry.surface.id != id) }
+        currentSurface = list.handle(for: id)
+        if let h = currentSurface { view(focus: h) }
+        refreshChromeForActiveSurface()
+        refreshTabBar()
+    }
+
+    /// Repaint the identity bar from the shown worktree + active surface's effective color.
+    private func refreshChromeForActiveSurface() {
+        guard let wt = selectedWorktree else {
+            worktreeBar.update(title: nil, branch: nil, colorHex: nil, agentState: .idle)
+            return
+        }
+        let worktreeColor = wt.color.flatMap { RGB(hex: $0) }
+        let active = surfaces.existingSurfaces(for: wt.id)?.activeSurface
+        let effective = active?.effectiveColor(worktreeColor: worktreeColor) ?? worktreeColor
+        worktreeBar.update(title: wt.title, branch: wt.branch,
+                           colorHex: effective?.hexString,
+                           agentState: agentStates[wt.id] ?? .idle)
+    }
+
+    /// No-op placeholder for the context menu (Task 9 implements rename/color/duplicate).
+    private func showSurfaceContextMenu(_ id: String, anchor: NSView) {}
 
     // MARK: - theming
 
@@ -423,14 +579,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Push the active terminal theme to every live surface and repaint the chrome.
     private func applyActiveTheme() {
-        // TODO: Task 8 - apply theme using new two-level API
-        // for wt in store.state.worktrees {
-        //     if let list = surfaces.existingSurfaces(for: wt.id) {
-        //         for entry in list.entries {
-        //             entry.handle.applyTheme(activeTheme)
-        //         }
-        //     }
-        // }
+        for wtID in surfaces.worktreeIDs {
+            surfaces.existingSurfaces(for: wtID)?.handles.forEach { $0.applyTheme(activeTheme) }
+        }
         applyChromeTheme()
     }
 
@@ -467,15 +618,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setTerminalFont(_ pref: TerminalFontPref) {
         preferences.terminalFont = pref
         do { try prefsStore.save(preferences) } catch { presentError(error) }
-        // TODO: Task 8 - apply font using new two-level API
-        // let font = resolvedTerminalFont()
-        // for wt in store.state.worktrees {
-        //     if let list = surfaces.existingSurfaces(for: wt.id) {
-        //         for entry in list.entries {
-        //             entry.handle.applyFont(font)
-        //         }
-        //     }
-        // }
+        let font = resolvedTerminalFont()
+        for wtID in surfaces.worktreeIDs {
+            surfaces.existingSurfaces(for: wtID)?.handles.forEach { $0.applyFont(font) }
+        }
     }
 
     /// iTerm2-style: the window blends into the terminal background and flips
@@ -579,6 +725,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         addItem(to: wtMenu, "Archive Worktree", #selector(archiveSelectedAction), command: .archiveWorktree)
         wtItem.submenu = wtMenu
 
+        // Surface menu — per-worktree terminal tabs
+        let surfaceItem = NSMenuItem()
+        mainMenu.addItem(surfaceItem)
+        let surfaceMenu = NSMenu(title: "Surface")
+        addItem(to: surfaceMenu, "New Tab", #selector(newSurfaceAction), command: .newSurface)
+        addItem(to: surfaceMenu, "Close Tab", #selector(closeSurfaceAction), command: .closeSurface)
+        addItem(to: surfaceMenu, "Split Surface", #selector(splitSurfaceAction), command: .splitSurface)
+        surfaceMenu.addItem(.separator())
+        addItem(to: surfaceMenu, "Next Tab", #selector(nextSurfaceAction), command: .nextSurface)
+        addItem(to: surfaceMenu, "Previous Tab", #selector(prevSurfaceAction), command: .prevSurface)
+        surfaceMenu.addItem(.separator())
+        let gotoCommands: [(ShortcutCommand, Int)] = [
+            (.goToSurface1, 1), (.goToSurface2, 2), (.goToSurface3, 3), (.goToSurface4, 4),
+            (.goToSurface5, 5), (.goToSurface6, 6), (.goToSurface7, 7), (.goToSurface8, 8),
+            (.goToSurface9, 9)]
+        for (cmd, n) in gotoCommands {
+            let item = NSMenuItem(title: "Go to Tab \(n)", action: #selector(goToSurfaceAction(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = n
+            apply(cmd, to: item)
+            surfaceMenu.addItem(item)
+        }
+        surfaceItem.submenu = surfaceMenu
+
         // Window menu
         let windowItem = NSMenuItem()
         mainMenu.addItem(windowItem)
@@ -621,6 +791,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let wt = selectedWorktree else { presentMessage("Select a worktree first."); return }
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: wt.worktreePath)])
     }
+
+    @objc private func newSurfaceAction() { newSurface() }
+    @objc private func closeSurfaceAction() { closeSurface() }
+    @objc private func nextSurfaceAction() { nextSurface() }
+    @objc private func prevSurfaceAction() { prevSurface() }
+    @objc private func goToSurfaceAction(_ sender: NSMenuItem) { goToSurface(sender.tag) }
+    /// Reserved for PR B (splits). No-op in PR A.
+    @objc private func splitSurfaceAction() { /* PR B */ }
 
     /// Opens the focused worktree's directory in any installed app the user picks (one-off).
     @objc private func openWithOtherAppAction() {
@@ -685,19 +863,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func pollAgentStates() {
         var states: [String: AgentState] = [:]
-        for wt in store.state.worktrees {
-            // TODO: Task 8 - poll surface output using new two-level API
-            // let snapshot = surfaces.existingSurfaces(for: wt.id)?.entries.first?.handle.outputSnapshot()
-            // states[wt.id] = snapshot.map { agentState(fromOutput: $0) } ?? .idle
-            states[wt.id] = .idle
+        for wtID in surfaces.worktreeIDs {
+            let active = surfaces.existingSurfaces(for: wtID)?.activeHandle
+            states[wtID] = active.map { agentState(fromOutput: $0.outputSnapshot()) } ?? .idle
         }
         agentStates = states
         sidebar.updateAgentStates(states)
         updateNotch()
-        if let s = selectedWorktree {
-            worktreeBar.update(title: s.title, branch: s.branch, colorHex: s.color,
-                               agentState: agentStates[s.id] ?? .idle)
-        }
+        refreshChromeForActiveSurface()
     }
 
     private func updateNotch() {
