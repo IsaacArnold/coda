@@ -355,7 +355,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 surface.view.removeFromSuperview()
                 surface.removeFromParent()
             }
-            if shownWorktreeID == s.id { shownWorktreeID = nil; currentSurface = nil }
+            if shownWorktreeID == s.id {
+                shownWorktreeID = nil
+                currentSurface = nil
+                selectedWorktree = nil
+            }
             refreshSidebar(select: store.state.worktrees.first?.id)
             select(store.state.worktrees.first)
         } catch { presentError(error) }
