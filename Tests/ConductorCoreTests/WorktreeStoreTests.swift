@@ -133,4 +133,53 @@ final class WorktreeStoreTests: XCTestCase {
         // Persisted to disk: a fresh load of the same config sees the override.
         XCTAssertEqual(cfg.load().worktrees.first(where: { $0.id == wt.id })?.color, "#E91E63")
     }
+
+    // MARK: - readable errors (#1) + create/archive atomicity (#4)
+
+    func testStoreErrorsHaveReadableDescriptions() {
+        XCTAssertEqual(String(describing: WorktreeStoreError.repoNotFound("R1")), "Repository not found: R1")
+        XCTAssertEqual(String(describing: WorktreeStoreError.worktreeNotFound("W1")), "Worktree not found: W1")
+    }
+
+    /// A store whose config lives in its own directory, so a test can make that directory
+    /// read-only to force `config.save` to throw (the on-disk worktree root stays writable).
+    private func makeStoreInOwnConfigDir() throws -> (WorktreeStore, cfgDir: URL, worktreeRoot: String) {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory() + "cfgdir-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let worktreeRoot = NSTemporaryDirectory() + "wtr-" + UUID().uuidString
+        let store = WorktreeStore(config: Config(url: dir.appendingPathComponent("store.json")),
+                                  git: GitWorktree(gitPath: "/usr/bin/git"),
+                                  worktreeRoot: worktreeRoot)
+        return (store, dir, worktreeRoot)
+    }
+
+    func testCreateWorktreeRollsBackWhenSaveFails() throws {
+        let repo = try makeTempRepo()
+        let (store, cfgDir, worktreeRoot) = try makeStoreInOwnConfigDir()
+        let r = try store.addRepository(path: repo)   // saves while the dir is still writable
+        // Make the config dir read-only so the save inside createWorktree throws.
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: cfgDir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: cfgDir.path) }
+
+        XCTAssertThrowsError(try store.createWorktree(repoID: r.id, title: "Doomed"))
+        // Rolled back: no in-memory entry, and the on-disk worktree was removed (no orphan).
+        XCTAssertTrue(store.state.worktrees.isEmpty)
+        let orphan = worktreeRoot + "/" + URL(fileURLWithPath: repo).lastPathComponent + "/doomed"
+        XCTAssertFalse(FileManager.default.fileExists(atPath: orphan), "orphaned worktree left on disk")
+    }
+
+    func testArchiveRollsBackWhenSaveFails() throws {
+        let repo = try makeTempRepo()
+        let (store, cfgDir, _) = try makeStoreInOwnConfigDir()
+        let r = try store.addRepository(path: repo)
+        let s = try store.createWorktree(repoID: r.id, title: "Keep Me")
+        // Read-only config dir → the save inside archive throws before the irreversible removal.
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: cfgDir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: cfgDir.path) }
+
+        XCTAssertThrowsError(try store.archiveWorktree(id: s.id, deleteBranch: true))
+        // Restored: the entry is still tracked and its files are intact.
+        XCTAssertTrue(store.state.worktrees.contains { $0.id == s.id })
+        XCTAssertTrue(FileManager.default.fileExists(atPath: s.worktreePath))
+    }
 }

@@ -1,6 +1,15 @@
 import Foundation
 
-public enum WorktreeStoreError: Error { case repoNotFound(String); case worktreeNotFound(String) }
+public enum WorktreeStoreError: Error, CustomStringConvertible {
+    case repoNotFound(String)
+    case worktreeNotFound(String)
+    public var description: String {
+        switch self {
+        case .repoNotFound(let id): return "Repository not found: \(id)"
+        case .worktreeNotFound(let id): return "Worktree not found: \(id)"
+        }
+    }
+}
 
 public final class WorktreeStore {
     private let config: Config
@@ -47,16 +56,25 @@ public final class WorktreeStore {
             .appending("/").appending(branch)
         try git.add(repo: repo.path, path: worktreePath, branch: branch, base: base)
 
-        // Seed the fresh worktree with repo-configured untracked files (e.g. .env).
-        // git worktree add only brings tracked files, so these would otherwise be missing.
-        _ = try copyAllowlistedFiles(from: repo.path, to: worktreePath, allowlist: repo.copyAllowlist)
+        do {
+            // Seed the fresh worktree with repo-configured untracked files (e.g. .env).
+            // git worktree add only brings tracked files, so these would otherwise be missing.
+            _ = try copyAllowlistedFiles(from: repo.path, to: worktreePath, allowlist: repo.copyAllowlist)
 
-        let worktree = Worktree(id: UUID().uuidString, repoID: repoID,
-                                title: title, branch: branch, worktreePath: worktreePath,
-                                color: IdentityPalette.color(at: state.worktrees.count))
-        state.worktrees.append(worktree)
-        try config.save(state)
-        return worktree
+            let worktree = Worktree(id: UUID().uuidString, repoID: repoID,
+                                    title: title, branch: branch, worktreePath: worktreePath,
+                                    color: IdentityPalette.color(at: state.worktrees.count))
+            state.worktrees.append(worktree)
+            try config.save(state)
+            return worktree
+        } catch {
+            // Atomicity: if anything after `git.add` fails (e.g. the save throws), roll the
+            // on-disk worktree + branch back so a partial create can't leave an orphan.
+            state.worktrees.removeAll { $0.worktreePath == worktreePath }
+            try? git.remove(repo: repo.path, path: worktreePath)
+            try? git.deleteBranch(repo: repo.path, branch: branch)
+            throw error
+        }
     }
 
     public func archiveWorktree(id: String, deleteBranch: Bool) throws {
@@ -66,12 +84,26 @@ public final class WorktreeStore {
         guard let repo = state.repositories.first(where: { $0.id == worktree.repoID }) else {
             throw WorktreeStoreError.repoNotFound(worktree.repoID)
         }
-        try git.remove(repo: repo.path, path: worktree.worktreePath)
+        // Persist the removal first; if the save fails, nothing has changed on disk yet.
+        state.worktrees.removeAll { $0.id == id }
+        do {
+            try config.save(state)
+        } catch {
+            state.worktrees.append(worktree)
+            throw error
+        }
+        // Now the irreversible filesystem removal. If it fails, restore the entry so we don't
+        // silently drop a worktree whose files still exist on disk.
+        do {
+            try git.remove(repo: repo.path, path: worktree.worktreePath)
+        } catch {
+            state.worktrees.append(worktree)
+            try? config.save(state)
+            throw error
+        }
         if deleteBranch {
             try? git.deleteBranch(repo: repo.path, branch: worktree.branch)
         }
-        state.worktrees.removeAll { $0.id == id }
-        try config.save(state)
     }
 
     /// Override a worktree's identity color (chrome only). Pass nil to clear.
