@@ -150,6 +150,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sidebar.onNewWorktree = { [weak self] repoID in self?.newWorktree(repoID: repoID) }
         sidebar.onSetWorktreeColor = { [weak self] worktreeID, hex in self?.setWorktreeColor(worktreeID, hex) }
         sidebar.onRemoveWorktreeColor = { [weak self] worktreeID in self?.setWorktreeColor(worktreeID, nil) }
+        sidebar.onRenameRepo = { [weak self] repoID in self?.renameRepo(repoID) }
+        sidebar.onSetRepoColor = { [weak self] repoID, hex in self?.setRepoColor(repoID, hex) }
+        sidebar.onRemoveRepoColor = { [weak self] repoID in self?.setRepoColor(repoID, nil) }
     }
 
     /// Override a worktree's identity color and repaint its bar + sidebar row.
@@ -162,6 +165,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 worktreeBar.update(title: s.title, branch: s.branch, colorHex: s.color,
                                    agentState: agentStates[s.id] ?? .idle)
             }
+        } catch { presentError(error) }
+    }
+
+    /// Display-only rename of a repository (blank input clears the override).
+    private func renameRepo(_ repoID: String) {
+        guard let repo = store.state.repositories.first(where: { $0.id == repoID }),
+              let input = promptForText(prompt: "Repository name:", defaultValue: repo.sidebarDisplayName)
+        else { return }
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            _ = try store.setRepositoryDisplayName(id: repoID, displayName: trimmed.isEmpty ? nil : trimmed)
+            refreshSidebar(select: selectedWorktree?.id)
+        } catch { presentError(error) }
+    }
+
+    /// Set or clear a repository's identity color and repaint the sidebar.
+    private func setRepoColor(_ repoID: String, _ hex: String?) {
+        do {
+            _ = try store.setRepositoryColor(id: repoID, color: hex)
+            refreshSidebar(select: selectedWorktree?.id)
         } catch { presentError(error) }
     }
 

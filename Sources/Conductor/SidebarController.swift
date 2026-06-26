@@ -93,6 +93,13 @@ final class SidebarController: NSViewController {
     /// Right-click a worktree → "Remove Color" — clear the override, back to the default look.
     var onRemoveWorktreeColor: ((String) -> Void)?
 
+    /// Right-click a repo header → "Rename…" — set/clear the display-name override.
+    var onRenameRepo: ((String) -> Void)?
+    /// Right-click a repo header → "Set Color" swatch — apply a hex identity color.
+    var onSetRepoColor: ((String, String) -> Void)?
+    /// Right-click a repo header → "Remove Color" — clear the repo color.
+    var onRemoveRepoColor: ((String) -> Void)?
+
     private let rowMenu = NSMenu()
 
     override func loadView() {
@@ -148,6 +155,21 @@ final class SidebarController: NSViewController {
 
     @objc private func contextNewWorktree(_ sender: NSMenuItem) {
         (sender.representedObject as? String).map { onNewWorktree?($0) }
+    }
+
+    @objc private func contextRenameRepo(_ sender: NSMenuItem) {
+        (sender.representedObject as? String).map { onRenameRepo?($0) }
+    }
+
+    @objc private func contextSetRepoColor(_ sender: NSMenuItem) {
+        guard let info = sender.representedObject as? [String: String],
+              let id = info["id"], let hex = info["hex"] else { return }
+        onSetRepoColor?(id, hex)
+    }
+
+    @objc private func contextRemoveRepoColor(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        onRemoveRepoColor?(id)
     }
 
     func reload(sections: [RepositorySection], selectedWorktreeID: String?,
@@ -229,6 +251,34 @@ extension SidebarController: NSMenuDelegate {
         newWorktree.target = self
         newWorktree.representedObject = repoID
         menu.addItem(newWorktree)
+
+        // Repo-header right-click (not a worktree row): rename + color the repository.
+        if clickedWorktreeID() == nil {
+            menu.addItem(.separator())
+            let rename = NSMenuItem(title: "Rename…",
+                                    action: #selector(contextRenameRepo(_:)), keyEquivalent: "")
+            rename.target = self
+            rename.representedObject = repoID
+            menu.addItem(rename)
+
+            let colorItem = NSMenuItem(title: "Set Color", action: nil, keyEquivalent: "")
+            let colorMenu = NSMenu()
+            for hex in IdentityPalette.colors {
+                let swatch = NSMenuItem(title: hex, action: #selector(contextSetRepoColor(_:)), keyEquivalent: "")
+                swatch.target = self
+                swatch.representedObject = ["id": repoID, "hex": hex]
+                if let color = NSColor(hex: hex) { swatch.image = Self.swatchImage(color) }
+                colorMenu.addItem(swatch)
+            }
+            colorMenu.addItem(.separator())
+            let removeColor = NSMenuItem(title: "Remove Color",
+                                         action: #selector(contextRemoveRepoColor(_:)), keyEquivalent: "")
+            removeColor.target = self
+            removeColor.representedObject = repoID
+            colorMenu.addItem(removeColor)
+            colorItem.submenu = colorMenu
+            menu.addItem(colorItem)
+        }
 
         if let worktreeID = clickedWorktreeID() {
             menu.addItem(.separator())
