@@ -176,6 +176,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if worktreeID == selectedWorktree?.id {
                 selectedWorktree = store.state.worktrees.first { $0.id == worktreeID }
                 refreshChromeForActiveSurface()
+                // Keep the focused-pane border tint in sync with the new color.
+                currentSurface?.identityColor = (store.state.worktrees.first { $0.id == worktreeID }?.color).flatMap { NSColor(hex: $0) }
             }
         } catch { presentError(error) }
     }
@@ -516,6 +518,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// (non-idle agent state). Closing the last surface spawns a fresh shell — a selected
     /// worktree always has at least one surface (never an empty pane).
     private func closeSurface(_ id: String? = nil) {
+        // ⌘W (no explicit surface id): close the focused PANE first; only close the tab
+        // when the surface is down to its last pane.
+        if id == nil, let split = currentSurface, split.allPanes.count > 1 {
+            _ = split.closeFocused()
+            refreshChromeForActiveSurface()
+            refreshTabBar()
+            return
+        }
         guard let wtID = shownWorktreeID, let list = surfaces.existingSurfaces(for: wtID) else { return }
         guard let targetID = id ?? list.activeSurfaceID else { return }
         let state = agentStates[surfaceKey(wtID, targetID)] ?? .idle
@@ -812,7 +822,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let surfaceMenu = NSMenu(title: "Surface")
         addItem(to: surfaceMenu, "New Tab", #selector(newSurfaceAction), command: .newSurface)
         addItem(to: surfaceMenu, "Close Tab", #selector(closeSurfaceAction), command: .closeSurface)
-        addItem(to: surfaceMenu, "Split Surface", #selector(splitSurfaceAction), command: .splitSurface)
+        addItem(to: surfaceMenu, "Split Right", #selector(splitSurfaceAction), command: .splitSurface)
+        addItem(to: surfaceMenu, "Split Down", #selector(splitDownAction), command: .splitDown)
         surfaceMenu.addItem(.separator())
         addItem(to: surfaceMenu, "Next Tab", #selector(nextSurfaceAction), command: .nextSurface)
         addItem(to: surfaceMenu, "Previous Tab", #selector(prevSurfaceAction), command: .prevSurface)
@@ -878,8 +889,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func nextSurfaceAction() { nextSurface() }
     @objc private func prevSurfaceAction() { prevSurface() }
     @objc private func goToSurfaceAction(_ sender: NSMenuItem) { goToSurface(sender.tag) }
-    /// Reserved for PR B (splits). No-op in PR A.
-    @objc private func splitSurfaceAction() { /* PR B */ }
+    @objc private func splitSurfaceAction() { currentSurface?.splitFocused(axis: .horizontal) }
+    @objc private func splitDownAction() { currentSurface?.splitFocused(axis: .vertical) }
 
     /// Opens the focused worktree's directory in any installed app the user picks (one-off).
     @objc private func openWithOtherAppAction() {
