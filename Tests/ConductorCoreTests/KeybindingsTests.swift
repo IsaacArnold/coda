@@ -39,8 +39,8 @@ final class ShortcutCommandTests: XCTestCase {
         XCTAssertEqual(ShortcutCommand.toggleSidebar.defaultChord, KeyChord("s", command: true, control: true))
     }
 
-    func testThereAreEightBindableCommands() {
-        XCTAssertEqual(ShortcutCommand.allCases.count, 8)
+    func testThereAreTwentyTwoBindableCommands() {
+        XCTAssertEqual(ShortcutCommand.allCases.count, 22)
     }
 }
 
@@ -88,5 +88,33 @@ final class NormalizedKeyEquivalentTests: XCTestCase {
     func testRejectsEmptyAndControlChars() {
         XCTAssertNil(normalizedKeyEquivalent(charactersIgnoringModifiers: ""))
         XCTAssertNil(normalizedKeyEquivalent(charactersIgnoringModifiers: "\u{1}"))
+    }
+}
+
+final class SurfaceShortcutTests: XCTestCase {
+    func testNewSurfaceDefaultsToCommandT() {
+        XCTAssertEqual(ShortcutCommand.newSurface.defaultChord, KeyChord("t", command: true))
+    }
+    func testCloseSurfaceDefaultsToCommandW() {
+        XCTAssertEqual(ShortcutCommand.closeSurface.defaultChord, KeyChord("w", command: true))
+    }
+    func testNextPrevDefaults() {
+        XCTAssertEqual(ShortcutCommand.nextSurface.defaultChord, KeyChord("]", command: true, shift: true))
+        XCTAssertEqual(ShortcutCommand.prevSurface.defaultChord, KeyChord("[", command: true, shift: true))
+    }
+    func testSplitDefaultsToCommandD() {
+        XCTAssertEqual(ShortcutCommand.splitSurface.defaultChord, KeyChord("d", command: true))
+    }
+    func testGoToSurfaceDefaultsAreCommandDigits() {
+        XCTAssertEqual(ShortcutCommand.goToSurface1.defaultChord, KeyChord("1", command: true))
+        XCTAssertEqual(ShortcutCommand.goToSurface9.defaultChord, KeyChord("9", command: true))
+    }
+    func testAllSurfaceCommandsAreInSurfaceCategory() {
+        let surfaceCmds: [ShortcutCommand] = [.newSurface, .closeSurface, .nextSurface,
+            .prevSurface, .splitSurface, .goToSurface1, .goToSurface5, .goToSurface9]
+        for cmd in surfaceCmds { XCTAssertEqual(cmd.category, .surface) }
+    }
+    func testDefaultBindingsHaveNoConflicts() {
+        XCTAssertTrue(keybindingConflicts(Keybindings()).isEmpty)
     }
 }

@@ -65,10 +65,11 @@ public struct KeyChord: Codable, Equatable, Hashable, Sendable {
 }
 
 public enum ShortcutCategory: String, CaseIterable, Sendable {
-    case worktree, repository, view, app
+    case worktree, surface, repository, view, app
     public var displayName: String {
         switch self {
         case .worktree: return "Worktree"
+        case .surface: return "Surfaces"
         case .repository: return "Repository"
         case .view: return "View"
         case .app: return "App"
@@ -77,9 +78,10 @@ public enum ShortcutCategory: String, CaseIterable, Sendable {
     public var order: Int {
         switch self {
         case .worktree: return 0
-        case .repository: return 1
-        case .view: return 2
-        case .app: return 3
+        case .surface: return 1
+        case .repository: return 2
+        case .view: return 3
+        case .app: return 4
         }
     }
 }
@@ -87,6 +89,9 @@ public enum ShortcutCategory: String, CaseIterable, Sendable {
 public enum ShortcutCommand: String, Codable, CaseIterable, Sendable {
     case newWorktree, launchClaude, openInEditor, revealInFinder, archiveWorktree
     case addRepository, toggleSidebar, openSettings
+    case newSurface, closeSurface, nextSurface, prevSurface, splitSurface
+    case goToSurface1, goToSurface2, goToSurface3, goToSurface4, goToSurface5
+    case goToSurface6, goToSurface7, goToSurface8, goToSurface9
 
     public var displayName: String {
         switch self {
@@ -98,6 +103,20 @@ public enum ShortcutCommand: String, Codable, CaseIterable, Sendable {
         case .addRepository: return "Add Repository"
         case .toggleSidebar: return "Toggle Sidebar"
         case .openSettings: return "Settings"
+        case .newSurface: return "New Tab"
+        case .closeSurface: return "Close Tab"
+        case .nextSurface: return "Next Tab"
+        case .prevSurface: return "Previous Tab"
+        case .splitSurface: return "Split Surface"
+        case .goToSurface1: return "Go to Tab 1"
+        case .goToSurface2: return "Go to Tab 2"
+        case .goToSurface3: return "Go to Tab 3"
+        case .goToSurface4: return "Go to Tab 4"
+        case .goToSurface5: return "Go to Tab 5"
+        case .goToSurface6: return "Go to Tab 6"
+        case .goToSurface7: return "Go to Tab 7"
+        case .goToSurface8: return "Go to Tab 8"
+        case .goToSurface9: return "Go to Tab 9"
         }
     }
 
@@ -105,6 +124,10 @@ public enum ShortcutCommand: String, Codable, CaseIterable, Sendable {
         switch self {
         case .newWorktree, .launchClaude, .openInEditor, .revealInFinder, .archiveWorktree:
             return .worktree
+        case .newSurface, .closeSurface, .nextSurface, .prevSurface, .splitSurface,
+             .goToSurface1, .goToSurface2, .goToSurface3, .goToSurface4, .goToSurface5,
+             .goToSurface6, .goToSurface7, .goToSurface8, .goToSurface9:
+            return .surface
         case .addRepository: return .repository
         case .toggleSidebar: return .view
         case .openSettings: return .app
@@ -121,6 +144,20 @@ public enum ShortcutCommand: String, Codable, CaseIterable, Sendable {
         case .addRepository:   return KeyChord("n", command: true, shift: true)
         case .toggleSidebar:   return KeyChord("s", command: true, control: true)
         case .openSettings:    return KeyChord(",", command: true)
+        case .newSurface:      return KeyChord("t", command: true)
+        case .closeSurface:    return KeyChord("w", command: true)
+        case .nextSurface:     return KeyChord("]", command: true, shift: true)
+        case .prevSurface:     return KeyChord("[", command: true, shift: true)
+        case .splitSurface:    return KeyChord("d", command: true)
+        case .goToSurface1:    return KeyChord("1", command: true)
+        case .goToSurface2:    return KeyChord("2", command: true)
+        case .goToSurface3:    return KeyChord("3", command: true)
+        case .goToSurface4:    return KeyChord("4", command: true)
+        case .goToSurface5:    return KeyChord("5", command: true)
+        case .goToSurface6:    return KeyChord("6", command: true)
+        case .goToSurface7:    return KeyChord("7", command: true)
+        case .goToSurface8:    return KeyChord("8", command: true)
+        case .goToSurface9:    return KeyChord("9", command: true)
         }
     }
 }
