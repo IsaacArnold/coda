@@ -130,7 +130,8 @@ final class SidebarController: NSViewController {
         (sender.representedObject as? String).map { onNewWorktree?($0) }
     }
 
-    func reload(sections: [RepositorySection], selectedWorktreeID: String?) {
+    func reload(sections: [RepositorySection], selectedWorktreeID: String?,
+                selectedRepoID: String? = nil) {
         repoNodes = sections.map { section in
             RepoNode(repository: section.repository,
                      children: section.worktrees.map(WorktreeNode.init))
@@ -138,10 +139,16 @@ final class SidebarController: NSViewController {
         outline.reloadData()
         for node in repoNodes { outline.expandItem(node) }
 
-        if let selectedWorktreeID,
-           let node = worktreeNode(id: selectedWorktreeID) {
-            let row = outline.row(forItem: node)
-            if row >= 0 { outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) }
+        // Prefer a worktree selection; fall back to highlighting a repo header
+        // (e.g. a freshly added repo that has no worktrees yet).
+        let selectedItem: Any? = worktreeNode(id: selectedWorktreeID)
+            ?? repoNode(id: selectedRepoID)
+        if let selectedItem {
+            let row = outline.row(forItem: selectedItem)
+            if row >= 0 {
+                outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+                outline.scrollRowToVisible(row)
+            }
         }
     }
 
@@ -162,11 +169,17 @@ final class SidebarController: NSViewController {
         }
     }
 
-    private func worktreeNode(id: String) -> WorktreeNode? {
+    private func worktreeNode(id: String?) -> WorktreeNode? {
+        guard let id else { return nil }
         for repo in repoNodes {
             if let match = repo.children.first(where: { $0.worktree.id == id }) { return match }
         }
         return nil
+    }
+
+    private func repoNode(id: String?) -> RepoNode? {
+        guard let id else { return nil }
+        return repoNodes.first(where: { $0.repository.id == id })
     }
 
     /// A small filled square for a color menu item.

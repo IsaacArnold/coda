@@ -163,6 +163,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sidebar.reload(sections: sections, selectedWorktreeID: id)
     }
 
+    /// Refresh and highlight a repository header (e.g. a freshly added repo with no
+    /// worktrees yet, which has no worktree row to select).
+    private func refreshSidebar(selectRepo id: String?) {
+        let sections = groupWorktreesByRepository(repositories: store.state.repositories,
+                                                  worktrees: store.state.worktrees)
+        sidebar.reload(sections: sections, selectedWorktreeID: nil, selectedRepoID: id)
+    }
+
     /// Per-repo settings, opened as a sheet from that repo in the sidebar (right-click).
     private func openRepoSettings(repoID: String) {
         guard let repo = store.state.repositories.first(where: { $0.id == repoID }) else { return }
@@ -261,7 +269,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.canChooseFiles = false
         panel.prompt = "Add Repo"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        do { _ = try store.addRepository(path: url.path) }
+        do {
+            // Refresh + highlight so the added repo is visibly there (it returns the
+            // existing one if already added, which highlights it just the same).
+            let repo = try store.addRepository(path: url.path)
+            refreshSidebar(selectRepo: repo.id)
+        }
         catch { presentError(error) }
     }
 
