@@ -16,6 +16,23 @@ private final class WorktreeNode: NSObject {
     init(_ worktree: Worktree) { self.worktree = worktree }
 }
 
+/// Supacode's sidebar branch glyph — the GitHub-Octicons `git-branch` mark
+/// (bundled from supacode's asset catalog), as a tintable template image.
+/// Falls back to the SF Symbol on the unlikely chance the asset is missing.
+func branchGlyphImage(diameter: CGFloat = 16) -> NSImage {
+    let image: NSImage
+    if let url = Bundle.module.url(forResource: "git-branch", withExtension: "svg", subdirectory: "Resources"),
+       let asset = NSImage(contentsOf: url) {
+        image = asset
+    } else {
+        image = NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: "branch")
+            ?? NSImage()
+    }
+    image.size = NSSize(width: diameter, height: diameter)
+    image.isTemplate = true   // so contentTintColor (identity color) paints it
+    return image
+}
+
 /// Maps an agent state to its badge tint (nil → no badge). Shared by the sidebar
 /// rows and the toolbar notch.
 func agentBadgeColor(_ state: AgentState) -> NSColor? {
@@ -27,10 +44,13 @@ func agentBadgeColor(_ state: AgentState) -> NSColor? {
     }
 }
 
-/// A worktree row: branch glyph + title + a trailing agent-state badge dot.
+/// A worktree row, two-line à la Supacode: branch glyph + (title over a
+/// `repo · branch` subtitle) + a trailing agent-state badge dot.
 /// The dot is a layer-drawn circle (not an SF symbol) so it always renders.
 private final class WorktreeCellView: NSTableCellView {
     let badge = NSView()
+    /// The `.footnote`-sized secondary subtitle (`repo · branch`) under the title.
+    let subtitleLabel = NSTextField(labelWithString: "")
 
     func applyBadge(_ state: AgentState) {
         badge.wantsLayer = true
@@ -253,6 +273,11 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         (item as? RepoNode).map { !$0.children.isEmpty } ?? false
     }
 
+    /// Worktree rows are two-line (title + subtitle); repo headers stay single-line.
+    func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
+        item is WorktreeNode ? 38 : 24
+    }
+
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         if let repo = item as? RepoNode {
             // Repo rows are plain secondary-gray section headers (no icon), à la Supacode.
@@ -264,7 +289,10 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
         if let wt = item as? WorktreeNode {
             let cell = makeWorktreeCell()
-            cell.textField?.stringValue = "\(wt.worktree.title)  [\(wt.worktree.branch)]"
+            cell.textField?.stringValue = wt.worktree.title
+            let repoName = (outlineView.parent(forItem: item) as? RepoNode)?.repository.name
+            cell.subtitleLabel.stringValue = repoName.map { "\($0) · \(wt.worktree.branch)" }
+                ?? wt.worktree.branch
             cell.applyBadge(agentStates[wt.worktree.id] ?? .idle)
             cell.applyIdentityColor(wt.worktree.color.flatMap { NSColor(hex: $0) },
                                     glyphTint: chrome?.color(.glyphTint).nsColor)
@@ -281,9 +309,6 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         outline.reloadData()
     }
 
-    /// Supacode's git-branch glyph; falls back to the older symbol on pre-macOS 15.
-    private static let branchSymbol = "arrow.trianglehead.branch"
-
     func outlineViewSelectionDidChange(_ notification: Notification) {
         switch outline.item(atRow: outline.selectedRow) {
         case let wt as WorktreeNode: onSelect?(wt.worktree)
@@ -299,24 +324,36 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         let cell = WorktreeCellView()
         let icon = NSImageView()
         icon.translatesAutoresizingMaskIntoConstraints = false
-        icon.image = NSImage(systemSymbolName: Self.branchSymbol, accessibilityDescription: nil)
-            ?? NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: nil)
+        icon.image = branchGlyphImage()
         icon.contentTintColor = .secondaryLabelColor
+        // Title: system body (13pt) — matches Supacode's `.font(.body)` worktree name.
         let tf = NSTextField(labelWithString: "")
         tf.translatesAutoresizingMaskIntoConstraints = false
         tf.font = .systemFont(ofSize: NSFont.systemFontSize)
         tf.lineBreakMode = .byTruncatingTail
+        // Subtitle: secondary `.footnote` (10pt) — matches Supacode's `repo · branch` line.
+        let sub = cell.subtitleLabel
+        sub.translatesAutoresizingMaskIntoConstraints = false
+        sub.font = .systemFont(ofSize: NSFont.preferredFont(forTextStyle: .footnote).pointSize)
+        sub.textColor = .secondaryLabelColor
+        sub.lineBreakMode = .byTruncatingTail
         let badge = cell.badge
         badge.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(icon); cell.addSubview(tf); cell.addSubview(badge)
+        cell.addSubview(icon); cell.addSubview(tf); cell.addSubview(sub); cell.addSubview(badge)
         cell.imageView = icon; cell.textField = tf
+        // Stack title over subtitle; the glyph + badge center across both lines.
+        let textTop = tf.topAnchor.constraint(equalTo: cell.topAnchor, constant: 4)
         NSLayoutConstraint.activate([
             icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
             icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             icon.widthAnchor.constraint(equalToConstant: 16),
+            textTop,
             tf.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 6),
-            tf.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             tf.trailingAnchor.constraint(lessThanOrEqualTo: badge.leadingAnchor, constant: -6),
+            sub.topAnchor.constraint(equalTo: tf.bottomAnchor, constant: 1),
+            sub.leadingAnchor.constraint(equalTo: tf.leadingAnchor),
+            sub.trailingAnchor.constraint(lessThanOrEqualTo: badge.leadingAnchor, constant: -6),
+            sub.bottomAnchor.constraint(equalTo: cell.bottomAnchor, constant: -4),
             badge.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
             badge.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             badge.widthAnchor.constraint(equalToConstant: 8),

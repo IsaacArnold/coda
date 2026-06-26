@@ -114,6 +114,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         splitVC = NSSplitViewController()
         splitVC.addSplitViewItem(sidebarItem)
         splitVC.addSplitViewItem(detailItem)
+        // Persist the user's dragged sidebar width across launches; a first-launch
+        // default is applied below once the split view is laid out.
+        splitVC.splitView.autosaveName = "MainSidebarSplit"
 
         window = NSWindow(contentViewController: splitVC)
         window.setContentSize(NSSize(width: 1100, height: 700))
@@ -134,6 +137,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateNotch()
         window.center()
         window.makeKeyAndOrderFront(nil)
+        // Default sidebar width on first launch (still freely draggable); the
+        // autosave restores the user's own width on every launch after that.
+        if UserDefaults.standard.object(forKey: "NSSplitView Subview Frames MainSidebarSplit") == nil {
+            splitVC.splitView.setPosition(255, ofDividerAt: 0)
+        }
     }
 
     private func wireSidebar() {
@@ -733,8 +741,12 @@ extension AppDelegate: NSToolbarDelegate {
             item.label = ""
             // The toolbar already gives each item a single rounded background, so the
             // notch content sits directly in it — no extra fill (that caused doubling).
-            notchIcon.symbolConfiguration = .init(pointSize: 12, weight: .regular)
-            notchLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+            // Match Supacode's notch (MotivationalStatusView): a `.callout`-sized
+            // time-of-day glyph + `.footnote`, monospaced status text.
+            notchIcon.symbolConfiguration = .init(
+                pointSize: NSFont.preferredFont(forTextStyle: .callout).pointSize, weight: .regular)
+            notchLabel.font = .monospacedSystemFont(
+                ofSize: NSFont.preferredFont(forTextStyle: .footnote).pointSize, weight: .regular)
             notchLabel.lineBreakMode = .byTruncatingTail
             notchLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 340).isActive = true
             notchBadge.wantsLayer = true
