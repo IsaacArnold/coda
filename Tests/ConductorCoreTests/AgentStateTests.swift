@@ -107,3 +107,21 @@ final class AgentStateTests: XCTestCase {
         XCTAssertEqual(agentState(fromOutput: "   \n  "), .idle)
     }
 }
+
+final class AgentStateRollupTests: XCTestCase {
+    func testEmptyRollsUpToIdle() {
+        XCTAssertEqual(rollup([]), .idle)
+    }
+    func testNeedsYouWinsOverEverything() {
+        XCTAssertEqual(rollup([.idle, .working, .done, .needsYou]), .needsYou)
+    }
+    func testWorkingWinsOverDoneAndIdle() {
+        XCTAssertEqual(rollup([.idle, .done, .working]), .working)
+    }
+    func testDoneWinsOverIdle() {
+        XCTAssertEqual(rollup([.idle, .done, .idle]), .done)
+    }
+    func testAllIdleRollsUpToIdle() {
+        XCTAssertEqual(rollup([.idle, .idle]), .idle)
+    }
+}

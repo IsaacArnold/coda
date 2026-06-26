@@ -73,3 +73,12 @@ private func lastMessageLine(_ output: String) -> String? {
     }
     return nil
 }
+
+/// The worktree-level badge across its surfaces: the highest-priority state present.
+/// Priority: needsYou > working > done > idle. An empty list rolls up to idle.
+public func rollup(_ states: [AgentState]) -> AgentState {
+    if states.contains(.needsYou) { return .needsYou }
+    if states.contains(.working) { return .working }
+    if states.contains(.done) { return .done }
+    return .idle
+}
