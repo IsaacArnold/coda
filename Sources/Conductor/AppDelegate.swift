@@ -495,7 +495,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Close a specific surface (defaults to the active one). Confirms if it looks busy
-    /// (non-idle agent state). Closing the last surface leaves the worktree empty.
+    /// (non-idle agent state). Closing the last surface spawns a fresh shell — a selected
+    /// worktree always has at least one surface (never an empty pane).
     private func closeSurface(_ id: String? = nil) {
         guard let wtID = shownWorktreeID, let list = surfaces.existingSurfaces(for: wtID) else { return }
         guard let targetID = id ?? list.activeSurfaceID else { return }
@@ -517,11 +518,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             newActive.view.isHidden = false
             currentSurface = newActive
             view(focus: newActive)
-        } else {
-            // Last tab closed: worktree is now empty. Allow re-focus to spawn a fresh shell.
+        } else if let wt = selectedWorktree {
+            // Never leave a worktree empty: closing the last tab spawns a fresh shell.
+            // createSurface re-establishes shownWorktreeID + active and refreshes chrome/tab bar.
             currentSurface = nil
-            shownWorktreeID = nil
-            surfaces.setActive(nil)
+            createSurface(in: wt, runSetupAndAutoLaunch: false)
+            return
         }
         refreshChromeForActiveSurface()
         refreshTabBar()

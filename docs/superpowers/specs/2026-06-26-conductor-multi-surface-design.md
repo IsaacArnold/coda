@@ -32,7 +32,7 @@ PR A wires the seams for B and C (a no-op `splitSurface`/⌘D command; a reserve
 | Tab identity | Auto-label + optional rename + optional **per-tab color override**. Active tab's *effective* color drives chrome. |
 | Keybinds | Full **customizable** set: ⌘T new, ⌘W close, ⌘⇧] / ⌘⇧[ next/prev, ⌘1–9 go-to-N, ⌘D split (PR B). |
 | Launch Claude (⌘R) | Runs `claude` in the **active** surface (unchanged, now scoped to active tab). |
-| Close tab | Confirm if a foreground process is busy; closing the **last** tab leaves the worktree empty — re-focus spawns a fresh shell. |
+| Close tab | Confirm if a foreground process is busy; closing the **last** tab respawns a fresh shell immediately — a selected worktree always has ≥1 surface (never an empty pane). _(Revised 2026-06-26 after in-app testing: the original "leave worktree empty" left a dead-end with no affordance; flipped to never-empty.)_ |
 | Badge | **Per-tab badge** in the tab bar **+ sidebar/notch rollup** (priority: needsYou > working > done > idle). |
 | Restore | **In-memory only**, no cross-restart restore. Surfaces persist across worktree switches but a restart starts each worktree with one fresh shell. |
 
