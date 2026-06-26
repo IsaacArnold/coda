@@ -338,8 +338,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         do {
             try store.archiveWorktree(id: s.id, deleteBranch: true)
-            // Tear down the archived worktree's surface (kills its PTY, no leak).
-            if let surface = surfaces.evict(worktreeID: s.id) {
+            // TODO: Task 8 - update to handle array from new API
+            let evicted = surfaces.evict(worktreeID: s.id)
+            for surface in evicted {
                 surface.view.removeFromSuperview()
                 surface.removeFromParent()
             }
@@ -360,18 +361,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         selectedWorktree = s
         updateNotch()
 
+        // TODO: Task 8 - update to new two-level API
         // Hide (don't destroy) the surface we're leaving — its PTY keeps running.
-        if let activeID = surfaces.activeWorktreeID, let leaving = surfaces.handle(for: activeID) {
-            leaving.view.isHidden = true
+        if let activeID = surfaces.activeWorktreeID, let list = surfaces.existingSurfaces(for: activeID) {
+            for entry in list.entries {
+                entry.handle.view.isHidden = true
+            }
         }
         surfaces.setActive(s?.id)
         currentSurface = nil
         guard let s else { worktreeBar.update(title: nil, branch: nil, colorHex: nil, agentState: .idle); return }
 
+        // TODO: Task 8 - update to new two-level API
         // Reuse the live surface if we've seen this worktree before; otherwise build one.
         let surface: TerminalSurface
-        if let existing = surfaces.handle(for: s.id) {
-            surface = existing
+        if let list = surfaces.existingSurfaces(for: s.id), let entry = list.entries.first {
+            surface = entry.handle
             surface.view.isHidden = false
         } else {
             let repo = store.state.repositories.first { $0.id == s.repoID }
@@ -383,7 +388,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let command = (isNewlyCreated && repo?.autoLaunchClaude == true) ? launchCommand(for: repo!) : ""
             surface = TerminalSurface(workingDirectory: s.worktreePath, command: command, setupScript: setup)
             surface.onOpenFile = { [weak self] path, line in self?.openInDefaultEditor(path: path, line: line) }
-            surfaces.register(surface, for: s.id)
+            // TODO: Task 8 - Add surface using new two-level API
+            surfaces.surfaces(for: s.id).add(surface, surface: Surface(id: "primary"))
             surface.applyTheme(activeTheme)
             surface.applyFont(resolvedTerminalFont())
             detail.addChild(surface)
@@ -417,9 +423,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Push the active terminal theme to every live surface and repaint the chrome.
     private func applyActiveTheme() {
-        for wt in store.state.worktrees {
-            surfaces.handle(for: wt.id)?.applyTheme(activeTheme)
-        }
+        // TODO: Task 8 - apply theme using new two-level API
+        // for wt in store.state.worktrees {
+        //     if let list = surfaces.existingSurfaces(for: wt.id) {
+        //         for entry in list.entries {
+        //             entry.handle.applyTheme(activeTheme)
+        //         }
+        //     }
+        // }
         applyChromeTheme()
     }
 
@@ -456,8 +467,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setTerminalFont(_ pref: TerminalFontPref) {
         preferences.terminalFont = pref
         do { try prefsStore.save(preferences) } catch { presentError(error) }
-        let font = resolvedTerminalFont()
-        for wt in store.state.worktrees { surfaces.handle(for: wt.id)?.applyFont(font) }
+        // TODO: Task 8 - apply font using new two-level API
+        // let font = resolvedTerminalFont()
+        // for wt in store.state.worktrees {
+        //     if let list = surfaces.existingSurfaces(for: wt.id) {
+        //         for entry in list.entries {
+        //             entry.handle.applyFont(font)
+        //         }
+        //     }
+        // }
     }
 
     /// iTerm2-style: the window blends into the terminal background and flips
@@ -668,8 +686,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func pollAgentStates() {
         var states: [String: AgentState] = [:]
         for wt in store.state.worktrees {
-            let snapshot = surfaces.handle(for: wt.id)?.outputSnapshot()
-            states[wt.id] = snapshot.map { agentState(fromOutput: $0) } ?? .idle
+            // TODO: Task 8 - poll surface output using new two-level API
+            // let snapshot = surfaces.existingSurfaces(for: wt.id)?.entries.first?.handle.outputSnapshot()
+            // states[wt.id] = snapshot.map { agentState(fromOutput: $0) } ?? .idle
+            states[wt.id] = .idle
         }
         agentStates = states
         sidebar.updateAgentStates(states)
