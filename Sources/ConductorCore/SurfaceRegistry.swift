@@ -1,34 +1,40 @@
 import Foundation
 
-/// Tracks which worktree owns which (opaque) terminal-surface handle, plus the
-/// active worktree, so the shell can keep surfaces alive across sidebar switches
-/// and tear them down on archive. Pure: the `Handle` is whatever the shell stores
-/// (a `TerminalSurface`); Core never touches AppKit.
+/// Tracks each worktree's ordered list of terminal surfaces plus the active worktree,
+/// so the shell keeps surfaces alive across sidebar switches and tears them all down on
+/// archive. Pure: `Handle` is whatever the shell stores (a `TerminalSurface`).
 public final class SurfaceRegistry<Handle> {
-    private var handles: [String: Handle] = [:]
+    private var worktrees: [String: WorktreeSurfaces<Handle>] = [:]
     public private(set) var activeWorktreeID: String?
 
     public init() {}
 
-    /// Associate a surface handle with a worktree. One handle per worktree: a
-    /// later registration for the same worktree replaces the earlier one.
-    public func register(_ handle: Handle, for worktreeID: String) {
-        handles[worktreeID] = handle
+    /// The surface list for a worktree, creating an empty one on first access. Returns the
+    /// same class instance each time, so mutations through it persist.
+    public func surfaces(for worktreeID: String) -> WorktreeSurfaces<Handle> {
+        if let existing = worktrees[worktreeID] { return existing }
+        let fresh = WorktreeSurfaces<Handle>()
+        worktrees[worktreeID] = fresh
+        return fresh
     }
 
-    public func handle(for worktreeID: String) -> Handle? { handles[worktreeID] }
+    /// Peek without creating — nil if the worktree has never had a surface.
+    public func existingSurfaces(for worktreeID: String) -> WorktreeSurfaces<Handle>? {
+        worktrees[worktreeID]
+    }
 
-    /// Mark the active worktree (the one whose surface is on screen). Idempotent.
+    /// Mark the active worktree (the one whose surfaces are on screen). Idempotent.
     public func setActive(_ worktreeID: String?) { activeWorktreeID = worktreeID }
 
-    /// Remove and return a worktree's handle (on archive), so the shell can tear
-    /// the surface down. Clears the active selection if it was the evicted worktree.
+    /// Remove a worktree's entire surface list (on archive); returns all handles so the
+    /// shell can tear down every PTY. Clears the active selection if it was this worktree.
     @discardableResult
-    public func evict(worktreeID: String) -> Handle? {
-        let removed = handles.removeValue(forKey: worktreeID)
+    public func evict(worktreeID: String) -> [Handle] {
+        let removed = worktrees.removeValue(forKey: worktreeID)
         if activeWorktreeID == worktreeID { activeWorktreeID = nil }
-        return removed
+        return removed?.handles ?? []
     }
 
-    public var count: Int { handles.count }
+    /// Worktree ids that currently have a surface list (for badge polling).
+    public var worktreeIDs: [String] { Array(worktrees.keys) }
 }

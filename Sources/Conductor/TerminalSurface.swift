@@ -15,6 +15,10 @@ final class TerminalSurface: NSViewController {
 
     /// Opens a ⌘-clicked `path:line` in the default editor (wired by AppDelegate).
     var onOpenFile: ((String, Int?) -> Void)?
+    /// The live terminal title (OSC 0/2, set by the shell/claude), used for the tab label.
+    private(set) var terminalTitle: String = ""
+    /// Fired when the terminal title changes, so the tab bar can relabel.
+    var onTitleChange: ((String) -> Void)?
 
     init(workingDirectory: String, command: String, setupScript: String = "") {
         self.workingDirectory = workingDirectory
@@ -29,6 +33,7 @@ final class TerminalSurface: NSViewController {
         terminal.autoresizingMask = [.width, .height]
         terminal.fallbackDirectory = workingDirectory
         terminal.onOpenFile = { [weak self] path, line in self?.onOpenFile?(path, line) }
+        terminal.processDelegate = self
         view = terminal
     }
 
@@ -102,4 +107,19 @@ final class TerminalSurface: NSViewController {
         if let pendingFont { applyFont(pendingFont) }
         if let pendingTheme { applyTheme(pendingTheme) }
     }
+}
+
+extension TerminalSurface: LocalProcessTerminalViewDelegate {
+    func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
+
+    func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
+        terminalTitle = title
+        onTitleChange?(title)
+    }
+
+    func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
+        terminal.currentDirectory = directory
+    }
+
+    func processTerminated(source: TerminalView, exitCode: Int32?) {}
 }
