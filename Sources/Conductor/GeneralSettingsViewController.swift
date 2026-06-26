@@ -10,12 +10,17 @@ final class GeneralSettingsViewController: NSViewController {
     private let editorPopup = NSPopUpButton()
     private var editor: Editor
 
+    private let fontValueLabel = NSTextField(labelWithString: "")
+    private var terminalFont: NSFont
+
     var onChangeEditor: ((Editor) -> Void)?
+    var onChangeFont: ((TerminalFontPref) -> Void)?
 
     private static let otherTitle = "Other…"
 
-    init(editor: Editor) {
+    init(editor: Editor, terminalFont: NSFont) {
         self.editor = editor
+        self.terminalFont = terminalFont
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -37,7 +42,18 @@ final class GeneralSettingsViewController: NSViewController {
         row.orientation = .horizontal
         row.spacing = 8
 
-        let stack = NSStackView(views: [title, row, hint])
+        let fontTitle = NSTextField(labelWithString: "Terminal font")
+        fontTitle.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        updateFontLabel()
+        let changeFontButton = NSButton(title: "Change…", target: self, action: #selector(chooseFont))
+        let fontRow = NSStackView(views: [NSTextField(labelWithString: "Font:"), fontValueLabel, changeFontButton])
+        fontRow.orientation = .horizontal
+        fontRow.spacing = 8
+        let fontHint = NSTextField(labelWithString: "Powerline / Nerd-Font glyphs render only if the chosen font includes them.")
+        fontHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        fontHint.textColor = .secondaryLabelColor
+
+        let stack = NSStackView(views: [title, row, hint, fontTitle, fontRow, fontHint])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
@@ -84,6 +100,25 @@ final class GeneralSettingsViewController: NSViewController {
             onChangeEditor?(chosen)
         }
         // else: the custom entry is already selected — nothing changed.
+    }
+
+    private func updateFontLabel() {
+        let name = terminalFont.displayName ?? terminalFont.fontName
+        fontValueLabel.stringValue = "\(name) \(Int(terminalFont.pointSize))"
+    }
+
+    @objc private func chooseFont() {
+        NSFontManager.shared.target = self
+        NSFontManager.shared.setSelectedFont(terminalFont, isMultiple: false)
+        NSFontManager.shared.orderFrontFontPanel(self)
+    }
+
+    /// Sent by NSFontManager (via the responder chain) when the user picks a font.
+    @objc func changeFont(_ sender: NSFontManager?) {
+        guard let sender else { return }
+        terminalFont = sender.convert(terminalFont)
+        updateFontLabel()
+        onChangeFont?(TerminalFontPref(name: terminalFont.fontName, size: Double(terminalFont.pointSize)))
     }
 
     private func pickOtherApp() {

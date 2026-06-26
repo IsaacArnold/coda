@@ -34,8 +34,11 @@ final class ThemeSettingsViewController: NSViewController {
         tableView.delegate = self
         tableView.doubleAction = #selector(applySelected)
         tableView.target = self
+        // Transparent list so the themed window background shows through (like the sidebar).
+        tableView.backgroundColor = .clear
         scroll.documentView = tableView
         scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
         scroll.translatesAutoresizingMaskIntoConstraints = false
 
         let applyButton = NSButton(title: "Apply", target: self, action: #selector(applySelected))

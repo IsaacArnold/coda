@@ -11,6 +11,7 @@ final class TerminalSurface: NSViewController {
     private let setupScript: String
     private var terminal: ClickableTerminalView!
     private var pendingTheme: TerminalTheme?
+    private var pendingFont: NSFont?
 
     /// Opens a ⌘-clicked `path:line` in the default editor (wired by AppDelegate).
     var onOpenFile: ((String, Int?) -> Void)?
@@ -49,6 +50,13 @@ final class TerminalSurface: NSViewController {
         terminal.nativeForegroundColor = theme.foreground.nsColor
         terminal.nativeBackgroundColor = theme.background.nsColor
         terminal.caretColor = theme.cursor.nsColor
+    }
+
+    /// Set the terminal font. Safe before the PTY starts — cached and applied on layout.
+    func applyFont(_ font: NSFont) {
+        pendingFont = font
+        guard terminal != nil else { return }
+        terminal.font = font
     }
 
     /// Forwarded from AppDelegate's ⌘+click monitor. Returns true if it opened something.
@@ -91,6 +99,7 @@ final class TerminalSurface: NSViewController {
                               environment: nil,
                               execName: "-zsh",
                               currentDirectory: workingDirectory)
+        if let pendingFont { applyFont(pendingFont) }
         if let pendingTheme { applyTheme(pendingTheme) }
     }
 }

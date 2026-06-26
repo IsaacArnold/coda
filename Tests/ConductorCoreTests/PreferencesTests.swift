@@ -41,6 +41,20 @@ final class PreferencesTests: XCTestCase {
         let back = try JSONDecoder().decode(Preferences.self, from: JSONEncoder().encode(prefs))
         XCTAssertEqual(back.activeTheme, "Dracula")
     }
+
+    func testTerminalFontDefaultsNilForOldPrefs() throws {
+        // Prefs written before the font picker carried no terminalFont key.
+        let json = #"{"defaultEditor":{"name":"Visual Studio Code","bundleID":"com.microsoft.VSCode","urlScheme":"vscode"}}"#
+        let prefs = try JSONDecoder().decode(Preferences.self, from: Data(json.utf8))
+        XCTAssertNil(prefs.terminalFont)
+    }
+
+    func testTerminalFontRoundTrips() throws {
+        var prefs = Preferences()
+        prefs.terminalFont = TerminalFontPref(name: "DankMono-Regular", size: 15)
+        let back = try JSONDecoder().decode(Preferences.self, from: JSONEncoder().encode(prefs))
+        XCTAssertEqual(back.terminalFont, TerminalFontPref(name: "DankMono-Regular", size: 15))
+    }
 }
 
 final class KnownEditorsTests: XCTestCase {

@@ -29,9 +29,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var keybindings = Keybindings()
     private var clickMonitor: Any?
     private var settingsWC: NSWindowController?
-    // Open-in toolbar item refs, so its label/tooltip track the chosen default editor.
+    // Open-in toolbar item ref, so its icon/tooltip/menu track the chosen default editor.
     private weak var openInItem: NSMenuToolbarItem?
-    private weak var openInDefaultMenuItem: NSMenuItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         store = makeStore()
@@ -142,10 +141,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sidebar.onRepoSettings = { [weak self] repoID in self?.openRepoSettings(repoID: repoID) }
         sidebar.onNewWorktree = { [weak self] repoID in self?.newWorktree(repoID: repoID) }
         sidebar.onSetWorktreeColor = { [weak self] worktreeID, hex in self?.setWorktreeColor(worktreeID, hex) }
+        sidebar.onRemoveWorktreeColor = { [weak self] worktreeID in self?.setWorktreeColor(worktreeID, nil) }
     }
 
     /// Override a worktree's identity color and repaint its bar + sidebar row.
-    private func setWorktreeColor(_ worktreeID: String, _ hex: String) {
+    private func setWorktreeColor(_ worktreeID: String, _ hex: String?) {
         do {
             _ = try store.setWorktreeColor(id: worktreeID, color: hex)
             refreshSidebar(select: selectedWorktree?.id)
@@ -186,13 +186,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 themeNames: themeStore.themeNames(),
                 activeTheme: preferences.activeTheme ?? defaultThemeName,
                 onApplyTheme: { [weak self] name in self?.setActiveTheme(named: name) },
-                onImportTheme: { [weak self] url in try? self?.themeStore.importTheme(from: url) })
+                onImportTheme: { [weak self] url in try? self?.themeStore.importTheme(from: url) },
+                terminalFont: resolvedTerminalFont(),
+                onChangeFont: { [weak self] pref in self?.setTerminalFont(pref) })
             let win = NSWindow(contentViewController: tab)
             win.title = "Settings"
             win.styleMask = [.titled, .closable]
             win.toolbarStyle = .preference
+            win.titlebarAppearsTransparent = true   // let the themed bg flow into the tab strip
             win.isReleasedWhenClosed = false
             settingsWC = NSWindowController(window: win)
+        }
+        // Match the active theme each time it opens (the window is cached, so re-apply here).
+        if let win = settingsWC?.window {
+            applyWindowChrome(ChromeTheme(terminal: activeTheme), to: win)
         }
         settingsWC?.window?.center()
         settingsWC?.showWindow(nil)
@@ -202,9 +209,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setDefaultEditor(_ editor: Editor) {
         preferences.defaultEditor = editor
         do { try prefsStore.save(preferences) } catch { presentError(error) }
-        // Keep the Open-in control's label/tooltip in sync with the chosen editor.
+        // Keep the Open-in control's tooltip + icon + menu in sync with the chosen editor.
         openInItem?.toolTip = "Open the worktree in \(editor.name) (⌘O)"
-        openInDefaultMenuItem?.title = "Open in \(editor.name)"
+        rebuildOpenInMenu()
+    }
+
+    /// An installed app's Finder icon, sized for a menu/toolbar; nil if the app isn't installed.
+    private func appIcon(bundleID: String, size: CGFloat = 16) -> NSImage? {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return nil }
+        let icon = NSWorkspace.shared.icon(forFile: url.path)
+        icon.size = NSSize(width: size, height: size)
+        return icon
+    }
+
+    /// Populate the Open-in control like Supacode: the toolbar button shows the default
+    /// editor's app icon, and the dropdown lists every installed known editor with its
+    /// icon + name (a checkmark on the current default), then "Open with Other App…".
+    private func rebuildOpenInMenu() {
+        guard let item = openInItem else { return }
+        item.image = appIcon(bundleID: preferences.defaultEditor.bundleID, size: 18)
+            ?? NSImage(systemSymbolName: "arrow.up.forward.app", accessibilityDescription: "Open in")
+        let menu = NSMenu()
+        for editor in Editor.knownEditors {
+            guard let icon = appIcon(bundleID: editor.bundleID) else { continue }   // installed only
+            let mi = NSMenuItem(title: "Open in \(editor.name)",
+                                action: #selector(openInSpecificEditor(_:)), keyEquivalent: "")
+            mi.target = self
+            mi.image = icon
+            mi.representedObject = editor.bundleID
+            mi.state = (editor.bundleID == preferences.defaultEditor.bundleID) ? .on : .off
+            menu.addItem(mi)
+        }
+        menu.addItem(.separator())
+        let openOther = NSMenuItem(title: "Open with Other App…",
+                                   action: #selector(openWithOtherAppAction), keyEquivalent: "")
+        openOther.target = self
+        menu.addItem(openOther)
+        item.menu = menu
+    }
+
+    /// Open the selected worktree in a specific known editor (one-off; doesn't change the default).
+    @objc private func openInSpecificEditor(_ sender: NSMenuItem) {
+        guard let bundleID = sender.representedObject as? String else { return }
+        guard let wt = selectedWorktree else { presentMessage("Select a worktree first."); return }
+        runOpen(["-b", bundleID, wt.worktreePath])
     }
 
     private func addRepo() {
@@ -293,6 +341,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             surface.onOpenFile = { [weak self] path, line in self?.openInDefaultEditor(path: path, line: line) }
             surfaces.register(surface, for: s.id)
             surface.applyTheme(activeTheme)
+            surface.applyFont(resolvedTerminalFont())
             detail.addChild(surface)
             surface.view.translatesAutoresizingMaskIntoConstraints = false
             detail.view.addSubview(surface.view)
@@ -330,14 +379,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyChromeTheme()
     }
 
+    /// The bundled "Symbols Nerd Font Mono", registered for this process for use as a glyph
+    /// fallback; resolves to its PostScript name once (nil if the resource is missing).
+    private static let nerdFallbackFontName: String? = {
+        guard let url = Bundle.module.url(forResource: "SymbolsNerdFontMono-Regular",
+                                          withExtension: "ttf", subdirectory: "Resources") else { return nil }
+        CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+        guard let descs = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],
+              let first = descs.first,
+              let name = CTFontDescriptorCopyAttribute(first, kCTFontNameAttribute) as? String else { return nil }
+        return name
+    }()
+
+    /// The configured terminal font (or the default monospaced font), augmented with the
+    /// bundled Nerd Font as a *cascade fallback* so powerline / icon glyphs render even when
+    /// the chosen font lacks them. The base font is untouched — fallback only fills glyphs the
+    /// base font is missing, so e.g. Dank Mono's own characters render from Dank Mono.
+    private func resolvedTerminalFont() -> NSFont {
+        let base: NSFont = {
+            if let pref = preferences.terminalFont, let font = NSFont(name: pref.name, size: CGFloat(pref.size)) {
+                return font
+            }
+            return .monospacedSystemFont(ofSize: 13, weight: .regular)
+        }()
+        guard let nerdName = Self.nerdFallbackFontName else { return base }
+        let nerdDescriptor = NSFontDescriptor(fontAttributes: [.name: nerdName])
+        let descriptor = base.fontDescriptor.addingAttributes([.cascadeList: [nerdDescriptor]])
+        return NSFont(descriptor: descriptor, size: base.pointSize) ?? base
+    }
+
+    /// Persist a new terminal font and re-apply it to every live surface.
+    private func setTerminalFont(_ pref: TerminalFontPref) {
+        preferences.terminalFont = pref
+        do { try prefsStore.save(preferences) } catch { presentError(error) }
+        let font = resolvedTerminalFont()
+        for wt in store.state.worktrees { surfaces.handle(for: wt.id)?.applyFont(font) }
+    }
+
     /// iTerm2-style: the window blends into the terminal background and flips
     /// light/dark by its luminance. All chrome colors read from ChromeTheme.
     private func applyChromeTheme() {
         let chrome = ChromeTheme(terminal: activeTheme)
-        window.appearance = chrome.appearance.nsAppearance
-        window.backgroundColor = chrome.color(.windowBackground).nsColor
+        applyWindowChrome(chrome, to: window)
         sidebar.applyChrome(chrome)
         updateNotch()
+        // Re-theme the Settings window too, if it's open (e.g. theme switched from its Themes tab).
+        if let settings = settingsWC?.window { applyWindowChrome(chrome, to: settings) }
+    }
+
+    /// Apply the derived chrome (appearance + background) to a window so it blends into the
+    /// active terminal theme. Shared by the main window and the Settings window.
+    private func applyWindowChrome(_ chrome: ChromeTheme, to window: NSWindow) {
+        window.appearance = chrome.appearance.nsAppearance
+        window.backgroundColor = chrome.color(.windowBackground).nsColor
     }
 
     // MARK: - native menu bar
@@ -586,9 +680,10 @@ private extension NSToolbarItem.Identifier {
 
 extension AppDelegate: NSToolbarDelegate {
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        // Add sits right beside the sidebar toggle (both left of the tracking separator),
-        // so they're not split apart by the full sidebar width.
-        [.toggleSidebar, .addRepository, .sidebarTrackingSeparator,
+        // No sidebar-tracking separator: it pins the notch's flexible space to the content
+        // region, so the notch drifts as the sidebar resizes. Centring it between the left
+        // (toggle+add) and right (launch+open) groups keeps it put in window coordinates.
+        [.toggleSidebar, .addRepository,
          .flexibleSpace, .notch, .flexibleSpace,
          .launchClaude, .openIn]
     }
@@ -645,21 +740,10 @@ extension AppDelegate: NSToolbarDelegate {
             let item = NSMenuToolbarItem(itemIdentifier: id)
             item.label = "Open in"
             item.toolTip = "Open the worktree in \(preferences.defaultEditor.name) (⌘O)"
-            item.image = NSImage(systemSymbolName: "arrow.up.forward.app", accessibilityDescription: "Open in")
             item.target = self
             item.action = #selector(openInAction)   // primary click → default editor
-            let menu = NSMenu()
-            let openDefault = NSMenuItem(title: "Open in \(preferences.defaultEditor.name)",
-                                         action: #selector(openInAction), keyEquivalent: "")
-            openDefault.target = self
-            menu.addItem(openDefault)
-            let openOther = NSMenuItem(title: "Open with Other App…",
-                                       action: #selector(openWithOtherAppAction), keyEquivalent: "")
-            openOther.target = self
-            menu.addItem(openOther)
-            item.menu = menu
             openInItem = item
-            openInDefaultMenuItem = openDefault
+            rebuildOpenInMenu()   // sets the default app's icon + the per-app dropdown
             return item
 
         default:
