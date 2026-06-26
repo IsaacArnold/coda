@@ -224,17 +224,6 @@ final class SidebarController: NSViewController {
         return repoNodes.first(where: { $0.repository.id == id })
     }
 
-    /// A small filled square for a color menu item.
-    private static func swatchImage(_ color: NSColor) -> NSImage {
-        let size = NSSize(width: 12, height: 12)
-        let image = NSImage(size: size)
-        image.lockFocus()
-        color.setFill()
-        NSBezierPath(roundedRect: NSRect(origin: .zero, size: size), xRadius: 2, yRadius: 2).fill()
-        image.unlockFocus()
-        return image
-    }
-
 }
 
 extension SidebarController: NSMenuDelegate {
@@ -261,46 +250,18 @@ extension SidebarController: NSMenuDelegate {
             rename.representedObject = repoID
             menu.addItem(rename)
 
-            let colorItem = NSMenuItem(title: "Set Color", action: nil, keyEquivalent: "")
-            let colorMenu = NSMenu()
-            for hex in IdentityPalette.colors {
-                let swatch = NSMenuItem(title: hex, action: #selector(contextSetRepoColor(_:)), keyEquivalent: "")
-                swatch.target = self
-                swatch.representedObject = ["id": repoID, "hex": hex]
-                if let color = NSColor(hex: hex) { swatch.image = Self.swatchImage(color) }
-                colorMenu.addItem(swatch)
-            }
-            colorMenu.addItem(.separator())
-            let removeColor = NSMenuItem(title: "Remove Color",
-                                         action: #selector(contextRemoveRepoColor(_:)), keyEquivalent: "")
-            removeColor.target = self
-            removeColor.representedObject = repoID
-            colorMenu.addItem(removeColor)
-            colorItem.submenu = colorMenu
-            menu.addItem(colorItem)
+            menu.addItem(ColorMenu.makeSetColorItem(
+                targetID: repoID, target: self,
+                setColor: #selector(contextSetRepoColor(_:)),
+                removeColor: #selector(contextRemoveRepoColor(_:))))
         }
 
         if let worktreeID = clickedWorktreeID() {
             menu.addItem(.separator())
-            let colorItem = NSMenuItem(title: "Set Color", action: nil, keyEquivalent: "")
-            let colorMenu = NSMenu()
-            for hex in IdentityPalette.colors {
-                let swatch = NSMenuItem(title: hex, action: #selector(contextSetColor(_:)), keyEquivalent: "")
-                swatch.target = self
-                swatch.representedObject = ["id": worktreeID, "hex": hex]
-                if let color = NSColor(hex: hex) {
-                    swatch.image = Self.swatchImage(color)
-                }
-                colorMenu.addItem(swatch)
-            }
-            colorMenu.addItem(.separator())
-            let removeColor = NSMenuItem(title: "Remove Color",
-                                         action: #selector(contextRemoveColor(_:)), keyEquivalent: "")
-            removeColor.target = self
-            removeColor.representedObject = worktreeID
-            colorMenu.addItem(removeColor)
-            colorItem.submenu = colorMenu
-            menu.addItem(colorItem)
+            menu.addItem(ColorMenu.makeSetColorItem(
+                targetID: worktreeID, target: self,
+                setColor: #selector(contextSetColor(_:)),
+                removeColor: #selector(contextRemoveColor(_:))))
         }
     }
 }
