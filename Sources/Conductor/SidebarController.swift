@@ -280,19 +280,34 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         if let repo = item as? RepoNode {
-            // Repo rows are plain secondary-gray section headers (no icon), à la Supacode.
+            // Repo rows are plain section headers, à la Supacode; tinted by the repo's color.
             let cell = makeCell(identifier: "repo", symbol: nil)
-            cell.textField?.stringValue = repo.repository.name
+            cell.textField?.stringValue = repo.repository.sidebarDisplayName
             cell.textField?.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
-            cell.textField?.textColor = (chrome?.color(.secondaryText).nsColor) ?? .secondaryLabelColor
+            let repoColor = repo.repository.color.flatMap { NSColor(hex: $0) }
+            cell.textField?.textColor = repoColor
+                ?? (chrome?.color(.secondaryText).nsColor) ?? .secondaryLabelColor
             return cell
         }
         if let wt = item as? WorktreeNode {
             let cell = makeWorktreeCell()
             cell.textField?.stringValue = wt.worktree.title
-            let repoName = (outlineView.parent(forItem: item) as? RepoNode)?.repository.name
-            cell.subtitleLabel.stringValue = repoName.map { "\($0) · \(wt.worktree.branch)" }
-                ?? wt.worktree.branch
+            let branch = wt.worktree.branch
+            let parentRepo = (outlineView.parent(forItem: item) as? RepoNode)?.repository
+            let secondary = NSColor.secondaryLabelColor
+            let subFont = cell.subtitleLabel.font ?? .systemFont(ofSize: NSFont.preferredFont(forTextStyle: .footnote).pointSize)
+            if let parentRepo {
+                let repoColor = parentRepo.color.flatMap { NSColor(hex: $0) } ?? secondary
+                let s = NSMutableAttributedString(
+                    string: parentRepo.sidebarDisplayName,
+                    attributes: [.foregroundColor: repoColor, .font: subFont])
+                s.append(NSAttributedString(
+                    string: " · \(branch)",
+                    attributes: [.foregroundColor: secondary, .font: subFont]))
+                cell.subtitleLabel.attributedStringValue = s
+            } else {
+                cell.subtitleLabel.stringValue = branch
+            }
             cell.applyBadge(agentStates[wt.worktree.id] ?? .idle)
             cell.applyIdentityColor(wt.worktree.color.flatMap { NSColor(hex: $0) },
                                     glyphTint: chrome?.color(.glyphTint).nsColor)
