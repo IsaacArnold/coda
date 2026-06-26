@@ -917,14 +917,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func pollAgentStates() {
         var states: [String: AgentState] = [:]
+        var rollups: [String: AgentState] = [:]
         for wtID in surfaces.worktreeIDs {
-            let active = surfaces.existingSurfaces(for: wtID)?.activeHandle
-            states[wtID] = active.map { agentState(fromOutput: $0.outputSnapshot()) } ?? .idle
+            guard let list = surfaces.existingSurfaces(for: wtID) else { continue }
+            var perSurface: [AgentState] = []
+            for entry in list.entries {
+                let snapshot = entry.handle.outputSnapshot()
+                let state = agentState(fromOutput: snapshot)
+                states[surfaceKey(wtID, entry.surface.id)] = state
+                perSurface.append(state)
+            }
+            rollups[wtID] = rollup(perSurface)
         }
+        // Merge: per-surface keys + per-worktree rollup keys in one map.
+        for (k, v) in rollups { states[k] = v }
         agentStates = states
-        sidebar.updateAgentStates(states)
+        sidebar.updateAgentStates(rollups)
         updateNotch()
         refreshChromeForActiveSurface()
+        refreshTabBar()
     }
 
     private func updateNotch() {
