@@ -25,6 +25,15 @@ public struct Editor: Codable, Equatable {
     ]
 }
 
+/// A terminal font choice, stored portably by PostScript name + point size (never a path).
+public struct TerminalFontPref: Codable, Equatable {
+    public var name: String
+    public var size: Double
+    public init(name: String, size: Double) {
+        self.name = name; self.size = size
+    }
+}
+
 /// App-wide, portable preferences (no machine-local absolute paths). Separate from
 /// `Config`, which is the only place absolute paths are allowed.
 public struct Preferences: Codable, Equatable {
@@ -33,9 +42,14 @@ public struct Preferences: Codable, Equatable {
     /// app falls back to its default bundled theme. Synthesized Codable decodes a
     /// missing key to nil, so older prefs files still load.
     public var activeTheme: String?
-    public init(defaultEditor: Editor = .vsCode, activeTheme: String? = nil) {
+    /// The terminal font. nil → the app's default monospaced font. Synthesized Codable
+    /// decodes a missing key to nil, so older prefs files still load.
+    public var terminalFont: TerminalFontPref?
+    public init(defaultEditor: Editor = .vsCode, activeTheme: String? = nil,
+                terminalFont: TerminalFontPref? = nil) {
         self.defaultEditor = defaultEditor
         self.activeTheme = activeTheme
+        self.terminalFont = terminalFont
     }
 }
 

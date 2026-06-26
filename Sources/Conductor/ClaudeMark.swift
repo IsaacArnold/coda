@@ -2,9 +2,15 @@ import AppKit
 
 /// The Claude logo mark for the Launch-Claude toolbar button.
 ///
-/// Prefers a bundled image asset named "ClaudeMark" (drop in the official artwork
-/// to use it); otherwise draws a terracotta sunburst approximating the Claude mark.
+/// Prefers the official Claude Code mark bundled as a resource (`claude-code-mark.svg`,
+/// sourced from supacode's asset catalog), then a bundled "ClaudeMark" asset, and finally
+/// a drawn terracotta sunburst approximating the mark.
 func claudeMarkImage(diameter: CGFloat = 17) -> NSImage {
+    if let url = Bundle.module.url(forResource: "claude-code-mark", withExtension: "svg", subdirectory: "Resources"),
+       let asset = NSImage(contentsOf: url) {
+        asset.size = NSSize(width: diameter, height: diameter)
+        return asset
+    }
     if let asset = NSImage(named: "ClaudeMark") {
         asset.size = NSSize(width: diameter, height: diameter)
         return asset

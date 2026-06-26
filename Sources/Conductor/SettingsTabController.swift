@@ -11,12 +11,15 @@ final class SettingsTabController: NSTabViewController {
          themeNames: [String],
          activeTheme: String?,
          onApplyTheme: @escaping (String) -> Void,
-         onImportTheme: @escaping (URL) -> Void) {
+         onImportTheme: @escaping (URL) -> Void,
+         terminalFont: NSFont,
+         onChangeFont: @escaping (TerminalFontPref) -> Void) {
         super.init(nibName: nil, bundle: nil)
         tabStyle = .toolbar
 
-        let general = GeneralSettingsViewController(editor: editor)
+        let general = GeneralSettingsViewController(editor: editor, terminalFont: terminalFont)
         general.onChangeEditor = onChangeEditor
+        general.onChangeFont = onChangeFont
         let generalItem = NSTabViewItem(viewController: general)
         generalItem.label = "General"
         generalItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "General")
@@ -35,6 +38,19 @@ final class SettingsTabController: NSTabViewController {
         keysItem.label = "Keyboard Shortcuts"
         keysItem.image = NSImage(systemSymbolName: "keyboard", accessibilityDescription: "Keyboard Shortcuts")
         addTabViewItem(keysItem)
+
+        // A consistent default window size across panes (NSTabViewController sizes the window
+        // to the selected pane). Tunable.
+        for vc in [general, themes, keys] as [NSViewController] {
+            vc.preferredContentSize = NSSize(width: 620, height: 520)
+        }
     }
     required init?(coder: NSCoder) { fatalError("not used") }
+
+    /// Keep the window titled "Settings" regardless of the selected tab — a toolbar-style
+    /// NSTabViewController otherwise sets the window title to the active tab's label.
+    override var title: String? {
+        get { "Settings" }
+        set { }
+    }
 }

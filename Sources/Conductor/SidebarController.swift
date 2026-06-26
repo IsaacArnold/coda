@@ -70,6 +70,8 @@ final class SidebarController: NSViewController {
 
     /// Right-click a worktree → pick a palette color for its identity bar/accent.
     var onSetWorktreeColor: ((String, String) -> Void)?
+    /// Right-click a worktree → "Remove Color" — clear the override, back to the default look.
+    var onRemoveWorktreeColor: ((String) -> Void)?
 
     private let rowMenu = NSMenu()
 
@@ -113,6 +115,11 @@ final class SidebarController: NSViewController {
         guard let info = sender.representedObject as? [String: String],
               let id = info["id"], let hex = info["hex"] else { return }
         onSetWorktreeColor?(id, hex)
+    }
+
+    @objc private func contextRemoveColor(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        onRemoveWorktreeColor?(id)
     }
 
     @objc private func contextRepoSettings(_ sender: NSMenuItem) {
@@ -203,6 +210,12 @@ extension SidebarController: NSMenuDelegate {
                 }
                 colorMenu.addItem(swatch)
             }
+            colorMenu.addItem(.separator())
+            let removeColor = NSMenuItem(title: "Remove Color",
+                                         action: #selector(contextRemoveColor(_:)), keyEquivalent: "")
+            removeColor.target = self
+            removeColor.representedObject = worktreeID
+            colorMenu.addItem(removeColor)
             colorItem.submenu = colorMenu
             menu.addItem(colorItem)
         }

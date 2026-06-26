@@ -104,11 +104,11 @@ Next Phase-1 plans layer on: setupScript + copy-allowlist, theming/.itermcolors,
 
 **⚠️ Prerequisite for Plan 2 (settings UI):** `copyAllowlistedFiles` does not yet reject `..`/absolute path-escapes. Harmless while the allowlist is hand-authored, but **add a path-escape guard + test in the same plan that exposes the allowlist to the settings UI** (that's when it becomes untrusted input).
 
-**Slice follow-ups (from final review, deferred — fold into next plan):**
-- `SessionStoreError` should get a `CustomStringConvertible` so `presentError` shows readable text (today it interpolates the raw enum case).
-- Sidebar lists only sessions, so "Add Repo…" gives no visible feedback — surface repos or confirm.
-- `TerminalSurface.command` is unquoted (safe today: only literal `"claude"`); quote/guard when a user-supplied command is wired in.
-- Atomicity gap: if `git.add` succeeds but `config.save` throws, an orphan worktree can remain (and vice versa on archive). Unlikely with atomic-write JSON; revisit when state grows.
+**Slice follow-ups (from final review):**
+- ✅ DONE (`phase1-polish`): `WorktreeStoreError` (renamed from `SessionStoreError`) now conforms to `CustomStringConvertible`, so `presentError` shows readable text.
+- ✅ DONE: the sidebar now lists every repository as a header (`groupWorktreesByRepository` maps all repos), so adding a repo gives immediate visible feedback even with no worktrees.
+- 🟡 BY DESIGN / low priority: `terminalLaunchLine` single-quotes the working directory; `command`/`setupScript` are deliberately shell-interpreted (user-configured commands run in the user's own shell — no untrusted-input boundary). Revisit only if arbitrary untrusted commands are ever introduced.
+- ✅ DONE (`phase1-polish`): create/archive are now atomic. `createWorktree` rolls back the on-disk worktree + branch if anything after `git.add` fails; `archiveWorktree` persists the state removal before the irreversible `git.remove` and restores the entry if either step throws. Covered by tests.
 
 ## To verify during the spike / setup
 
