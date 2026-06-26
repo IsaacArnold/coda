@@ -598,6 +598,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                            colorHex: effective?.hexString,
                            agentState: agentStates[wt.id] ?? .idle)
         sidebar.setIdentityOverride(effective?.nsColor, forWorktree: wt.id)
+        currentSurface?.identityColor = effective?.nsColor
     }
 
     /// Right-click on a surface tab: rename, color, or close it.
@@ -825,6 +826,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         addItem(to: surfaceMenu, "Split Right", #selector(splitSurfaceAction), command: .splitSurface)
         addItem(to: surfaceMenu, "Split Down", #selector(splitDownAction), command: .splitDown)
         surfaceMenu.addItem(.separator())
+        addItem(to: surfaceMenu, "Focus Pane Left",  #selector(focusPaneLeftAction),  command: .focusPaneLeft)
+        addItem(to: surfaceMenu, "Focus Pane Right", #selector(focusPaneRightAction), command: .focusPaneRight)
+        addItem(to: surfaceMenu, "Focus Pane Up",    #selector(focusPaneUpAction),    command: .focusPaneUp)
+        addItem(to: surfaceMenu, "Focus Pane Down",  #selector(focusPaneDownAction),  command: .focusPaneDown)
+        surfaceMenu.addItem(.separator())
         addItem(to: surfaceMenu, "Next Tab", #selector(nextSurfaceAction), command: .nextSurface)
         addItem(to: surfaceMenu, "Previous Tab", #selector(prevSurfaceAction), command: .prevSurface)
         surfaceMenu.addItem(.separator())
@@ -891,6 +897,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func goToSurfaceAction(_ sender: NSMenuItem) { goToSurface(sender.tag) }
     @objc private func splitSurfaceAction() { currentSurface?.splitFocused(axis: .horizontal) }
     @objc private func splitDownAction() { currentSurface?.splitFocused(axis: .vertical) }
+    @objc private func focusPaneLeftAction()  { currentSurface?.moveFocus(.left) }
+    @objc private func focusPaneRightAction() { currentSurface?.moveFocus(.right) }
+    @objc private func focusPaneUpAction()    { currentSurface?.moveFocus(.up) }
+    @objc private func focusPaneDownAction()  { currentSurface?.moveFocus(.down) }
 
     /// Opens the focused worktree's directory in any installed app the user picks (one-off).
     @objc private func openWithOtherAppAction() {
