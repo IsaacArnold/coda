@@ -408,6 +408,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// optional auto-launch Claude); additional tabs are always plain shells.
     @discardableResult
     private func createSurface(in wt: Worktree, runSetupAndAutoLaunch: Bool) -> TerminalSurface {
+        shownWorktreeID = wt.id
+        surfaces.setActive(wt.id)
         let repo = store.state.repositories.first { $0.id == wt.repoID }
         let isNewlyCreated = runSetupAndAutoLaunch && pendingSetupWorktreeIDs.contains(wt.id)
         let setup = isNewlyCreated ? (repo?.setupScript ?? "") : ""
