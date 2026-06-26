@@ -15,6 +15,14 @@ final class ClickableTerminalView: LocalProcessTerminalView {
     var currentDirectory: String?
     /// Opens a resolved file (absolute path) at an optional line in the default editor.
     var onOpenFile: ((String, Int?) -> Void)?
+    /// Fired when this terminal becomes first responder (click or programmatic focus),
+    /// so the owning SplitSurface can mark this pane focused.
+    var onBecomeFirstResponder: (() -> Void)?
+    override var hasFocus: Bool {
+        didSet {
+            if hasFocus { onBecomeFirstResponder?() }
+        }
+    }
 
     /// Give a focused terminal first crack at ⌘-combos it owns (clear, line-kill) before
     /// the main menu's key-equivalents see them — otherwise e.g. ⌘⌫ would hit the menu's

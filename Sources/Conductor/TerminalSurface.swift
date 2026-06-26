@@ -19,6 +19,8 @@ final class TerminalSurface: NSViewController {
     private(set) var terminalTitle: String = ""
     /// Fired when the terminal title changes, so the tab bar can relabel.
     var onTitleChange: ((String) -> Void)?
+    /// Fired when this surface's terminal gains focus (forwarded from the terminal view).
+    var onFocused: (() -> Void)?
 
     init(workingDirectory: String, command: String, setupScript: String = "") {
         self.workingDirectory = workingDirectory
@@ -33,6 +35,7 @@ final class TerminalSurface: NSViewController {
         terminal.autoresizingMask = [.width, .height]
         terminal.fallbackDirectory = workingDirectory
         terminal.onOpenFile = { [weak self] path, line in self?.onOpenFile?(path, line) }
+        terminal.onBecomeFirstResponder = { [weak self] in self?.onFocused?() }
         terminal.processDelegate = self
         view = terminal
     }
