@@ -117,6 +117,24 @@ public final class WorktreeStore {
         return state.worktrees[idx]
     }
 
+    public func setRepositoryColor(id: String, color: String?) throws -> Repository {
+        guard let idx = state.repositories.firstIndex(where: { $0.id == id }) else {
+            throw WorktreeStoreError.repoNotFound(id)
+        }
+        state.repositories[idx].color = color
+        try config.save(state)
+        return state.repositories[idx]
+    }
+
+    public func setRepositoryDisplayName(id: String, displayName: String?) throws -> Repository {
+        guard let idx = state.repositories.firstIndex(where: { $0.id == id }) else {
+            throw WorktreeStoreError.repoNotFound(id)
+        }
+        state.repositories[idx].displayName = displayName
+        try config.save(state)
+        return state.repositories[idx]
+    }
+
     private func uniqueBranch(base: String, repo: Repository) -> String {
         let taken = Set(state.worktrees.filter { $0.repoID == repo.id }.map { $0.branch })
         if !taken.contains(base) { return base }

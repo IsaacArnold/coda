@@ -114,6 +114,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         splitVC = NSSplitViewController()
         splitVC.addSplitViewItem(sidebarItem)
         splitVC.addSplitViewItem(detailItem)
+        // Persist the user's dragged sidebar width across launches; a first-launch
+        // default is applied below once the split view is laid out.
+        splitVC.splitView.autosaveName = "MainSidebarSplit"
 
         window = NSWindow(contentViewController: splitVC)
         window.setContentSize(NSSize(width: 1100, height: 700))
@@ -134,6 +137,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateNotch()
         window.center()
         window.makeKeyAndOrderFront(nil)
+        // Default sidebar width on first launch (still freely draggable); the
+        // autosave restores the user's own width on every launch after that.
+        if UserDefaults.standard.object(forKey: "NSSplitView Subview Frames MainSidebarSplit") == nil {
+            splitVC.splitView.setPosition(255, ofDividerAt: 0)
+        }
     }
 
     private func wireSidebar() {
@@ -142,6 +150,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sidebar.onNewWorktree = { [weak self] repoID in self?.newWorktree(repoID: repoID) }
         sidebar.onSetWorktreeColor = { [weak self] worktreeID, hex in self?.setWorktreeColor(worktreeID, hex) }
         sidebar.onRemoveWorktreeColor = { [weak self] worktreeID in self?.setWorktreeColor(worktreeID, nil) }
+        sidebar.onRenameRepo = { [weak self] repoID in self?.renameRepo(repoID) }
+        sidebar.onSetRepoColor = { [weak self] repoID, hex in self?.setRepoColor(repoID, hex) }
+        sidebar.onRemoveRepoColor = { [weak self] repoID in self?.setRepoColor(repoID, nil) }
     }
 
     /// Override a worktree's identity color and repaint its bar + sidebar row.
@@ -154,6 +165,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 worktreeBar.update(title: s.title, branch: s.branch, colorHex: s.color,
                                    agentState: agentStates[s.id] ?? .idle)
             }
+        } catch { presentError(error) }
+    }
+
+    /// Display-only rename of a repository (blank input clears the override).
+    private func renameRepo(_ repoID: String) {
+        guard let repo = store.state.repositories.first(where: { $0.id == repoID }),
+              let input = promptForText(prompt: "Repository name:", defaultValue: repo.sidebarDisplayName)
+        else { return }
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            _ = try store.setRepositoryDisplayName(id: repoID, displayName: trimmed.isEmpty ? nil : trimmed)
+            refreshSidebar(select: selectedWorktree?.id)
+        } catch { presentError(error) }
+    }
+
+    /// Set or clear a repository's identity color and repaint the sidebar.
+    private func setRepoColor(_ repoID: String, _ hex: String?) {
+        do {
+            _ = try store.setRepositoryColor(id: repoID, color: hex)
+            refreshSidebar(select: selectedWorktree?.id)
         } catch { presentError(error) }
     }
 
@@ -733,8 +764,12 @@ extension AppDelegate: NSToolbarDelegate {
             item.label = ""
             // The toolbar already gives each item a single rounded background, so the
             // notch content sits directly in it — no extra fill (that caused doubling).
-            notchIcon.symbolConfiguration = .init(pointSize: 12, weight: .regular)
-            notchLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+            // Match Supacode's notch (MotivationalStatusView): a `.callout`-sized
+            // time-of-day glyph + `.footnote`, monospaced status text.
+            notchIcon.symbolConfiguration = .init(
+                pointSize: NSFont.preferredFont(forTextStyle: .callout).pointSize, weight: .regular)
+            notchLabel.font = .monospacedSystemFont(
+                ofSize: NSFont.preferredFont(forTextStyle: .footnote).pointSize, weight: .regular)
             notchLabel.lineBreakMode = .byTruncatingTail
             notchLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 340).isActive = true
             notchBadge.wantsLayer = true

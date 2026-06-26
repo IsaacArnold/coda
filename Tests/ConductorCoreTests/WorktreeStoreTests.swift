@@ -134,6 +134,41 @@ final class WorktreeStoreTests: XCTestCase {
         XCTAssertEqual(cfg.load().worktrees.first(where: { $0.id == wt.id })?.color, "#E91E63")
     }
 
+    func testSetRepositoryColorPersistsAndClears() throws {
+        let repo = try makeTempRepo()
+        let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: repo)
+
+        _ = try store.setRepositoryColor(id: r.id, color: "#D97757")
+        XCTAssertEqual(cfg.load().repositories.first(where: { $0.id == r.id })?.color, "#D97757")
+
+        _ = try store.setRepositoryColor(id: r.id, color: nil)
+        XCTAssertNil(cfg.load().repositories.first(where: { $0.id == r.id })?.color)
+    }
+
+    func testSetRepositoryDisplayNamePersistsAndClears() throws {
+        let repo = try makeTempRepo()
+        let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: repo)
+
+        let renamed = try store.setRepositoryDisplayName(id: r.id, displayName: "Pretty")
+        XCTAssertEqual(renamed.sidebarDisplayName, "Pretty")
+        XCTAssertEqual(cfg.load().repositories.first(where: { $0.id == r.id })?.displayName, "Pretty")
+
+        _ = try store.setRepositoryDisplayName(id: r.id, displayName: nil)
+        XCTAssertNil(cfg.load().repositories.first(where: { $0.id == r.id })?.displayName)
+    }
+
+    func testSetRepositoryColorUnknownIDThrows() throws {
+        let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        XCTAssertThrowsError(try store.setRepositoryColor(id: "nope", color: "#fff"))
+    }
+
+    func testSetRepositoryDisplayNameUnknownIDThrows() throws {
+        let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        XCTAssertThrowsError(try store.setRepositoryDisplayName(id: "nope", displayName: "X"))
+    }
+
     // MARK: - readable errors (#1) + create/archive atomicity (#4)
 
     func testStoreErrorsHaveReadableDescriptions() {

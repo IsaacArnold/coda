@@ -9,16 +9,22 @@ public struct Repository: Codable, Equatable, Identifiable {
     /// When true, a newly created worktree in this repo auto-runs Claude (after the
     /// setup script, if any). Off by default: worktrees are shell-first.
     public var autoLaunchClaude: Bool
+    /// Display-only rename override; nil/blank → use the folder-derived `name`.
+    public var displayName: String?
+    /// Identity color as a hex string (e.g. "#D97757"); nil → secondary gray.
+    public var color: String?
 
     public init(id: String, path: String, name: String,
                 setupScript: String = "", copyAllowlist: [String] = [],
-                autoLaunchClaude: Bool = false) {
+                autoLaunchClaude: Bool = false,
+                displayName: String? = nil, color: String? = nil) {
         self.id = id; self.path = path; self.name = name
         self.setupScript = setupScript; self.copyAllowlist = copyAllowlist
         self.autoLaunchClaude = autoLaunchClaude
+        self.displayName = displayName; self.color = color
     }
 
-    private enum CodingKeys: String, CodingKey { case id, path, name, setupScript, copyAllowlist, autoLaunchClaude }
+    private enum CodingKeys: String, CodingKey { case id, path, name, setupScript, copyAllowlist, autoLaunchClaude, displayName, color }
 
     // Custom decode so older configs without the setup / auto-launch fields still load.
     public init(from decoder: Decoder) throws {
@@ -29,6 +35,15 @@ public struct Repository: Codable, Equatable, Identifiable {
         setupScript = try c.decodeIfPresent(String.self, forKey: .setupScript) ?? ""
         copyAllowlist = try c.decodeIfPresent([String].self, forKey: .copyAllowlist) ?? []
         autoLaunchClaude = try c.decodeIfPresent(Bool.self, forKey: .autoLaunchClaude) ?? false
+        displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
+        color = try c.decodeIfPresent(String.self, forKey: .color)
+    }
+
+    /// The name to show in the sidebar: a non-blank `displayName`, else the folder `name`.
+    public var sidebarDisplayName: String {
+        let trimmed = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmed, !trimmed.isEmpty { return trimmed }
+        return name
     }
 }
 

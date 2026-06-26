@@ -47,7 +47,7 @@ A step-back re-grill before theming, triggered by "it doesn't look like a Mac ap
 
 **Milestone:** R1–R8 = the "native shell + launch model" milestone, sequenced: (1) rename Session→Worktree, (2) shell-first + Launch Claude + persist surfaces, (3) native chrome, (4) heuristic badge → sidebar + notch, (5) Settings window + per-repo sheet + Open-in default. **Theming (#11) is the very next milestone after this lands.** One persisted terminal per worktree this milestone.
 
-**Deferred to later milestones:** theming/`.itermcolors` (#11), sidebar diff stats, command palette, multi-surface splits/tabs (#4), scratch terminals (#3), snippets/keybinds, diff surface (Phase 2).
+**Deferred to later milestones:** theming/`.itermcolors` (#11), sidebar diff stats, command palette, snippets/keybinds, diff surface (Phase 2). _Multi-surface splits/tabs (#4) + scratch terminals (#3) promoted to **Phase 1.5** 2026-06-26 — see the Phased backlog._
 
 **Plan & issues:** PRD = GitHub issue [#4](https://github.com/IsaacArnold/conductor/issues/4); broken into vertical-slice issues #5–#12 (all `ready-for-agent`): #5 rename → #6 source-list sidebar → #7 shell-first + Launch Claude → #8 persist surfaces (`SurfaceRegistry`) → #9 native chrome → #10 Open-in + cmd+click → #11 agent badge + notch → #12 Settings window + per-repo sheet. Start with #5. Implement one issue per fresh session via `/implement` (PRD #4 + the single issue).
 
@@ -134,6 +134,13 @@ Next Phase-1 plans layer on: setupScript + copy-allowlist, theming/.itermcolors,
 - Worktree archive/delete with branch cleanup
 - Heuristic agent-state badges in sidebar
 - Tab colors + naming, theming, snippets+keybinds, cmd+click → VS Code _(all still to be grilled)_
+
+### Phase 1.5 — Multi-surface (promoted from "deferred to later milestones" 2026-06-26)
+The two pieces of the locked 3-level hierarchy (#4) + the escape-hatch (#3) that Phase 1 stubbed but never built. Brings the surface layer to parity with Supacode.
+- **Per-worktree surface tabs** — multiple terminal surfaces inside one worktree (the iTerm-style colored tab bar = the surface tab bar, per #4). Each tab is its own PTY; tabs persist across worktree switches like the current single surface does (extend `SurfaceRegistry` from one handle/worktree to many).
+- **Splits / panes** — split a surface into side-by-side panes (Supacode-style). Engine already proven in the spike (check ⑤: `NSSplitView` + dynamic add-pane). Needs the `setPosition(_:ofDividerAt:)`-after-layout gotcha handled.
+- **Scratch (worktree-less) tabs** — the throwaway-shell escape hatch (#3 / R3): a plain shell not tied to any worktree, named distinctly so it never reads as a worktree. Lives outside the sidebar's repo→worktree grouping.
+- _Open design qs to grill before planning:_ tab/pane focus + keybinds (⌘T new tab, ⌘D split?); how surface tabs interact with per-surface naming/colors (#12 — tabs can override worktree identity); whether scratch tabs get their own sidebar section or live only in the tab bar; restore behavior (#14 is layout-only).
 
 ### Phase 2 — Fast-follows
 - Localhost HTTP-hook server → authoritative agent badges (replaces heuristic)

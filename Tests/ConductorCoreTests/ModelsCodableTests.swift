@@ -48,4 +48,30 @@ final class ModelsCodableTests: XCTestCase {
         XCTAssertEqual(back.color, "#4CAF50")
         XCTAssertEqual(back, wt)
     }
+
+    func testRepositoryDecodesOldJSONWithoutColorOrDisplayName() throws {
+        let json = #"{"id":"r1","path":"/tmp/repo","name":"repo"}"#
+        let repo = try JSONDecoder().decode(Repository.self, from: Data(json.utf8))
+        XCTAssertNil(repo.displayName)
+        XCTAssertNil(repo.color)
+    }
+
+    func testRepositoryRoundTripsDisplayNameAndColor() throws {
+        let repo = Repository(id: "r1", path: "/tmp/repo", name: "repo",
+                              displayName: "My Repo", color: "#D97757")
+        let back = try JSONDecoder().decode(Repository.self,
+                                            from: JSONEncoder().encode(repo))
+        XCTAssertEqual(back, repo)
+    }
+
+    func testSidebarDisplayNameFallsBackAndOverrides() {
+        let base = Repository(id: "r1", path: "/tmp/repo", name: "folder-name")
+        XCTAssertEqual(base.sidebarDisplayName, "folder-name")                 // nil → folder name
+
+        var blank = base; blank.displayName = "   "
+        XCTAssertEqual(blank.sidebarDisplayName, "folder-name")                // whitespace → folder name
+
+        var named = base; named.displayName = "  Pretty Name  "
+        XCTAssertEqual(named.sidebarDisplayName, "Pretty Name")                // trimmed override
+    }
 }

@@ -16,6 +16,23 @@ private final class WorktreeNode: NSObject {
     init(_ worktree: Worktree) { self.worktree = worktree }
 }
 
+/// Supacode's sidebar branch glyph — the GitHub-Octicons `git-branch` mark
+/// (bundled from supacode's asset catalog), as a tintable template image.
+/// Falls back to the SF Symbol on the unlikely chance the asset is missing.
+func branchGlyphImage(diameter: CGFloat = 16) -> NSImage {
+    let image: NSImage
+    if let url = Bundle.module.url(forResource: "git-branch", withExtension: "svg", subdirectory: "Resources"),
+       let asset = NSImage(contentsOf: url) {
+        image = asset
+    } else {
+        image = NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: "branch")
+            ?? NSImage()
+    }
+    image.size = NSSize(width: diameter, height: diameter)
+    image.isTemplate = true   // so contentTintColor (identity color) paints it
+    return image
+}
+
 /// Maps an agent state to its badge tint (nil → no badge). Shared by the sidebar
 /// rows and the toolbar notch.
 func agentBadgeColor(_ state: AgentState) -> NSColor? {
@@ -27,10 +44,13 @@ func agentBadgeColor(_ state: AgentState) -> NSColor? {
     }
 }
 
-/// A worktree row: branch glyph + title + a trailing agent-state badge dot.
+/// A worktree row, two-line à la Supacode: branch glyph + (title over a
+/// `repo · branch` subtitle) + a trailing agent-state badge dot.
 /// The dot is a layer-drawn circle (not an SF symbol) so it always renders.
 private final class WorktreeCellView: NSTableCellView {
     let badge = NSView()
+    /// The `.footnote`-sized secondary subtitle (`repo · branch`) under the title.
+    let subtitleLabel = NSTextField(labelWithString: "")
 
     func applyBadge(_ state: AgentState) {
         badge.wantsLayer = true
@@ -72,6 +92,13 @@ final class SidebarController: NSViewController {
     var onSetWorktreeColor: ((String, String) -> Void)?
     /// Right-click a worktree → "Remove Color" — clear the override, back to the default look.
     var onRemoveWorktreeColor: ((String) -> Void)?
+
+    /// Right-click a repo header → "Rename…" — set/clear the display-name override.
+    var onRenameRepo: ((String) -> Void)?
+    /// Right-click a repo header → "Set Color" swatch — apply a hex identity color.
+    var onSetRepoColor: ((String, String) -> Void)?
+    /// Right-click a repo header → "Remove Color" — clear the repo color.
+    var onRemoveRepoColor: ((String) -> Void)?
 
     private let rowMenu = NSMenu()
 
@@ -128,6 +155,21 @@ final class SidebarController: NSViewController {
 
     @objc private func contextNewWorktree(_ sender: NSMenuItem) {
         (sender.representedObject as? String).map { onNewWorktree?($0) }
+    }
+
+    @objc private func contextRenameRepo(_ sender: NSMenuItem) {
+        (sender.representedObject as? String).map { onRenameRepo?($0) }
+    }
+
+    @objc private func contextSetRepoColor(_ sender: NSMenuItem) {
+        guard let info = sender.representedObject as? [String: String],
+              let id = info["id"], let hex = info["hex"] else { return }
+        onSetRepoColor?(id, hex)
+    }
+
+    @objc private func contextRemoveRepoColor(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        onRemoveRepoColor?(id)
     }
 
     func reload(sections: [RepositorySection], selectedWorktreeID: String?,
@@ -210,6 +252,34 @@ extension SidebarController: NSMenuDelegate {
         newWorktree.representedObject = repoID
         menu.addItem(newWorktree)
 
+        // Repo-header right-click (not a worktree row): rename + color the repository.
+        if clickedWorktreeID() == nil {
+            menu.addItem(.separator())
+            let rename = NSMenuItem(title: "Rename…",
+                                    action: #selector(contextRenameRepo(_:)), keyEquivalent: "")
+            rename.target = self
+            rename.representedObject = repoID
+            menu.addItem(rename)
+
+            let colorItem = NSMenuItem(title: "Set Color", action: nil, keyEquivalent: "")
+            let colorMenu = NSMenu()
+            for hex in IdentityPalette.colors {
+                let swatch = NSMenuItem(title: hex, action: #selector(contextSetRepoColor(_:)), keyEquivalent: "")
+                swatch.target = self
+                swatch.representedObject = ["id": repoID, "hex": hex]
+                if let color = NSColor(hex: hex) { swatch.image = Self.swatchImage(color) }
+                colorMenu.addItem(swatch)
+            }
+            colorMenu.addItem(.separator())
+            let removeColor = NSMenuItem(title: "Remove Color",
+                                         action: #selector(contextRemoveRepoColor(_:)), keyEquivalent: "")
+            removeColor.target = self
+            removeColor.representedObject = repoID
+            colorMenu.addItem(removeColor)
+            colorItem.submenu = colorMenu
+            menu.addItem(colorItem)
+        }
+
         if let worktreeID = clickedWorktreeID() {
             menu.addItem(.separator())
             let colorItem = NSMenuItem(title: "Set Color", action: nil, keyEquivalent: "")
@@ -253,18 +323,41 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         (item as? RepoNode).map { !$0.children.isEmpty } ?? false
     }
 
+    /// Worktree rows are two-line (title + subtitle); repo headers stay single-line.
+    func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
+        item is WorktreeNode ? 38 : 24
+    }
+
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         if let repo = item as? RepoNode {
-            // Repo rows are plain secondary-gray section headers (no icon), à la Supacode.
+            // Repo rows are plain section headers, à la Supacode; tinted by the repo's color.
             let cell = makeCell(identifier: "repo", symbol: nil)
-            cell.textField?.stringValue = repo.repository.name
+            cell.textField?.stringValue = repo.repository.sidebarDisplayName
             cell.textField?.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
-            cell.textField?.textColor = (chrome?.color(.secondaryText).nsColor) ?? .secondaryLabelColor
+            let repoColor = repo.repository.color.flatMap { NSColor(hex: $0) }
+            cell.textField?.textColor = repoColor
+                ?? (chrome?.color(.secondaryText).nsColor) ?? .secondaryLabelColor
             return cell
         }
         if let wt = item as? WorktreeNode {
             let cell = makeWorktreeCell()
-            cell.textField?.stringValue = "\(wt.worktree.title)  [\(wt.worktree.branch)]"
+            cell.textField?.stringValue = wt.worktree.title
+            let branch = wt.worktree.branch
+            let parentRepo = (outlineView.parent(forItem: item) as? RepoNode)?.repository
+            let secondary = NSColor.secondaryLabelColor
+            let subFont = cell.subtitleLabel.font ?? .systemFont(ofSize: NSFont.preferredFont(forTextStyle: .footnote).pointSize)
+            if let parentRepo {
+                let repoColor = parentRepo.color.flatMap { NSColor(hex: $0) } ?? secondary
+                let s = NSMutableAttributedString(
+                    string: parentRepo.sidebarDisplayName,
+                    attributes: [.foregroundColor: repoColor, .font: subFont])
+                s.append(NSAttributedString(
+                    string: " · \(branch)",
+                    attributes: [.foregroundColor: secondary, .font: subFont]))
+                cell.subtitleLabel.attributedStringValue = s
+            } else {
+                cell.subtitleLabel.stringValue = branch
+            }
             cell.applyBadge(agentStates[wt.worktree.id] ?? .idle)
             cell.applyIdentityColor(wt.worktree.color.flatMap { NSColor(hex: $0) },
                                     glyphTint: chrome?.color(.glyphTint).nsColor)
@@ -281,9 +374,6 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         outline.reloadData()
     }
 
-    /// Supacode's git-branch glyph; falls back to the older symbol on pre-macOS 15.
-    private static let branchSymbol = "arrow.trianglehead.branch"
-
     func outlineViewSelectionDidChange(_ notification: Notification) {
         switch outline.item(atRow: outline.selectedRow) {
         case let wt as WorktreeNode: onSelect?(wt.worktree)
@@ -299,24 +389,36 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         let cell = WorktreeCellView()
         let icon = NSImageView()
         icon.translatesAutoresizingMaskIntoConstraints = false
-        icon.image = NSImage(systemSymbolName: Self.branchSymbol, accessibilityDescription: nil)
-            ?? NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: nil)
+        icon.image = branchGlyphImage()
         icon.contentTintColor = .secondaryLabelColor
+        // Title: system body (13pt) — matches Supacode's `.font(.body)` worktree name.
         let tf = NSTextField(labelWithString: "")
         tf.translatesAutoresizingMaskIntoConstraints = false
         tf.font = .systemFont(ofSize: NSFont.systemFontSize)
         tf.lineBreakMode = .byTruncatingTail
+        // Subtitle: secondary `.footnote` (10pt) — matches Supacode's `repo · branch` line.
+        let sub = cell.subtitleLabel
+        sub.translatesAutoresizingMaskIntoConstraints = false
+        sub.font = .systemFont(ofSize: NSFont.preferredFont(forTextStyle: .footnote).pointSize)
+        sub.textColor = .secondaryLabelColor
+        sub.lineBreakMode = .byTruncatingTail
         let badge = cell.badge
         badge.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(icon); cell.addSubview(tf); cell.addSubview(badge)
+        cell.addSubview(icon); cell.addSubview(tf); cell.addSubview(sub); cell.addSubview(badge)
         cell.imageView = icon; cell.textField = tf
+        // Stack title over subtitle; the glyph + badge center across both lines.
+        let textTop = tf.topAnchor.constraint(equalTo: cell.topAnchor, constant: 4)
         NSLayoutConstraint.activate([
             icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
             icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             icon.widthAnchor.constraint(equalToConstant: 16),
+            textTop,
             tf.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 6),
-            tf.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             tf.trailingAnchor.constraint(lessThanOrEqualTo: badge.leadingAnchor, constant: -6),
+            sub.topAnchor.constraint(equalTo: tf.bottomAnchor, constant: 1),
+            sub.leadingAnchor.constraint(equalTo: tf.leadingAnchor),
+            sub.trailingAnchor.constraint(lessThanOrEqualTo: badge.leadingAnchor, constant: -6),
+            sub.bottomAnchor.constraint(equalTo: cell.bottomAnchor, constant: -4),
             badge.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
             badge.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             badge.widthAnchor.constraint(equalToConstant: 8),
