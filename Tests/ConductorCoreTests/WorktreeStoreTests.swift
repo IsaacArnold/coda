@@ -164,6 +164,11 @@ final class WorktreeStoreTests: XCTestCase {
         XCTAssertThrowsError(try store.setRepositoryColor(id: "nope", color: "#fff"))
     }
 
+    func testSetRepositoryDisplayNameUnknownIDThrows() throws {
+        let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        XCTAssertThrowsError(try store.setRepositoryDisplayName(id: "nope", displayName: "X"))
+    }
+
     // MARK: - readable errors (#1) + create/archive atomicity (#4)
 
     func testStoreErrorsHaveReadableDescriptions() {
