@@ -564,10 +564,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         worktreeBar.update(title: wt.title, branch: wt.branch,
                            colorHex: effective?.hexString,
                            agentState: agentStates[wt.id] ?? .idle)
+        sidebar.setIdentityOverride(effective?.nsColor, forWorktree: wt.id)
     }
 
-    /// No-op placeholder for the context menu (Task 9 implements rename/color/duplicate).
-    private func showSurfaceContextMenu(_ id: String, anchor: NSView) {}
+    /// Right-click on a surface tab: rename, color, or close it.
+    private func showSurfaceContextMenu(_ surfaceID: String, anchor: NSView) {
+        let menu = NSMenu()
+        let rename = NSMenuItem(title: "Rename…", action: #selector(renameSurfaceAction(_:)), keyEquivalent: "")
+        rename.target = self
+        rename.representedObject = surfaceID
+        menu.addItem(rename)
+        menu.addItem(ColorMenu.makeSetColorItem(
+            targetID: surfaceID, target: self,
+            setColor: #selector(setSurfaceColorAction(_:)),
+            removeColor: #selector(removeSurfaceColorAction(_:))))
+        menu.addItem(.separator())
+        let close = NSMenuItem(title: "Close Tab", action: #selector(closeSurfaceMenuAction(_:)), keyEquivalent: "")
+        close.target = self
+        close.representedObject = surfaceID
+        menu.addItem(close)
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.height), in: anchor)
+    }
+
+    @objc private func renameSurfaceAction(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String, let wtID = shownWorktreeID,
+              let list = surfaces.existingSurfaces(for: wtID) else { return }
+        let current = list.entry(for: id)?.surface.nameOverride ?? ""
+        guard let input = promptForText(prompt: "Tab name:", defaultValue: current) else { return }
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        list.rename(id: id, to: trimmed.isEmpty ? nil : trimmed)   // blank clears → auto-label
+        refreshTabBar()
+    }
+
+    @objc private func setSurfaceColorAction(_ sender: NSMenuItem) {
+        guard let info = sender.representedObject as? [String: String],
+              let id = info["id"], let hex = info["hex"], let rgb = RGB(hex: hex),
+              let wtID = shownWorktreeID, let list = surfaces.existingSurfaces(for: wtID) else { return }
+        list.setColor(id: id, to: rgb)
+        refreshTabBar()
+        refreshChromeForActiveSurface()
+        refreshSidebar(select: selectedWorktree?.id)
+    }
+
+    @objc private func removeSurfaceColorAction(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String, let wtID = shownWorktreeID,
+              let list = surfaces.existingSurfaces(for: wtID) else { return }
+        list.setColor(id: id, to: nil)
+        refreshTabBar()
+        refreshChromeForActiveSurface()
+        refreshSidebar(select: selectedWorktree?.id)
+    }
+
+    @objc private func closeSurfaceMenuAction(_ sender: NSMenuItem) {
+        (sender.representedObject as? String).map { closeSurface($0) }
+    }
 
     // MARK: - theming
 

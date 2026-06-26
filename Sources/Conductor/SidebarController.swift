@@ -100,6 +100,15 @@ final class SidebarController: NSViewController {
     /// Right-click a repo header → "Remove Color" — clear the repo color.
     var onRemoveRepoColor: ((String) -> Void)?
 
+    /// An optional per-worktree identity-color override (active surface's effective color),
+    /// keyed by worktree id; falls back to the worktree's own color when absent.
+    private var identityOverrides: [String: NSColor] = [:]
+    func setIdentityOverride(_ color: NSColor?, forWorktree id: String) {
+        let changed = identityOverrides[id] != color
+        if let color { identityOverrides[id] = color } else { identityOverrides[id] = nil }
+        if changed { outline.reloadData() }
+    }
+
     private let rowMenu = NSMenu()
 
     override func loadView() {
@@ -320,8 +329,9 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
                 cell.subtitleLabel.stringValue = branch
             }
             cell.applyBadge(agentStates[wt.worktree.id] ?? .idle)
-            cell.applyIdentityColor(wt.worktree.color.flatMap { NSColor(hex: $0) },
-                                    glyphTint: chrome?.color(.glyphTint).nsColor)
+            let identity = identityOverrides[wt.worktree.id]
+                ?? wt.worktree.color.flatMap { NSColor(hex: $0) }
+            cell.applyIdentityColor(identity, glyphTint: chrome?.color(.glyphTint).nsColor)
             return cell
         }
         return nil
