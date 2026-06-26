@@ -37,8 +37,8 @@ final class SplitSurface: NSViewController {
 
     func splitFocused(axis: SplitAxis) {
         let made = makePane()
-        wire(made.pane, id: made.id)
         tree.splitFocused(axis: axis, newID: made.id, newLeaf: made.pane)
+        wire(made.pane, id: made.id)
         rebuild()
         distributeDividers()
         focusActivePane()

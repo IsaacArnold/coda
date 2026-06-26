@@ -20,7 +20,7 @@ final class ClickableTerminalView: LocalProcessTerminalView {
     var onBecomeFirstResponder: (() -> Void)?
     override var hasFocus: Bool {
         didSet {
-            if hasFocus { onBecomeFirstResponder?() }
+            if hasFocus != oldValue, hasFocus { onBecomeFirstResponder?() }
         }
     }
 
