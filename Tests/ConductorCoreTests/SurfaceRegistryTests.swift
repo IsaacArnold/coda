@@ -2,23 +2,20 @@ import XCTest
 @testable import ConductorCore
 
 final class SurfaceRegistryTests: XCTestCase {
-    func testRegisterThenLookupReturnsHandle() {
+    func testSurfacesForNewWorktreeIsCreatedEmpty() {
         let registry = SurfaceRegistry<String>()
-        registry.register("surface-A", for: "wt1")
-        XCTAssertEqual(registry.handle(for: "wt1"), "surface-A")
+        let list = registry.surfaces(for: "wt1")
+        XCTAssertTrue(list.isEmpty)
+        // Same instance returned on re-access (mutations persist).
+        registry.surfaces(for: "wt1").add("h", surface: Surface(id: "s1"))
+        XCTAssertEqual(registry.surfaces(for: "wt1").count, 1)
     }
 
-    func testLookupMissingWorktreeReturnsNil() {
+    func testExistingSurfacesIsNilUntilCreated() {
         let registry = SurfaceRegistry<String>()
-        XCTAssertNil(registry.handle(for: "nope"))
-    }
-
-    func testRegisteringSameWorktreeKeepsASingleEntry() {
-        let registry = SurfaceRegistry<String>()
-        registry.register("first", for: "wt1")
-        registry.register("second", for: "wt1")
-        XCTAssertEqual(registry.count, 1)
-        XCTAssertEqual(registry.handle(for: "wt1"), "second")
+        XCTAssertNil(registry.existingSurfaces(for: "wt1"))
+        _ = registry.surfaces(for: "wt1")
+        XCTAssertNotNil(registry.existingSurfaces(for: "wt1"))
     }
 
     func testActiveSelectionTracksTheActiveWorktree() {
@@ -26,49 +23,46 @@ final class SurfaceRegistryTests: XCTestCase {
         XCTAssertNil(registry.activeWorktreeID)
         registry.setActive("wt1")
         XCTAssertEqual(registry.activeWorktreeID, "wt1")
-        registry.setActive("wt2")
-        XCTAssertEqual(registry.activeWorktreeID, "wt2")
+        registry.setActive(nil)
+        XCTAssertNil(registry.activeWorktreeID)
     }
 
-    func testReselectingTheSameActiveWorktreeIsIdempotent() {
+    func testEvictReturnsAllHandlesAndRemovesTheWorktree() {
         let registry = SurfaceRegistry<String>()
-        registry.register("surface-A", for: "wt1")
-        registry.setActive("wt1")
-        registry.setActive("wt1")
-        XCTAssertEqual(registry.activeWorktreeID, "wt1")
-        XCTAssertEqual(registry.count, 1)
-        XCTAssertEqual(registry.handle(for: "wt1"), "surface-A")
-    }
-
-    func testEvictRemovesAndReturnsHandle() {
-        let registry = SurfaceRegistry<String>()
-        registry.register("surface-A", for: "wt1")
+        let list = registry.surfaces(for: "wt1")
+        list.add("h1", surface: Surface(id: "s1"))
+        list.add("h2", surface: Surface(id: "s2"))
         let evicted = registry.evict(worktreeID: "wt1")
-        XCTAssertEqual(evicted, "surface-A")
-        XCTAssertNil(registry.handle(for: "wt1"))
-        XCTAssertEqual(registry.count, 0)
+        XCTAssertEqual(evicted.sorted(), ["h1", "h2"])
+        XCTAssertNil(registry.existingSurfaces(for: "wt1"))
     }
 
     func testEvictingTheActiveWorktreeClearsActive() {
         let registry = SurfaceRegistry<String>()
-        registry.register("surface-A", for: "wt1")
+        _ = registry.surfaces(for: "wt1")
         registry.setActive("wt1")
         _ = registry.evict(worktreeID: "wt1")
         XCTAssertNil(registry.activeWorktreeID)
     }
 
-    func testEvictingANonActiveWorktreeLeavesActiveUntouched() {
+    func testEvictingNonActiveLeavesActiveUntouched() {
         let registry = SurfaceRegistry<String>()
-        registry.register("a", for: "wt1")
-        registry.register("b", for: "wt2")
+        _ = registry.surfaces(for: "wt1")
+        _ = registry.surfaces(for: "wt2")
         registry.setActive("wt1")
         _ = registry.evict(worktreeID: "wt2")
         XCTAssertEqual(registry.activeWorktreeID, "wt1")
-        XCTAssertEqual(registry.handle(for: "wt1"), "a")
     }
 
-    func testEvictingMissingWorktreeReturnsNil() {
+    func testEvictingMissingWorktreeReturnsEmpty() {
         let registry = SurfaceRegistry<String>()
-        XCTAssertNil(registry.evict(worktreeID: "ghost"))
+        XCTAssertEqual(registry.evict(worktreeID: "ghost"), [])
+    }
+
+    func testWorktreeIDsListsWorktreesWithSurfaceLists() {
+        let registry = SurfaceRegistry<String>()
+        _ = registry.surfaces(for: "wt1")
+        _ = registry.surfaces(for: "wt2")
+        XCTAssertEqual(Set(registry.worktreeIDs), ["wt1", "wt2"])
     }
 }
