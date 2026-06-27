@@ -56,6 +56,9 @@ public struct Worktree: Codable, Equatable, Identifiable {
     /// Identity color (hex, e.g. "#4CAF50") driving the full-width bar + sidebar accent.
     /// Chrome only — never the terminal grid. Auto-assigned at creation, manually overridable.
     public var color: String?
+    /// True only for the synthesized repo main-checkout worktree (working dir == repo dir).
+    /// In-memory only — absent from `CodingKeys`, so it never persists and always decodes false.
+    public var isMain: Bool = false
 
     public init(id: String, repoID: String, title: String, branch: String,
                 worktreePath: String, color: String? = nil) {
@@ -74,5 +77,17 @@ public struct Worktree: Codable, Equatable, Identifiable {
         branch = try c.decode(String.self, forKey: .branch)
         worktreePath = try c.decode(String.self, forKey: .worktreePath)
         color = try c.decodeIfPresent(String.self, forKey: .color)
+    }
+}
+
+extension Worktree {
+    /// The synthesized "main checkout" worktree for a repo: its working dir IS the repo dir.
+    /// Never persisted (identified by `isMain`); id derived from the repo so surfaces persist
+    /// within a session and the derived chrome color is stable.
+    public static func mainCheckout(for repo: Repository, branch: String) -> Worktree {
+        var wt = Worktree(id: "\(repo.id)#main", repoID: repo.id, title: "Default",
+                          branch: branch, worktreePath: repo.path, color: nil)
+        wt.isMain = true
+        return wt
     }
 }

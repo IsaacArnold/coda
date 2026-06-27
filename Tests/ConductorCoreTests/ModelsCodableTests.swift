@@ -74,4 +74,30 @@ final class ModelsCodableTests: XCTestCase {
         var named = base; named.displayName = "  Pretty Name  "
         XCTAssertEqual(named.sidebarDisplayName, "Pretty Name")                // trimmed override
     }
+
+    func testWorktreeIsMainDefaultsFalseAndIsNotPersisted() throws {
+        // A synthesized main worktree carries isMain == true in memory…
+        let repo = Repository(id: "R1", path: "/tmp/acme", name: "acme")
+        let main = Worktree.mainCheckout(for: repo, branch: "main")
+        XCTAssertTrue(main.isMain)
+        XCTAssertEqual(main.id, "R1#main")
+        XCTAssertEqual(main.repoID, "R1")
+        XCTAssertEqual(main.title, "Default")
+        XCTAssertEqual(main.worktreePath, "/tmp/acme")
+        XCTAssertEqual(main.branch, "main")
+
+        // …but isMain is in-memory only: it must not survive a JSON round-trip, and the
+        // encoded JSON must not even contain the key.
+        let data = try JSONEncoder().encode(main)
+        let json = String(decoding: data, as: UTF8.self)
+        XCTAssertFalse(json.contains("isMain"), "isMain leaked into persisted JSON")
+        let decoded = try JSONDecoder().decode(Worktree.self, from: data)
+        XCTAssertFalse(decoded.isMain, "isMain should decode to false (not persisted)")
+    }
+
+    func testNormalWorktreeIsNotMain() {
+        let wt = Worktree(id: "W1", repoID: "R1", title: "Feature", branch: "feat",
+                          worktreePath: "/tmp/wt/feat")
+        XCTAssertFalse(wt.isMain)
+    }
 }
