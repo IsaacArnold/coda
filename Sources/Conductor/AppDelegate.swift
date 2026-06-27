@@ -362,7 +362,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let repo = store.state.repositories.first(where: { $0.id == repoID }) else { return }
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "“Remove “\(repo.sidebarDisplayName)”?”"
+        alert.messageText = "Remove “\(repo.sidebarDisplayName)”?"
         alert.informativeText = "Conductor will forget this repository and its worktrees. "
             + "Your files, branches, and worktree directories are left untouched on disk."
         alert.addButton(withTitle: "Remove")
