@@ -233,11 +233,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sidebar.reload(sections: displaySections(), selectedWorktreeID: id)
     }
 
-    /// Refresh and highlight a repository header (used by add-repo before a row exists).
-    private func refreshSidebar(selectRepo id: String?) {
-        sidebar.reload(sections: displaySections(), selectedWorktreeID: nil, selectedRepoID: id)
-    }
-
     /// Read each repo's current branch and start a HEAD watcher for it (call once at launch).
     private func seedBranchesAndWatchers() {
         headWatcher.onChange = { [weak self] repoID in
