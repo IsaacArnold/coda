@@ -29,6 +29,11 @@ public struct GitWorktree {
         try git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// The abbreviated SHA of HEAD (used to label a detached-HEAD checkout).
+    public func shortHead(repo: String) throws -> String {
+        try git(repo, ["rev-parse", "--short", "HEAD"]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     public func add(repo: String, path: String, branch: String, base: String) throws {
         try git(repo, ["worktree", "add", "-b", branch, path, base])
     }
