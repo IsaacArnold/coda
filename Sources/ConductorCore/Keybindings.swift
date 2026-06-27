@@ -90,6 +90,7 @@ public enum ShortcutCommand: String, Codable, CaseIterable, Sendable {
     case newWorktree, launchClaude, openInEditor, revealInFinder, archiveWorktree
     case addRepository, toggleSidebar, openSettings
     case newSurface, closeSurface, nextSurface, prevSurface, splitSurface
+    case splitDown, focusPaneLeft, focusPaneRight, focusPaneUp, focusPaneDown
     case goToSurface1, goToSurface2, goToSurface3, goToSurface4, goToSurface5
     case goToSurface6, goToSurface7, goToSurface8, goToSurface9
 
@@ -107,7 +108,12 @@ public enum ShortcutCommand: String, Codable, CaseIterable, Sendable {
         case .closeSurface: return "Close Tab"
         case .nextSurface: return "Next Tab"
         case .prevSurface: return "Previous Tab"
-        case .splitSurface: return "Split Surface"
+        case .splitSurface: return "Split Right"
+        case .splitDown: return "Split Down"
+        case .focusPaneLeft: return "Focus Pane Left"
+        case .focusPaneRight: return "Focus Pane Right"
+        case .focusPaneUp: return "Focus Pane Up"
+        case .focusPaneDown: return "Focus Pane Down"
         case .goToSurface1: return "Go to Tab 1"
         case .goToSurface2: return "Go to Tab 2"
         case .goToSurface3: return "Go to Tab 3"
@@ -125,6 +131,7 @@ public enum ShortcutCommand: String, Codable, CaseIterable, Sendable {
         case .newWorktree, .launchClaude, .openInEditor, .revealInFinder, .archiveWorktree:
             return .worktree
         case .newSurface, .closeSurface, .nextSurface, .prevSurface, .splitSurface,
+             .splitDown, .focusPaneLeft, .focusPaneRight, .focusPaneUp, .focusPaneDown,
              .goToSurface1, .goToSurface2, .goToSurface3, .goToSurface4, .goToSurface5,
              .goToSurface6, .goToSurface7, .goToSurface8, .goToSurface9:
             return .surface
@@ -149,6 +156,11 @@ public enum ShortcutCommand: String, Codable, CaseIterable, Sendable {
         case .nextSurface:     return KeyChord("]", command: true, shift: true)
         case .prevSurface:     return KeyChord("[", command: true, shift: true)
         case .splitSurface:    return KeyChord("d", command: true)
+        case .splitDown:       return KeyChord("d", command: true, shift: true)
+        case .focusPaneLeft:   return KeyChord("\u{f702}", command: true, option: true)
+        case .focusPaneRight:  return KeyChord("\u{f703}", command: true, option: true)
+        case .focusPaneUp:     return KeyChord("\u{f700}", command: true, option: true)
+        case .focusPaneDown:   return KeyChord("\u{f701}", command: true, option: true)
         case .goToSurface1:    return KeyChord("1", command: true)
         case .goToSurface2:    return KeyChord("2", command: true)
         case .goToSurface3:    return KeyChord("3", command: true)

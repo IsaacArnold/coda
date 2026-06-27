@@ -10,11 +10,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let surfaceTabBar = SurfaceTabBar()
     private var surfaceSeq = 0   // monotonic id source for new surfaces
     private var store: WorktreeStore!
-    private var currentSurface: TerminalSurface?
+    private var currentSurface: SplitSurface?
     private var selectedWorktree: Worktree?
     // Keeps each worktree's terminal alive across sidebar switches; the handle is
-    // the TerminalSurface itself.
-    private let surfaces = SurfaceRegistry<TerminalSurface>()
+    // a SplitSurface (single-pane in PR A; splits added in PR B).
+    private let surfaces = SurfaceRegistry<SplitSurface>()
     // Toolbar centre-notch: time-of-day glyph + time only (worktree name/badge live in the identity bar).
     private let notchLabel = NSTextField(labelWithString: "No worktree")
     private let notchIcon = NSImageView()
@@ -63,8 +63,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // tokens), so consuming the up keeps our editor open as the only handler.
         clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
             guard let self, event.modifierFlags.contains(.command), event.window === self.window,
-                  let surface = self.currentSurface, surface.containsClick(event) else { return event }
-            if event.type == .leftMouseDown { surface.handleCommandClick(event) }
+                  let split = self.currentSurface, let pane = split.paneContaining(event) else { return event }
+            if event.type == .leftMouseDown { pane.handleCommandClick(event) }
             return nil
         }
     }
@@ -176,6 +176,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if worktreeID == selectedWorktree?.id {
                 selectedWorktree = store.state.worktrees.first { $0.id == worktreeID }
                 refreshChromeForActiveSurface()
+                // Keep the focused-pane border tint in sync with the new color.
+                currentSurface?.identityColor = (store.state.worktrees.first { $0.id == worktreeID }?.color).flatMap { NSColor(hex: $0) }
             }
         } catch { presentError(error) }
     }
@@ -351,9 +353,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try store.archiveWorktree(id: s.id, deleteBranch: true)
             // Tear down all of the archived worktree's surfaces (kills every PTY, no leak).
-            for surface in surfaces.evict(worktreeID: s.id) {
-                surface.view.removeFromSuperview()
-                surface.removeFromParent()
+            for split in surfaces.evict(worktreeID: s.id) {
+                split.allPanes.forEach { $0.view.removeFromSuperview(); $0.removeFromParent() }
+                split.view.removeFromSuperview()
+                split.removeFromParent()
             }
             if shownWorktreeID == s.id {
                 shownWorktreeID = nil
@@ -402,12 +405,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshTabBar()
     }
 
-    /// Build a fresh TerminalSurface for `wt`, register it, install it in the detail view,
-    /// make it the active surface, and focus it. `runSetupAndAutoLaunch` is true only for the
-    /// worktree's very first surface (mirrors the old first-open behavior: setupScript +
+    /// Build a fresh SplitSurface (single-pane) for `wt`, register it, install it in the detail
+    /// view, make it the active surface, and focus it. `runSetupAndAutoLaunch` is true only for
+    /// the worktree's very first surface (mirrors the old first-open behavior: setupScript +
     /// optional auto-launch Claude); additional tabs are always plain shells.
     @discardableResult
-    private func createSurface(in wt: Worktree, runSetupAndAutoLaunch: Bool) -> TerminalSurface {
+    private func createSurface(in wt: Worktree, runSetupAndAutoLaunch: Bool) -> SplitSurface {
         shownWorktreeID = wt.id
         surfaces.setActive(wt.id)
         let repo = store.state.repositories.first { $0.id == wt.repoID }
@@ -416,34 +419,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pendingSetupWorktreeIDs.remove(wt.id)
         let command = (isNewlyCreated && repo?.autoLaunchClaude == true) ? launchCommand(for: repo!) : ""
 
-        let surface = TerminalSurface(workingDirectory: wt.worktreePath, command: command, setupScript: setup)
-        surface.onOpenFile = { [weak self] path, line in self?.openInDefaultEditor(path: path, line: line) }
-        surface.onTitleChange = { [weak self] _ in self?.refreshTabBar() }
-        surface.applyTheme(activeTheme)
-        surface.applyFont(resolvedTerminalFont())
+        // The first pane carries setup/command; split panes are plain shells (makePane).
+        let firstPane = makePane(in: wt, command: command, setup: setup)
+        let split = SplitSurface(
+            firstPane: firstPane, firstID: nextPaneID(),
+            makePane: { [weak self, wt] in
+                let pane = self?.makePane(in: wt, command: "", setup: "") ?? TerminalSurface(workingDirectory: wt.worktreePath, command: "", setupScript: "")
+                return (self?.nextPaneID() ?? UUID().uuidString, pane)
+            })
+        split.onFocusChange = { [weak self] in self?.refreshTabBar(); self?.refreshChromeForActiveSurface() }
 
         surfaceSeq += 1
         let id = "surface-\(surfaceSeq)"
         let list = surfaces.surfaces(for: wt.id)
-        // Hide the current active surface (we're inserting after it and switching to the new one).
         list.activeHandle?.view.isHidden = true
-        list.add(surface, surface: Surface(id: id))
+        list.add(split, surface: Surface(id: id))
 
-        detail.addChild(surface)
-        surface.view.translatesAutoresizingMaskIntoConstraints = false
-        detail.view.addSubview(surface.view)
+        detail.addChild(split)
+        split.view.translatesAutoresizingMaskIntoConstraints = false
+        detail.view.addSubview(split.view)
         NSLayoutConstraint.activate([
-            surface.view.topAnchor.constraint(equalTo: surfaceTabBar.bottomAnchor, constant: 6),
-            surface.view.bottomAnchor.constraint(equalTo: detail.view.bottomAnchor),
-            surface.view.leadingAnchor.constraint(equalTo: detail.view.leadingAnchor, constant: 8),
-            surface.view.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor, constant: -8),
+            split.view.topAnchor.constraint(equalTo: surfaceTabBar.bottomAnchor, constant: 6),
+            split.view.bottomAnchor.constraint(equalTo: detail.view.bottomAnchor),
+            split.view.leadingAnchor.constraint(equalTo: detail.view.leadingAnchor, constant: 8),
+            split.view.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor, constant: -8),
         ])
-        currentSurface = surface
-        view(focus: surface)
+        currentSurface = split
+        split.identityColor = (selectedWorktree?.color).flatMap { NSColor(hex: $0) }
+        view(focus: split)
         refreshChromeForActiveSurface()
         refreshTabBar()
-        return surface
+        return split
     }
+
+    /// Build a fully-configured terminal pane for a worktree (cwd, theme, font, callbacks).
+    private func makePane(in wt: Worktree, command: String, setup: String) -> TerminalSurface {
+        let pane = TerminalSurface(workingDirectory: wt.worktreePath, command: command, setupScript: setup)
+        pane.onOpenFile = { [weak self] path, line in self?.openInDefaultEditor(path: path, line: line) }
+        pane.onTitleChange = { [weak self] _ in self?.refreshTabBar() }
+        pane.applyTheme(activeTheme)
+        pane.applyFont(resolvedTerminalFont())
+        return pane
+    }
+
+    private var paneSeq = 0
+    private func nextPaneID() -> String { paneSeq += 1; return "pane-\(paneSeq)" }
 
     /// Switch the shown worktree's active surface to `id`: hide the old, show the new, focus it.
     private func activateSurface(_ id: String) {
@@ -458,8 +478,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshTabBar()
     }
 
-    private func view(focus surface: TerminalSurface) {
-        window.makeFirstResponder(surface.view)
+    private func view(focus surface: SplitSurface) {
+        window.makeFirstResponder(surface.focusedPane.view)
     }
 
     /// Rebuild the tab bar from the shown worktree's surface list.
@@ -476,7 +496,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return SurfaceTabItem(
                 id: entry.surface.id,
                 label: surfaceLabel(nameOverride: entry.surface.nameOverride,
-                                    terminalTitle: entry.handle.terminalTitle, index: idx),
+                                    terminalTitle: entry.handle.focusedPane.terminalTitle, index: idx),
                 state: agentStates[surfaceKey(wtID, entry.surface.id)] ?? .idle,
                 isActive: entry.surface.id == list.activeSurfaceID,
                 tint: effective?.nsColor)
@@ -498,6 +518,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// (non-idle agent state). Closing the last surface spawns a fresh shell — a selected
     /// worktree always has at least one surface (never an empty pane).
     private func closeSurface(_ id: String? = nil) {
+        // ⌘W (no explicit surface id): close the focused PANE first; only close the tab
+        // when the surface is down to its last pane.
+        if id == nil, let split = currentSurface, split.allPanes.count > 1 {
+            _ = split.closeFocused()
+            refreshChromeForActiveSurface()
+            refreshTabBar()
+            return
+        }
         guard let wtID = shownWorktreeID, let list = surfaces.existingSurfaces(for: wtID) else { return }
         guard let targetID = id ?? list.activeSurfaceID else { return }
         let state = agentStates[surfaceKey(wtID, targetID)] ?? .idle
@@ -511,6 +539,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
         if let removed = list.close(id: targetID) {
+            removed.allPanes.forEach { $0.view.removeFromSuperview(); $0.removeFromParent() }
             removed.view.removeFromSuperview()
             removed.removeFromParent()
         }
@@ -548,7 +577,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// `next/prev/goTo` already moved the list's active id; reflect it in the views.
-    private func activateSurfaceAfterListMove(_ id: String, in list: WorktreeSurfaces<TerminalSurface>) {
+    private func activateSurfaceAfterListMove(_ id: String, in list: WorktreeSurfaces<SplitSurface>) {
         for entry in list.entries { entry.handle.view.isHidden = (entry.surface.id != id) }
         currentSurface = list.handle(for: id)
         if let h = currentSurface { view(focus: h) }
@@ -569,6 +598,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                            colorHex: effective?.hexString,
                            agentState: agentStates[wt.id] ?? .idle)
         sidebar.setIdentityOverride(effective?.nsColor, forWorktree: wt.id)
+        currentSurface?.identityColor = effective?.nsColor
     }
 
     /// Right-click on a surface tab: rename, color, or close it.
@@ -638,7 +668,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Push the active terminal theme to every live surface and repaint the chrome.
     private func applyActiveTheme() {
         for wtID in surfaces.worktreeIDs {
-            surfaces.existingSurfaces(for: wtID)?.handles.forEach { $0.applyTheme(activeTheme) }
+            surfaces.existingSurfaces(for: wtID)?.handles.forEach { split in
+                split.allPanes.forEach { $0.applyTheme(activeTheme) }
+            }
         }
         applyChromeTheme()
     }
@@ -678,7 +710,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do { try prefsStore.save(preferences) } catch { presentError(error) }
         let font = resolvedTerminalFont()
         for wtID in surfaces.worktreeIDs {
-            surfaces.existingSurfaces(for: wtID)?.handles.forEach { $0.applyFont(font) }
+            surfaces.existingSurfaces(for: wtID)?.handles.forEach { split in
+                split.allPanes.forEach { $0.applyFont(font) }
+            }
         }
     }
 
@@ -789,7 +823,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let surfaceMenu = NSMenu(title: "Surface")
         addItem(to: surfaceMenu, "New Tab", #selector(newSurfaceAction), command: .newSurface)
         addItem(to: surfaceMenu, "Close Tab", #selector(closeSurfaceAction), command: .closeSurface)
-        addItem(to: surfaceMenu, "Split Surface", #selector(splitSurfaceAction), command: .splitSurface)
+        addItem(to: surfaceMenu, "Split Right", #selector(splitSurfaceAction), command: .splitSurface)
+        addItem(to: surfaceMenu, "Split Down", #selector(splitDownAction), command: .splitDown)
+        surfaceMenu.addItem(.separator())
+        addItem(to: surfaceMenu, "Focus Pane Left",  #selector(focusPaneLeftAction),  command: .focusPaneLeft)
+        addItem(to: surfaceMenu, "Focus Pane Right", #selector(focusPaneRightAction), command: .focusPaneRight)
+        addItem(to: surfaceMenu, "Focus Pane Up",    #selector(focusPaneUpAction),    command: .focusPaneUp)
+        addItem(to: surfaceMenu, "Focus Pane Down",  #selector(focusPaneDownAction),  command: .focusPaneDown)
         surfaceMenu.addItem(.separator())
         addItem(to: surfaceMenu, "Next Tab", #selector(nextSurfaceAction), command: .nextSurface)
         addItem(to: surfaceMenu, "Previous Tab", #selector(prevSurfaceAction), command: .prevSurface)
@@ -855,8 +895,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func nextSurfaceAction() { nextSurface() }
     @objc private func prevSurfaceAction() { prevSurface() }
     @objc private func goToSurfaceAction(_ sender: NSMenuItem) { goToSurface(sender.tag) }
-    /// Reserved for PR B (splits). No-op in PR A.
-    @objc private func splitSurfaceAction() { /* PR B */ }
+    @objc private func splitSurfaceAction() { currentSurface?.splitFocused(axis: .horizontal) }
+    @objc private func splitDownAction() { currentSurface?.splitFocused(axis: .vertical) }
+    @objc private func focusPaneLeftAction()  { currentSurface?.moveFocus(.left) }
+    @objc private func focusPaneRightAction() { currentSurface?.moveFocus(.right) }
+    @objc private func focusPaneUpAction()    { currentSurface?.moveFocus(.up) }
+    @objc private func focusPaneDownAction()  { currentSurface?.moveFocus(.down) }
 
     /// Opens the focused worktree's directory in any installed app the user picks (one-off).
     @objc private func openWithOtherAppAction() {
@@ -896,11 +940,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func launchClaudeAction() {
         guard let wt = selectedWorktree,
               let repo = store.state.repositories.first(where: { $0.id == wt.repoID }),
-              let surface = currentSurface else {
+              let split = currentSurface else {
             presentMessage("Select a worktree first.")
             return
         }
-        surface.sendCommand(launchCommand(for: repo))
+        split.focusedPane.sendCommand(launchCommand(for: repo))
     }
 
     private static let notchTimeFormatter: DateFormatter = {
@@ -926,14 +970,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let list = surfaces.existingSurfaces(for: wtID) else { continue }
             var perSurface: [AgentState] = []
             for entry in list.entries {
-                let snapshot = entry.handle.outputSnapshot()
-                let state = agentState(fromOutput: snapshot)
-                states[surfaceKey(wtID, entry.surface.id)] = state
-                perSurface.append(state)
+                let paneStates = entry.handle.allPanes.map { agentState(fromOutput: $0.outputSnapshot()) }
+                let surfaceState = rollup(paneStates)
+                states[surfaceKey(wtID, entry.surface.id)] = surfaceState
+                perSurface.append(surfaceState)
             }
             rollups[wtID] = rollup(perSurface)
         }
-        // Merge: per-surface keys + per-worktree rollup keys in one map.
         for (k, v) in rollups { states[k] = v }
         agentStates = states
         sidebar.updateAgentStates(rollups)

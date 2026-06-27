@@ -39,8 +39,8 @@ final class ShortcutCommandTests: XCTestCase {
         XCTAssertEqual(ShortcutCommand.toggleSidebar.defaultChord, KeyChord("s", command: true, control: true))
     }
 
-    func testThereAreTwentyTwoBindableCommands() {
-        XCTAssertEqual(ShortcutCommand.allCases.count, 22)
+    func testThereAreTwentySevenBindableCommands() {
+        XCTAssertEqual(ShortcutCommand.allCases.count, 27)
     }
 }
 
@@ -115,6 +115,31 @@ final class SurfaceShortcutTests: XCTestCase {
         for cmd in surfaceCmds { XCTAssertEqual(cmd.category, .surface) }
     }
     func testDefaultBindingsHaveNoConflicts() {
+        XCTAssertTrue(keybindingConflicts(Keybindings()).isEmpty)
+    }
+}
+
+final class PaneShortcutTests: XCTestCase {
+    func testSplitRightKeepsCommandDAndIsRenamed() {
+        XCTAssertEqual(ShortcutCommand.splitSurface.defaultChord, KeyChord("d", command: true))
+        XCTAssertEqual(ShortcutCommand.splitSurface.displayName, "Split Right")
+    }
+    func testSplitDownIsShiftCommandD() {
+        XCTAssertEqual(ShortcutCommand.splitDown.defaultChord, KeyChord("d", command: true, shift: true))
+        XCTAssertEqual(ShortcutCommand.splitDown.category, .surface)
+    }
+    func testFocusPaneDefaultsAreCommandOptionArrows() {
+        XCTAssertEqual(ShortcutCommand.focusPaneLeft.defaultChord,  KeyChord("\u{f702}", command: true, option: true))
+        XCTAssertEqual(ShortcutCommand.focusPaneRight.defaultChord, KeyChord("\u{f703}", command: true, option: true))
+        XCTAssertEqual(ShortcutCommand.focusPaneUp.defaultChord,    KeyChord("\u{f700}", command: true, option: true))
+        XCTAssertEqual(ShortcutCommand.focusPaneDown.defaultChord,  KeyChord("\u{f701}", command: true, option: true))
+    }
+    func testAllPaneCommandsAreSurfaceCategory() {
+        for c in [ShortcutCommand.splitDown, .focusPaneLeft, .focusPaneRight, .focusPaneUp, .focusPaneDown] {
+            XCTAssertEqual(c.category, .surface)
+        }
+    }
+    func testDefaultBindingsStillHaveNoConflicts() {
         XCTAssertTrue(keybindingConflicts(Keybindings()).isEmpty)
     }
 }
