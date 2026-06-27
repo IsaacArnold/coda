@@ -124,6 +124,8 @@ Next Phase-1 plans layer on: setupScript + copy-allowlist, theming/.itermcolors,
 - ⚪️ Lifecycle — `SessionStart` / `SessionEnd`
 - Correlate firings to worktree via `cwd` + `session_id` + `transcript_path`. Transport: `http` hook type → localhost server.
 
+**Known heuristic limitation (motivates the hook upgrade above; observed verifying PR #30 splits, 2026-06-27):** the MVP heuristic re-derives state by scanning each pane's *visible scrollback* every ~1.2s and matches the working-spinner regex `(<digits>s` anywhere in the snapshot. So a **frozen/leftover line keeps a pane stuck "working"** until it scrolls off-screen — a live spinner self-clears, but stale output (or an `echo "(9s …)"` left on screen) does not. The HTTP-hook path is event-driven and immune to this.
+
 ---
 
 ## Phased backlog (the "additions" we keep deferring)
