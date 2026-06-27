@@ -170,6 +170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sidebar.onRenameRepo = { [weak self] repoID in self?.renameRepo(repoID) }
         sidebar.onSetRepoColor = { [weak self] repoID, hex in self?.setRepoColor(repoID, hex) }
         sidebar.onRemoveRepoColor = { [weak self] repoID in self?.setRepoColor(repoID, nil) }
+        sidebar.onRemoveRepo = { [weak self] repoID in self?.removeRepo(repoID) }
     }
 
     /// Override a worktree's identity color and repaint its bar + sidebar row.
@@ -355,6 +356,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         catch { presentError(error) }
     }
 
+    /// Forget a repository (no disk changes): confirm, remove from the store, evict every
+    /// surface for the repo's worktrees + its main checkout, stop its HEAD watcher.
+    private func removeRepo(_ repoID: String) {
+        guard let repo = store.state.repositories.first(where: { $0.id == repoID }) else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "“Remove “\(repo.sidebarDisplayName)”?”"
+        alert.informativeText = "Conductor will forget this repository and its worktrees. "
+            + "Your files, branches, and worktree directories are left untouched on disk."
+        alert.addButton(withTitle: "Remove")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            let removed = try store.removeRepository(id: repoID)
+            var evictIDs = removed.map { $0.id }
+            evictIDs.append("\(repoID)#main")
+            for id in evictIDs {
+                for split in surfaces.evict(worktreeID: id) { tearDown(split) }
+            }
+            headWatcher.unwatch(repoID: repoID)
+            currentBranches[repoID] = nil
+            if let shown = shownWorktreeID, evictIDs.contains(shown) {
+                shownWorktreeID = nil
+                currentSurface = nil
+                selectedWorktree = nil
+            }
+            refreshSidebar(select: allDisplayWorktrees().first?.id)
+            select(allDisplayWorktrees().first)
+        } catch { presentError(error) }
+    }
+
     private func newWorktree(repoID: String? = nil) {
         // Add to the given repo (sidebar right-click), else the one implied by the
         // selection, else the first repo.
@@ -373,8 +405,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch { presentError(error) }
     }
 
+    /// Tear down a surface’s panes + views (kills every PTY). Used by archive and repo removal.
+    private func tearDown(_ split: SplitSurface) {
+        split.allPanes.forEach { $0.view.removeFromSuperview(); $0.removeFromParent() }
+        split.view.removeFromSuperview()
+        split.removeFromParent()
+    }
+
     private func archive(_ s: Worktree) {
-        // Archiving deletes the branch too and can't be undone — confirm first.
+        // Archiving deletes the branch too and can’t be undone — confirm first.
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Archive “\(s.title)”?"
@@ -384,12 +423,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         do {
             try store.archiveWorktree(id: s.id, deleteBranch: true)
-            // Tear down all of the archived worktree's surfaces (kills every PTY, no leak).
-            for split in surfaces.evict(worktreeID: s.id) {
-                split.allPanes.forEach { $0.view.removeFromSuperview(); $0.removeFromParent() }
-                split.view.removeFromSuperview()
-                split.removeFromParent()
-            }
+            // Tear down all of the archived worktree’s surfaces (kills every PTY, no leak).
+            for split in surfaces.evict(worktreeID: s.id) { tearDown(split) }
             if shownWorktreeID == s.id {
                 shownWorktreeID = nil
                 currentSurface = nil
@@ -909,6 +944,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func archiveSelectedAction() {
         guard let wt = selectedWorktree else { presentMessage("Select a worktree first."); return }
+        if wt.isMain {
+            presentMessage("The main checkout can't be archived. Use Remove Repository to forget the repo.")
+            return
+        }
         archive(wt)
     }
 
