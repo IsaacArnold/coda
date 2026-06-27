@@ -20,3 +20,16 @@ public func groupWorktreesByRepository(repositories: [Repository], worktrees: [W
                           worktrees: worktrees.filter { $0.repoID == repo.id })
     }
 }
+
+/// Like `groupWorktreesByRepository`, but prepends each repo's synthesized "main checkout"
+/// worktree (the repo's own working dir, current branch) above its real worktrees. This is
+/// what the sidebar consumes: every repo always has at least the main-checkout row.
+public func sectionsWithMainCheckouts(repositories: [Repository],
+                                      worktrees: [Worktree],
+                                      branchForRepo: [String: String]) -> [RepositorySection] {
+    repositories.map { repo in
+        let main = Worktree.mainCheckout(for: repo, branch: branchForRepo[repo.id] ?? "")
+        let real = worktrees.filter { $0.repoID == repo.id }
+        return RepositorySection(repository: repo, worktrees: [main] + real)
+    }
+}
