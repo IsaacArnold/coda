@@ -12,6 +12,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store: WorktreeStore!
     private var currentSurface: SplitSurface?
     private var selectedWorktree: Worktree?
+    /// repoID → current branch of its main checkout, kept fresh by `headWatcher`.
+    private var currentBranches: [String: String] = [:]
+    private let headWatcher = HeadWatcher()
     // Keeps each worktree's terminal alive across sidebar switches; the handle is
     // a SplitSurface (single-pane in PR A; splits added in PR B).
     private let surfaces = SurfaceRegistry<SplitSurface>()
@@ -47,7 +50,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildMenu()
         buildWindow()
         wireSidebar()
-        refreshSidebar(select: store.state.worktrees.first?.id)
+        seedBranchesAndWatchers()
+        refreshSidebar(select: allDisplayWorktrees().first?.id)
         applyChromeTheme()
         // Keep the notch clock current.
         notchTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
@@ -202,18 +206,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch { presentError(error) }
     }
 
-    private func refreshSidebar(select id: String?) {
-        let sections = groupWorktreesByRepository(repositories: store.state.repositories,
-                                                  worktrees: store.state.worktrees)
-        sidebar.reload(sections: sections, selectedWorktreeID: id)
+    /// Sidebar sections WITH each repo's synthesized main-checkout row prepended.
+    private func displaySections() -> [RepositorySection] {
+        sectionsWithMainCheckouts(repositories: store.state.repositories,
+                                  worktrees: store.state.worktrees,
+                                  branchForRepo: currentBranches)
     }
 
-    /// Refresh and highlight a repository header (e.g. a freshly added repo with no
-    /// worktrees yet, which has no worktree row to select).
+    /// Every worktree the sidebar shows — synthesized main checkouts + real worktrees.
+    private func allDisplayWorktrees() -> [Worktree] {
+        displaySections().flatMap { $0.worktrees }
+    }
+
+    /// Look up a display worktree (incl. a synthesized main checkout) by id.
+    private func displayWorktree(id: String?) -> Worktree? {
+        guard let id else { return nil }
+        return allDisplayWorktrees().first { $0.id == id }
+    }
+
+    private func refreshSidebar(select id: String?) {
+        sidebar.reload(sections: displaySections(), selectedWorktreeID: id)
+    }
+
+    /// Refresh and highlight a repository header (used by add-repo before a row exists).
     private func refreshSidebar(selectRepo id: String?) {
-        let sections = groupWorktreesByRepository(repositories: store.state.repositories,
-                                                  worktrees: store.state.worktrees)
-        sidebar.reload(sections: sections, selectedWorktreeID: nil, selectedRepoID: id)
+        sidebar.reload(sections: displaySections(), selectedWorktreeID: nil, selectedRepoID: id)
+    }
+
+    /// Read each repo's current branch and start a HEAD watcher for it (call once at launch).
+    private func seedBranchesAndWatchers() {
+        headWatcher.onChange = { [weak self] repoID in
+            guard let self else { return }
+            self.currentBranches[repoID] = try? self.store.currentBranch(repoID: repoID)
+            self.refreshSidebar(select: self.shownWorktreeID)
+        }
+        for repo in store.state.repositories {
+            currentBranches[repo.id] = try? store.currentBranch(repoID: repo.id)
+            headWatcher.watch(repoID: repo.id, repoPath: repo.path)
+        }
     }
 
     /// Per-repo settings, opened as a sheet from that repo in the sidebar (right-click).
@@ -315,10 +345,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.prompt = "Add Repo"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            // Refresh + highlight so the added repo is visibly there (it returns the
-            // existing one if already added, which highlights it just the same).
             let repo = try store.addRepository(path: url.path)
-            refreshSidebar(selectRepo: repo.id)
+            currentBranches[repo.id] = try? store.currentBranch(repoID: repo.id)
+            headWatcher.watch(repoID: repo.id, repoPath: repo.path)
+            let mainID = "\(repo.id)#main"
+            refreshSidebar(select: mainID)
+            select(displayWorktree(id: mainID))
         }
         catch { presentError(error) }
     }
