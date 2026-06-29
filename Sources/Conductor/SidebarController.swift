@@ -45,11 +45,11 @@ func agentBadgeColor(_ state: AgentState) -> NSColor? {
 }
 
 /// A worktree row, two-line à la Supacode: branch glyph + (title over a
-/// `repo · branch` subtitle) + a trailing agent-state badge dot.
+/// `branch` subtitle) + a trailing agent-state badge dot.
 /// The dot is a layer-drawn circle (not an SF symbol) so it always renders.
 private final class WorktreeCellView: NSTableCellView {
     let badge = NSView()
-    /// The `.footnote`-sized secondary subtitle (`repo · branch`) under the title.
+    /// The `.footnote`-sized secondary subtitle (the branch name) under the title.
     let subtitleLabel = NSTextField(labelWithString: "")
 
     func applyBadge(_ state: AgentState) {
@@ -332,22 +332,8 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         if let wt = item as? WorktreeNode {
             let cell = makeWorktreeCell()
             cell.textField?.stringValue = wt.worktree.title
-            let branch = wt.worktree.branch
-            let parentRepo = (outlineView.parent(forItem: item) as? RepoNode)?.repository
-            let secondary = NSColor.secondaryLabelColor
-            let subFont = cell.subtitleLabel.font ?? .systemFont(ofSize: NSFont.preferredFont(forTextStyle: .footnote).pointSize)
-            if let parentRepo {
-                let repoColor = parentRepo.color.flatMap { NSColor(hex: $0) } ?? secondary
-                let s = NSMutableAttributedString(
-                    string: parentRepo.sidebarDisplayName,
-                    attributes: [.foregroundColor: repoColor, .font: subFont])
-                s.append(NSAttributedString(
-                    string: " · \(branch)",
-                    attributes: [.foregroundColor: secondary, .font: subFont]))
-                cell.subtitleLabel.attributedStringValue = s
-            } else {
-                cell.subtitleLabel.stringValue = branch
-            }
+            // Subtitle is just the branch — the repo name is already the section header above.
+            cell.subtitleLabel.stringValue = wt.worktree.branch
             cell.applyBadge(agentStates[wt.worktree.id] ?? .idle)
             let identity = identityOverrides[wt.worktree.id]
                 ?? wt.worktree.color.flatMap { NSColor(hex: $0) }
@@ -387,7 +373,7 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         tf.translatesAutoresizingMaskIntoConstraints = false
         tf.font = .systemFont(ofSize: NSFont.systemFontSize)
         tf.lineBreakMode = .byTruncatingTail
-        // Subtitle: secondary `.footnote` (10pt) — matches Supacode's `repo · branch` line.
+        // Subtitle: secondary `.footnote` (10pt) — the branch name.
         let sub = cell.subtitleLabel
         sub.translatesAutoresizingMaskIntoConstraints = false
         sub.font = .systemFont(ofSize: NSFont.preferredFont(forTextStyle: .footnote).pointSize)
