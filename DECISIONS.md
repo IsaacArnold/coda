@@ -1,9 +1,17 @@
-# Conductor — Design Decisions & Phasing
+# Coda — Design Decisions & Phasing
 
 A terminal-first native macOS app for managing Claude Code workflows.
 Inspiration: Supacode (worktree/agent orchestration) + iTerm2 (tabs, colors, snippets, cmd+click) + Ghostty (aesthetic).
 
-_Living document — updated during the `/grill-me` design session. Last updated: 2026-06-24._
+_Living document — updated during the `/grill-me` design session. Last updated: 2026-06-29._
+
+> **Renamed Conductor → Coda (2026-06-29).** The app, Swift package, targets
+> (`Conductor`/`ConductorCore` → `Coda`/`CodaCore`), and on-disk data directory
+> (`~/.conductor` → `~/.coda`) were renamed. A one-time settings migration copies
+> `preferences.json`, `keybindings.json`, and `themes/` to the new directory on
+> first launch (registered repos + worktrees are re-registered, not migrated —
+> their absolute paths can't survive the move). Dated spec/plan files under
+> `docs/superpowers/` keep their original `conductor-*` names as historical record.
 
 ---
 
