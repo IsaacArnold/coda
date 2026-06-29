@@ -60,6 +60,19 @@ final class SplitSurface: NSViewController {
         return true
     }
 
+    /// Close a specific pane by id (the hover × button). Only meaningful when >1 pane —
+    /// the last pane is closed via the tab, so the × is never shown on a single pane.
+    func closePane(id: String) {
+        guard tree.count > 1 else { return }
+        let pane = tree.leaf(id: id)
+        guard tree.close(id: id) else { return }
+        pane?.view.removeFromSuperview(); pane?.removeFromParent()
+        rebuild()
+        distributeDividers()
+        focusActivePane()
+        onFocusChange?()
+    }
+
     func moveFocus(_ direction: PaneDirection) {
         let frames = tree.leaves.map { entry -> PaneRect in
             let f = entry.leaf.view.convert(entry.leaf.view.bounds, to: container)
@@ -126,10 +139,14 @@ final class SplitSurface: NSViewController {
 
     private func buildView(_ node: PaneTree<TerminalSurface>.Node) -> NSView {
         switch node {
-        case let .leaf(_, pane):
-            pane.view.translatesAutoresizingMaskIntoConstraints = true
-            pane.view.autoresizingMask = [.width, .height]
-            return pane.view
+        case let .leaf(id, pane):
+            let wrapper = PaneContainerView(id: id, content: pane.view)
+            wrapper.autoresizingMask = [.width, .height]
+            // The × is only an affordance when there's another pane to fall back to;
+            // closing the sole pane is the tab bar's job.
+            wrapper.isCloseable = tree.count > 1
+            wrapper.onClose = { [weak self] in self?.closePane(id: id) }
+            return wrapper
         case let .split(axis, a, b, _):
             let split = NSSplitView()
             split.isVertical = (axis == .horizontal)   // side-by-side ⇒ vertical dividers
@@ -171,5 +188,93 @@ final class SplitSurface: NSViewController {
             let pos = CGFloat(i + 1) * pane + CGFloat(i) * dividerW
             split.setPosition(pos, ofDividerAt: i)
         }
+    }
+}
+
+/// Wraps one pane's terminal view and overlays a close (×) button in the top-right corner,
+/// revealed only while the mouse is inside the pane (and only when the pane is closeable —
+/// the sole pane of a tab is closed via the tab bar, not here).
+private final class PaneContainerView: NSView {
+    let id: String
+    var onClose: (() -> Void)?
+    var isCloseable = false {
+        didSet { if !isCloseable { closeButton.isHidden = true } }
+    }
+
+    private let closeButton = PointerButton()
+    private var hoverArea: NSTrackingArea?
+
+    init(id: String, content: NSView) {
+        self.id = id
+        super.init(frame: .zero)
+
+        content.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(content)
+
+        closeButton.image = NSImage(systemSymbolName: "xmark.circle.fill",
+                                    accessibilityDescription: "Close Pane")
+        closeButton.imageScaling = .scaleProportionallyDown
+        closeButton.isBordered = false
+        closeButton.contentTintColor = .labelColor
+        closeButton.toolTip = "Close Pane"
+        closeButton.target = self
+        closeButton.action = #selector(closeTapped)
+        closeButton.isHidden = true
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(closeButton)   // above the terminal so it receives the click
+
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: topAnchor),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor),
+            content.leadingAnchor.constraint(equalTo: leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: trailingAnchor),
+            closeButton.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            closeButton.widthAnchor.constraint(equalToConstant: 16),
+            closeButton.heightAnchor.constraint(equalToConstant: 16),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    @objc private func closeTapped() { onClose?() }
+
+    // Hover tracking covers the whole pane regardless of the terminal subview on top of it
+    // (tracking areas are independent of hit-testing).
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let area = hoverArea { removeTrackingArea(area) }
+        let area = NSTrackingArea(rect: .zero,
+                                  options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+                                  owner: self)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        if isCloseable { closeButton.isHidden = false }
+    }
+    override func mouseExited(with event: NSEvent) {
+        closeButton.isHidden = true
+    }
+}
+
+/// An NSButton that shows the pointing-hand cursor while the mouse is over it. The
+/// `.cursorUpdate` tracking area takes precedence over the terminal view beneath it,
+/// which otherwise sets an I-beam cursor.
+private final class PointerButton: NSButton {
+    private var cursorArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let area = cursorArea { removeTrackingArea(area) }
+        let area = NSTrackingArea(rect: .zero,
+                                  options: [.cursorUpdate, .activeInActiveApp, .inVisibleRect],
+                                  owner: self)
+        addTrackingArea(area)
+        cursorArea = area
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.pointingHand.set()
     }
 }
