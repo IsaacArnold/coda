@@ -1,4 +1,4 @@
-# Conductor
+# Coda
 
 A native macOS app that orchestrates Claude Code work across git worktrees. The user manages many parallel branches of work, each in its own worktree, with an embedded terminal as the primary surface.
 
