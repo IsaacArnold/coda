@@ -38,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private weak var openInItem: NSMenuToolbarItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        applyDockIcon()
         let home = FileManager.default.homeDirectoryForCurrentUser
         // One-time settings migration from the app's former name (~/.conductor → ~/.coda).
         DataDirMigration.migrateSettings(from: home.appendingPathComponent(".conductor"),
@@ -81,6 +82,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// Set the Dock/app-switcher icon at runtime. We run as a bare `swift run`
+    /// executable with no `.app` bundle (so no `CFBundleIconFile`), so the icon must
+    /// be applied programmatically from the bundled multi-resolution `Coda.icns`.
+    private func applyDockIcon() {
+        if let url = Bundle.module.url(forResource: "Coda", withExtension: "icns", subdirectory: "Resources"),
+           let icon = NSImage(contentsOf: url) {
+            NSApp.applicationIconImage = icon
+        }
+    }
 
     /// The bundled starter `.itermcolors` shipped as app resources.
     private func bundledThemeURLs() -> [URL] {
