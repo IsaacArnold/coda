@@ -12,6 +12,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store: WorktreeStore!
     private var currentSurface: SplitSurface?
     private var selectedWorktree: Worktree?
+    /// repoID → current branch of its main checkout, kept fresh by `headWatcher`.
+    private var currentBranches: [String: String] = [:]
+    private let headWatcher = HeadWatcher()
     // Keeps each worktree's terminal alive across sidebar switches; the handle is
     // a SplitSurface (single-pane in PR A; splits added in PR B).
     private let surfaces = SurfaceRegistry<SplitSurface>()
@@ -47,7 +50,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildMenu()
         buildWindow()
         wireSidebar()
-        refreshSidebar(select: store.state.worktrees.first?.id)
+        seedBranchesAndWatchers()
+        refreshSidebar(select: allDisplayWorktrees().first?.id)
         applyChromeTheme()
         // Keep the notch clock current.
         notchTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
@@ -67,6 +71,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if event.type == .leftMouseDown { pane.handleCommandClick(event) }
             return nil
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        headWatcher.unwatchAll()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -166,6 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sidebar.onRenameRepo = { [weak self] repoID in self?.renameRepo(repoID) }
         sidebar.onSetRepoColor = { [weak self] repoID, hex in self?.setRepoColor(repoID, hex) }
         sidebar.onRemoveRepoColor = { [weak self] repoID in self?.setRepoColor(repoID, nil) }
+        sidebar.onRemoveRepo = { [weak self] repoID in self?.removeRepo(repoID) }
     }
 
     /// Override a worktree's identity color and repaint its bar + sidebar row.
@@ -202,18 +211,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch { presentError(error) }
     }
 
-    private func refreshSidebar(select id: String?) {
-        let sections = groupWorktreesByRepository(repositories: store.state.repositories,
-                                                  worktrees: store.state.worktrees)
-        sidebar.reload(sections: sections, selectedWorktreeID: id)
+    /// Sidebar sections WITH each repo's synthesized main-checkout row prepended.
+    private func displaySections() -> [RepositorySection] {
+        sectionsWithMainCheckouts(repositories: store.state.repositories,
+                                  worktrees: store.state.worktrees,
+                                  branchForRepo: currentBranches)
     }
 
-    /// Refresh and highlight a repository header (e.g. a freshly added repo with no
-    /// worktrees yet, which has no worktree row to select).
-    private func refreshSidebar(selectRepo id: String?) {
-        let sections = groupWorktreesByRepository(repositories: store.state.repositories,
-                                                  worktrees: store.state.worktrees)
-        sidebar.reload(sections: sections, selectedWorktreeID: nil, selectedRepoID: id)
+    /// Every worktree the sidebar shows — synthesized main checkouts + real worktrees.
+    private func allDisplayWorktrees() -> [Worktree] {
+        displaySections().flatMap { $0.worktrees }
+    }
+
+    /// Look up a display worktree (incl. a synthesized main checkout) by id.
+    private func displayWorktree(id: String?) -> Worktree? {
+        guard let id else { return nil }
+        return allDisplayWorktrees().first { $0.id == id }
+    }
+
+    private func refreshSidebar(select id: String?) {
+        sidebar.reload(sections: displaySections(), selectedWorktreeID: id)
+    }
+
+    /// Read each repo's current branch and start a HEAD watcher for it (call once at launch).
+    private func seedBranchesAndWatchers() {
+        headWatcher.onChange = { [weak self] repoID in
+            guard let self else { return }
+            self.currentBranches[repoID] = try? self.store.currentBranch(repoID: repoID)
+            self.refreshSidebar(select: self.shownWorktreeID)
+        }
+        for repo in store.state.repositories {
+            currentBranches[repo.id] = try? store.currentBranch(repoID: repo.id)
+            headWatcher.watch(repoID: repo.id, repoPath: repo.path)
+        }
     }
 
     /// Per-repo settings, opened as a sheet from that repo in the sidebar (right-click).
@@ -315,12 +345,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.prompt = "Add Repo"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            // Refresh + highlight so the added repo is visibly there (it returns the
-            // existing one if already added, which highlights it just the same).
             let repo = try store.addRepository(path: url.path)
-            refreshSidebar(selectRepo: repo.id)
+            currentBranches[repo.id] = try? store.currentBranch(repoID: repo.id)
+            headWatcher.watch(repoID: repo.id, repoPath: repo.path)
+            let mainID = "\(repo.id)#main"
+            refreshSidebar(select: mainID)
+            select(displayWorktree(id: mainID))
         }
         catch { presentError(error) }
+    }
+
+    /// Forget a repository (no disk changes): confirm, remove from the store, evict every
+    /// surface for the repo's worktrees + its main checkout, stop its HEAD watcher.
+    private func removeRepo(_ repoID: String) {
+        guard let repo = store.state.repositories.first(where: { $0.id == repoID }) else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Remove “\(repo.sidebarDisplayName)”?"
+        alert.informativeText = "Conductor will forget this repository and its worktrees. "
+            + "Your files, branches, and worktree directories are left untouched on disk."
+        alert.addButton(withTitle: "Remove")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            let removed = try store.removeRepository(id: repoID)
+            var evictIDs = removed.map { $0.id }
+            evictIDs.append("\(repoID)#main")
+            for id in evictIDs {
+                for split in surfaces.evict(worktreeID: id) { tearDown(split) }
+            }
+            headWatcher.unwatch(repoID: repoID)
+            currentBranches[repoID] = nil
+            if let shown = shownWorktreeID, evictIDs.contains(shown) {
+                shownWorktreeID = nil
+                currentSurface = nil
+                selectedWorktree = nil
+            }
+            refreshSidebar(select: allDisplayWorktrees().first?.id)
+            select(allDisplayWorktrees().first)
+        } catch { presentError(error) }
     }
 
     private func newWorktree(repoID: String? = nil) {
@@ -341,8 +404,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch { presentError(error) }
     }
 
+    /// Tear down a surface’s panes + views (kills every PTY). Used by archive and repo removal.
+    private func tearDown(_ split: SplitSurface) {
+        split.allPanes.forEach { $0.view.removeFromSuperview(); $0.removeFromParent() }
+        split.view.removeFromSuperview()
+        split.removeFromParent()
+    }
+
     private func archive(_ s: Worktree) {
-        // Archiving deletes the branch too and can't be undone — confirm first.
+        // Archiving deletes the branch too and can’t be undone — confirm first.
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Archive “\(s.title)”?"
@@ -352,12 +422,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         do {
             try store.archiveWorktree(id: s.id, deleteBranch: true)
-            // Tear down all of the archived worktree's surfaces (kills every PTY, no leak).
-            for split in surfaces.evict(worktreeID: s.id) {
-                split.allPanes.forEach { $0.view.removeFromSuperview(); $0.removeFromParent() }
-                split.view.removeFromSuperview()
-                split.removeFromParent()
-            }
+            // Tear down all of the archived worktree’s surfaces (kills every PTY, no leak).
+            for split in surfaces.evict(worktreeID: s.id) { tearDown(split) }
             if shownWorktreeID == s.id {
                 shownWorktreeID = nil
                 currentSurface = nil
@@ -877,6 +943,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func archiveSelectedAction() {
         guard let wt = selectedWorktree else { presentMessage("Select a worktree first."); return }
+        if wt.isMain {
+            presentMessage("The main checkout can't be archived. Use Remove Repository to forget the repo.")
+            return
+        }
         archive(wt)
     }
 

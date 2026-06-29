@@ -124,6 +124,8 @@ Next Phase-1 plans layer on: setupScript + copy-allowlist, theming/.itermcolors,
 - ⚪️ Lifecycle — `SessionStart` / `SessionEnd`
 - Correlate firings to worktree via `cwd` + `session_id` + `transcript_path`. Transport: `http` hook type → localhost server.
 
+**Known heuristic limitation (motivates the hook upgrade above; observed verifying PR #30 splits, 2026-06-27):** the MVP heuristic re-derives state by scanning each pane's *visible scrollback* every ~1.2s and matches the working-spinner regex `(<digits>s` anywhere in the snapshot. So a **frozen/leftover line keeps a pane stuck "working"** until it scrolls off-screen — a live spinner self-clears, but stale output (or an `echo "(9s …)"` left on screen) does not. The HTTP-hook path is event-driven and immune to this.
+
 ---
 
 ## Phased backlog (the "additions" we keep deferring)
@@ -139,7 +141,7 @@ Next Phase-1 plans layer on: setupScript + copy-allowlist, theming/.itermcolors,
 The two pieces of the locked 3-level hierarchy (#4) + the escape-hatch (#3) that Phase 1 stubbed but never built. Brings the surface layer to parity with Supacode.
 - **Per-worktree surface tabs** — multiple terminal surfaces inside one worktree (the iTerm-style colored tab bar = the surface tab bar, per #4). Each tab is its own PTY; tabs persist across worktree switches like the current single surface does (extend `SurfaceRegistry` from one handle/worktree to many).
 - **Splits / panes** — split a surface into side-by-side panes (Supacode-style). Engine already proven in the spike (check ⑤: `NSSplitView` + dynamic add-pane). Needs the `setPosition(_:ofDividerAt:)`-after-layout gotcha handled.
-- **Scratch (worktree-less) tabs** — the throwaway-shell escape hatch (#3 / R3): a plain shell not tied to any worktree, named distinctly so it never reads as a worktree. Lives outside the sidebar's repo→worktree grouping.
+- **Repo main-checkout sessions** *(supersedes the originally-planned scratch tabs, 2026-06-27)* — the repo's own checkout is a first-class, always-present session (synthesized never-persisted main `Worktree`, `worktreePath == repo.path`, live `.git/HEAD` branch tracking), so you never have to create a `git worktree` to start working. Includes Remove Repository (forgets the repo, no disk changes). Spec: `docs/superpowers/specs/2026-06-27-conductor-main-checkout-design.md`; plan: `docs/superpowers/plans/2026-06-27-conductor-main-checkout.md`. **Scratch (worktree-less, repo-less) terminals remain deferred** — `Surface.kind = .scratch` seam stays reserved, revisited after living with main-checkout sessions.
 - _Open design qs to grill before planning:_ tab/pane focus + keybinds (⌘T new tab, ⌘D split?); how surface tabs interact with per-surface naming/colors (#12 — tabs can override worktree identity); whether scratch tabs get their own sidebar section or live only in the tab bar; restore behavior (#14 is layout-only).
 
 ### Phase 2 — Fast-follows

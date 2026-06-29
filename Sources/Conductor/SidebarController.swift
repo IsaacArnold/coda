@@ -99,6 +99,8 @@ final class SidebarController: NSViewController {
     var onSetRepoColor: ((String, String) -> Void)?
     /// Right-click a repo header → "Remove Color" — clear the repo color.
     var onRemoveRepoColor: ((String) -> Void)?
+    /// Right-click a repo header → "Remove Repository…" — forget the repo (no disk changes).
+    var onRemoveRepo: ((String) -> Void)?
 
     /// An optional per-worktree identity-color override (active surface's effective color),
     /// keyed by worktree id; falls back to the worktree's own color when absent.
@@ -145,6 +147,17 @@ final class SidebarController: NSViewController {
         let row = outline.clickedRow
         guard row >= 0, let wt = outline.item(atRow: row) as? WorktreeNode else { return nil }
         return wt.worktree.id
+    }
+
+    /// The worktree the right-clicked row represents, or nil if a repo header was clicked.
+    private func clickedWorktree() -> Worktree? {
+        let row = outline.clickedRow
+        guard row >= 0, let wt = outline.item(atRow: row) as? WorktreeNode else { return nil }
+        return wt.worktree
+    }
+
+    @objc private func contextRemoveRepo(_ sender: NSMenuItem) {
+        (sender.representedObject as? String).map { onRemoveRepo?($0) }
     }
 
     @objc private func contextSetColor(_ sender: NSMenuItem) {
@@ -263,9 +276,16 @@ extension SidebarController: NSMenuDelegate {
                 targetID: repoID, target: self,
                 setColor: #selector(contextSetRepoColor(_:)),
                 removeColor: #selector(contextRemoveRepoColor(_:))))
+
+            menu.addItem(.separator())
+            let remove = NSMenuItem(title: "Remove Repository…",
+                                    action: #selector(contextRemoveRepo(_:)), keyEquivalent: "")
+            remove.target = self
+            remove.representedObject = repoID
+            menu.addItem(remove)
         }
 
-        if let worktreeID = clickedWorktreeID() {
+        if let worktreeID = clickedWorktreeID(), clickedWorktree()?.isMain == false {
             menu.addItem(.separator())
             menu.addItem(ColorMenu.makeSetColorItem(
                 targetID: worktreeID, target: self,

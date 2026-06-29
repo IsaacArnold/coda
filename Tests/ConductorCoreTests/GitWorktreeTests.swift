@@ -33,4 +33,14 @@ final class GitWorktreeTests: XCTestCase {
         let branches = try ProcessRunner.run("/usr/bin/git", ["-C", repo, "branch", "--list", "feature-y"], cwd: nil)
         XCTAssertTrue(branches.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
+
+    func testShortHeadReturnsAbbreviatedSHA() throws {
+        let repo = try makeTempRepo()
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        let sha = try git.shortHead(repo: repo)
+        XCTAssertFalse(sha.isEmpty)
+        // A short SHA is hex and reasonably short (git defaults to ~7 chars).
+        XCTAssertLessThanOrEqual(sha.count, 40)
+        XCTAssertTrue(sha.allSatisfy { $0.isHexDigit })
+    }
 }

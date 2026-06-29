@@ -45,6 +45,32 @@ public final class WorktreeStore {
         return state.repositories[idx]
     }
 
+    /// The current branch of a repo's main checkout, for the synthesized main-checkout label.
+    /// Falls back to the short SHA when HEAD is detached (`rev-parse --abbrev-ref` returns "HEAD").
+    public func currentBranch(repoID: String) throws -> String {
+        guard let repo = state.repositories.first(where: { $0.id == repoID }) else {
+            throw WorktreeStoreError.repoNotFound(repoID)
+        }
+        let branch = try git.currentBranch(repo: repo.path)
+        if branch == "HEAD" { return (try? git.shortHead(repo: repo.path)) ?? branch }
+        return branch
+    }
+
+    /// Forget a repository: removes it and all its worktrees from local state and persists.
+    /// Returns the removed worktrees so the shell can evict their surfaces. NEVER deletes any
+    /// branch, worktree directory, or repo on disk — this is purely a Conductor-side forget.
+    @discardableResult
+    public func removeRepository(id: String) throws -> [Worktree] {
+        guard let idx = state.repositories.firstIndex(where: { $0.id == id }) else {
+            throw WorktreeStoreError.repoNotFound(id)
+        }
+        let removed = state.worktrees.filter { $0.repoID == id }
+        state.repositories.remove(at: idx)
+        state.worktrees.removeAll { $0.repoID == id }
+        try config.save(state)
+        return removed
+    }
+
     public func createWorktree(repoID: String, title: String) throws -> Worktree {
         guard let repo = state.repositories.first(where: { $0.id == repoID }) else {
             throw WorktreeStoreError.repoNotFound(repoID)

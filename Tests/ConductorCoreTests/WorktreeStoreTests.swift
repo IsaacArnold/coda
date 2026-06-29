@@ -217,4 +217,44 @@ final class WorktreeStoreTests: XCTestCase {
         XCTAssertTrue(store.state.worktrees.contains { $0.id == s.id })
         XCTAssertTrue(FileManager.default.fileExists(atPath: s.worktreePath))
     }
+
+    func testRemoveRepositoryForgetsRepoAndWorktreesButLeavesDiskIntact() throws {
+        let repoPath = try makeTempRepo()
+        let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: repoPath)
+        let wt = try store.createWorktree(repoID: r.id, title: "Keep On Disk")
+
+        let removed = try store.removeRepository(id: r.id)
+
+        // Returned the worktree so the shell can evict its surfaces.
+        XCTAssertEqual(removed.map(\.id), [wt.id])
+        // Forgotten in memory + on-disk config.
+        XCTAssertFalse(store.state.repositories.contains { $0.id == r.id })
+        XCTAssertFalse(store.state.worktrees.contains { $0.repoID == r.id })
+        XCTAssertFalse(cfg.load().repositories.contains { $0.id == r.id })
+        XCTAssertFalse(cfg.load().worktrees.contains { $0.repoID == r.id })
+        // Disk untouched: the repo dir and the worktree dir both still exist.
+        XCTAssertTrue(FileManager.default.fileExists(atPath: repoPath))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: wt.worktreePath))
+    }
+
+    func testRemoveRepositoryUnknownIDThrows() {
+        let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        XCTAssertThrowsError(try store.removeRepository(id: "nope"))
+    }
+
+    func testCurrentBranchReturnsRepoBranch() throws {
+        let repoPath = try makeTempRepo()
+        let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: repoPath)
+        // makeTempRepo() initializes on the default branch; just assert it's non-empty and not "HEAD".
+        let branch = try store.currentBranch(repoID: r.id)
+        XCTAssertFalse(branch.isEmpty)
+        XCTAssertNotEqual(branch, "HEAD")
+    }
+
+    func testCurrentBranchUnknownIDThrows() {
+        let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        XCTAssertThrowsError(try store.currentBranch(repoID: "nope"))
+    }
 }
