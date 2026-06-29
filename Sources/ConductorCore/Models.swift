@@ -85,7 +85,7 @@ extension Worktree {
     /// Never persisted (identified by `isMain`); id derived from the repo so surfaces persist
     /// within a session and the derived chrome color is stable.
     public static func mainCheckout(for repo: Repository, branch: String) -> Worktree {
-        var wt = Worktree(id: "\(repo.id)#main", repoID: repo.id, title: "Default",
+        var wt = Worktree(id: "\(repo.id)#main", repoID: repo.id, title: "Workspace",
                           branch: branch, worktreePath: repo.path, color: nil)
         wt.isMain = true
         return wt

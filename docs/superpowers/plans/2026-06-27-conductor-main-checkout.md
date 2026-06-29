@@ -26,7 +26,7 @@
 - Test: `Tests/ConductorCoreTests/ModelsCodableTests.swift` (add cases)
 
 **Interfaces:**
-- Produces: `Worktree.isMain: Bool` (stored, default `false`, excluded from `CodingKeys` → never persisted); `static func Worktree.mainCheckout(for: Repository, branch: String) -> Worktree` (sets `id = "\(repo.id)#main"`, `repoID = repo.id`, `title = "Default"`, `worktreePath = repo.path`, `color = nil`, `isMain = true`).
+- Produces: `Worktree.isMain: Bool` (stored, default `false`, excluded from `CodingKeys` → never persisted); `static func Worktree.mainCheckout(for: Repository, branch: String) -> Worktree` (sets `id = "\(repo.id)#main"`, `repoID = repo.id`, `title = "Workspace"`, `worktreePath = repo.path`, `color = nil`, `isMain = true`).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -40,7 +40,7 @@ func testWorktreeIsMainDefaultsFalseAndIsNotPersisted() throws {
     XCTAssertTrue(main.isMain)
     XCTAssertEqual(main.id, "R1#main")
     XCTAssertEqual(main.repoID, "R1")
-    XCTAssertEqual(main.title, "Default")
+    XCTAssertEqual(main.title, "Workspace")
     XCTAssertEqual(main.worktreePath, "/tmp/acme")
     XCTAssertEqual(main.branch, "main")
 
@@ -87,7 +87,7 @@ extension Worktree {
     /// Never persisted (identified by `isMain`); id derived from the repo so surfaces persist
     /// within a session and the derived chrome color is stable.
     public static func mainCheckout(for repo: Repository, branch: String) -> Worktree {
-        var wt = Worktree(id: "\(repo.id)#main", repoID: repo.id, title: "Default",
+        var wt = Worktree(id: "\(repo.id)#main", repoID: repo.id, title: "Workspace",
                           branch: branch, worktreePath: repo.path, color: nil)
         wt.isMain = true
         return wt
@@ -138,7 +138,7 @@ func testMainCheckoutIsPrependedPerRepo() {
     XCTAssertEqual(sections[0].worktrees.map(\.id), ["R1#main", "W1"])
     XCTAssertTrue(sections[0].worktrees[0].isMain)
     XCTAssertEqual(sections[0].worktrees[0].branch, "main")
-    XCTAssertEqual(sections[0].worktrees[0].title, "Default")
+    XCTAssertEqual(sections[0].worktrees[0].title, "Workspace")
     XCTAssertFalse(sections[0].worktrees[1].isMain)
     // R2: only its main checkout (no real worktrees), with its own branch.
     XCTAssertEqual(sections[1].worktrees.map(\.id), ["R2#main"])
@@ -523,7 +523,7 @@ Expected: Build complete.
 - [ ] **Step 5: Manual smoke test**
 
 Run: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift run`
-Verify: launching with an existing repo shows a **"Default"** row (subtitle `repo · <branch>`) under each repo, auto-selected with a live shell in the repo dir. Add a new repo → its "Default" row appears and is selected with a shell. In a terminal outside the app, `cd` into that repo and run `git switch -c scratch-test` → the sidebar subtitle updates to `… · scratch-test` in place (no new row). Switch back: `git switch -` → it reverts. Quit the app.
+Verify: launching with an existing repo shows a **"Workspace"** row (subtitle `repo · <branch>`) under each repo, auto-selected with a live shell in the repo dir. Add a new repo → its "Workspace" row appears and is selected with a shell. In a terminal outside the app, `cd` into that repo and run `git switch -c scratch-test` → the sidebar subtitle updates to `… · scratch-test` in place (no new row). Switch back: `git switch -` → it reverts. Quit the app.
 
 - [ ] **Step 6: Commit**
 
@@ -691,9 +691,9 @@ Expected: All tests PASS (prior count + the new Task 1–3 tests).
 
 Run: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift run`
 Verify:
-- Right-click a main-checkout ("Default") row → **no** "Set Color" submenu; right-click a real worktree → Set Color is present.
+- Right-click a main-checkout ("Workspace") row → **no** "Set Color" submenu; right-click a real worktree → Set Color is present.
 - Right-click a repo header → "Remove Repository…" present → confirm dialog → on Remove, the repo + all its rows disappear, and (in a separate terminal) `git worktree list` in the repo still shows everything; the repo dir + any worktree dirs are still on disk.
-- Select a "Default" row, then menu **Archive** (or its shortcut) → shows the "can't be archived" message; the repo is untouched.
+- Select a "Workspace" row, then menu **Archive** (or its shortcut) → shows the "can't be archived" message; the repo is untouched.
 - Open a couple of tabs / a split in a main checkout, switch to another worktree and back → surfaces persist; a busy command lights the tab + sidebar badge.
 - Quit.
 
@@ -749,7 +749,7 @@ git commit -m "feat(app): stop HEAD watchers on terminate; docs(decisions): main
 ## Self-Review
 
 **Spec coverage:**
-- Synthesized `isMain` main worktree, never persisted, derived id, title "Default" → Task 1. ✓
+- Synthesized `isMain` main worktree, never persisted, derived id, title "Workspace" → Task 1. ✓
 - Section builder prepending main per repo, branch fallback → Task 2. ✓
 - `removeRepository` (returns removed, no disk side-effects) + detached-HEAD short SHA → Task 3. ✓
 - `.git/HEAD` live watcher with re-arm-on-rename → Task 4. ✓

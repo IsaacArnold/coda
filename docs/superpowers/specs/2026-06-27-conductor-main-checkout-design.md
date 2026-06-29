@@ -26,7 +26,7 @@ Conductor's `Worktree` always points at a **separate** `git worktree add` direct
 | Representation | The main checkout is a **synthesized** `Worktree` (`isMain` flag), **never persisted** to config. One per registered repo, derived on load. |
 | Branch switch | **Live in-place update** via a `.git/HEAD` file watcher → updates the main row's branch subtitle. No new sidebar row. |
 | Lifecycle | **Permanent** while the repo is registered. Main row has **no Archive / no branch-delete**. Removed only by removing the repo. |
-| Sidebar label | Title = fixed **"Default"**; subtitle = `repo · branch` (branch part live). Main row sits **first** under its repo, above real worktrees. |
+| Sidebar label | Title = fixed **"Workspace"**; subtitle = `repo · branch` (branch part live). Main row sits **first** under its repo, above real worktrees. |
 | Remove repo | New `removeRepository` store method + repo-header "Remove Repository…" menu item (with confirmation). Drops repo + its worktrees from config and evicts their surfaces; **never touches git/disk**. |
 | Surfaces | Main checkout is a normal worktree to the registry → tabs/splits/badges/persist-across-switch all reused. Shell spawns in `repo.path`. No setup-script / copy-allowlist. Shell-first (never auto-launches Claude). |
 | Color | Main checkout's effective color = `repo.color` if set, else a deterministic `IdentityPalette` pick seeded by repo id. Not individually overridable in MVP. |
@@ -41,7 +41,7 @@ The codebase pattern holds: decision logic lives in pure `ConductorCore` (XCTest
 
 **Main-checkout factory** — a function/initializer producing a synthesized main `Worktree` for a repo:
 - `id` = stable, derived from the repo id (e.g. `"\(repo.id)#main"`), so surfaces persist within a session and the derived color is stable.
-- `repoID` = repo.id, `worktreePath` = repo.path, `title` = `"Default"`, `isMain` = true.
+- `repoID` = repo.id, `worktreePath` = repo.path, `title` = `"Workspace"`, `isMain` = true.
 - `branch` = supplied current branch (see branch map below), or a fallback (`""` / repo's last-known) when unknown.
 - `color` = nil (effective color is derived at display time from `repo.color` ?? deterministic palette).
 
@@ -68,7 +68,7 @@ Seeding the map (reading `currentBranch` per repo at launch / on add) is the she
 
 **Add-repo flow** — after `addRepository`, seed the branch map (`currentBranch`), start a `HeadWatcher` for it, reload the sidebar, and **auto-select the repo's main checkout** so a session spawns immediately (existing select→ensure-surface path).
 
-**Sidebar** — consume `sectionsWithMainCheckouts(...)`. The main row renders title "Default" + `repo · branch` subtitle (reuse the two-line `WorktreeCellView`; branch from the section). Context menu for an `isMain` row: **omit Archive and any branch-delete**; keep Reveal in Finder; Set Color is omitted on the main row in MVP (color is derived). Repo-header menu gains **"Remove Repository…"** → confirmation → `removeRepository` → evict surfaces for the returned worktrees **and** the repo's main checkout (`"\(repo.id)#main"`) → stop its watcher → reload.
+**Sidebar** — consume `sectionsWithMainCheckouts(...)`. The main row renders title "Workspace" + `repo · branch` subtitle (reuse the two-line `WorktreeCellView`; branch from the section). Context menu for an `isMain` row: **omit Archive and any branch-delete**; keep Reveal in Finder; Set Color is omitted on the main row in MVP (color is derived). Repo-header menu gains **"Remove Repository…"** → confirmation → `removeRepository` → evict surfaces for the returned worktrees **and** the repo's main checkout (`"\(repo.id)#main"`) → stop its watcher → reload.
 
 **Surface lifecycle** — selecting the main checkout uses the existing per-worktree surface path: spawn a `TerminalSurface`/`SplitSurface` whose shell cwd is `repo.path`. Skip setup-script/copy-allowlist (those run only in `createWorktree`). Never auto-launch Claude regardless of `repo.autoLaunchClaude` (that setting governs freshly-*created* worktrees). ⌘R / Launch-Claude works in the active surface as today. Badge polling already walks `surfaces.worktreeIDs`, so the main checkout participates automatically once it has a surface.
 
@@ -83,13 +83,13 @@ Seeding the map (reading `currentBranch` per repo at launch / on add) is the she
 
 **Core (XCTest):**
 - `Worktree.isMain` round-trips: decoding a persisted worktree yields `isMain == false`; `isMain` is not emitted on encode.
-- Main-checkout factory: correct derived id, `worktreePath == repo.path`, title "Default", `isMain == true`, branch from supplied value + fallback.
+- Main-checkout factory: correct derived id, `worktreePath == repo.path`, title "Workspace", `isMain == true`, branch from supplied value + fallback.
 - `sectionsWithMainCheckouts`: one main per repo, **prepended** above real worktrees; repos with zero real worktrees still get exactly the main row; repo/worktree ordering preserved; branch pulled from `branchForRepo` with fallback when missing.
 - `removeRepository`: removes repo + its worktrees from state, persists, returns the removed worktrees; throws on unknown id; leaves other repos/worktrees intact; (asserts it performs no git/disk side-effects — verified via a stub `GitWorktree` whose remove/deleteBranch fail the test if called).
 - Back-compat: a repo with existing real worktrees still groups correctly with the main prepended.
 
 **In-app (manual, per the verify skill):**
-- Add a repo → a "Default" session row appears under it and is auto-selected with a live shell in the repo dir.
+- Add a repo → a "Workspace" session row appears under it and is auto-selected with a live shell in the repo dir.
 - `git checkout -b other` (or switch) inside the repo's main dir → the main row's branch subtitle updates live, in place, no new row.
 - Open multiple tabs / a split inside the main checkout; switch to another worktree and back → surfaces persist; badges roll up.
 - Detached HEAD → short SHA shown, no crash.
@@ -100,4 +100,4 @@ Seeding the map (reading `currentBranch` per repo at launch / on add) is the she
 - Scratch (worktree-less) terminals — deferred; `.scratch` seam stays reserved.
 - Cross-restart restore of tabs/layout (#14 stays deferred).
 - Per-surface `runScript` / fuller per-surface config (Phase 3).
-- Individually overriding the main checkout's color, renaming the "Default" title, hide-instead-of-remove.
+- Individually overriding the main checkout's color, renaming the "Workspace" title, hide-instead-of-remove.

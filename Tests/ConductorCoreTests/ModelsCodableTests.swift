@@ -82,7 +82,7 @@ final class ModelsCodableTests: XCTestCase {
         XCTAssertTrue(main.isMain)
         XCTAssertEqual(main.id, "R1#main")
         XCTAssertEqual(main.repoID, "R1")
-        XCTAssertEqual(main.title, "Default")
+        XCTAssertEqual(main.title, "Workspace")
         XCTAssertEqual(main.worktreePath, "/tmp/acme")
         XCTAssertEqual(main.branch, "main")
 

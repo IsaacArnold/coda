@@ -56,7 +56,7 @@ final class WorktreeGroupingTests: XCTestCase {
         XCTAssertEqual(sections[0].worktrees.map(\.id), ["R1#main", "W1"])
         XCTAssertTrue(sections[0].worktrees[0].isMain)
         XCTAssertEqual(sections[0].worktrees[0].branch, "main")
-        XCTAssertEqual(sections[0].worktrees[0].title, "Default")
+        XCTAssertEqual(sections[0].worktrees[0].title, "Workspace")
         XCTAssertFalse(sections[0].worktrees[1].isMain)
         // R2: only its main checkout (no real worktrees), with its own branch.
         XCTAssertEqual(sections[1].worktrees.map(\.id), ["R2#main"])
