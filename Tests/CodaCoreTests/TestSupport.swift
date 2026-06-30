@@ -20,3 +20,16 @@ func makeTempRepo() throws -> String {
     try git(["commit", "-m", "init"])
     return dir
 }
+
+/// Create a throwaway git repo with NO commits — HEAD points to an unborn branch `master`.
+/// Mirrors a freshly `git init`'d project (see the celestial-crater bug). Returns its path.
+func makeTempRepoNoCommits() throws -> String {
+    let dir = NSTemporaryDirectory() + "coda-test-unborn-" + UUID().uuidString
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    p.arguments = ["init", "-b", "master", dir]
+    p.standardOutput = Pipe(); p.standardError = Pipe()
+    try p.run(); p.waitUntilExit()
+    return dir
+}

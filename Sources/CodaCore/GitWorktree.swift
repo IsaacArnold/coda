@@ -29,6 +29,13 @@ public struct GitWorktree {
         try git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// The branch HEAD points at, via `symbolic-ref`. Unlike `rev-parse --abbrev-ref HEAD`, this
+    /// works on an *unborn* branch (a freshly `git init`'d repo with no commits). It throws on a
+    /// detached HEAD, where there is no symbolic ref to resolve.
+    public func symbolicRef(repo: String) throws -> String {
+        try git(repo, ["symbolic-ref", "--short", "HEAD"]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// The abbreviated SHA of HEAD (used to label a detached-HEAD checkout).
     public func shortHead(repo: String) throws -> String {
         try git(repo, ["rev-parse", "--short", "HEAD"]).trimmingCharacters(in: .whitespacesAndNewlines)

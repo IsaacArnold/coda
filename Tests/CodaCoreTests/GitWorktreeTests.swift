@@ -34,6 +34,14 @@ final class GitWorktreeTests: XCTestCase {
         XCTAssertTrue(branches.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
+    func testSymbolicRefReturnsBranchOnRepoWithNoCommits() throws {
+        // `rev-parse --abbrev-ref HEAD` fails on an unborn branch; symbolic-ref still names it.
+        let repo = try makeTempRepoNoCommits()
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        XCTAssertThrowsError(try git.currentBranch(repo: repo))
+        XCTAssertEqual(try git.symbolicRef(repo: repo), "master")
+    }
+
     func testShortHeadReturnsAbbreviatedSHA() throws {
         let repo = try makeTempRepo()
         let git = GitWorktree(gitPath: "/usr/bin/git")
