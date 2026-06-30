@@ -21,6 +21,15 @@ final class WorktreeStoreTests: XCTestCase {
         XCTAssertTrue(cfg.load().repositories.contains(r))
     }
 
+    func testCurrentBranchOnRepoWithNoCommits() throws {
+        // A freshly `git init`'d repo has an unborn branch: `rev-parse --abbrev-ref HEAD`
+        // fails, but the branch name (master) is still knowable via symbolic-ref.
+        let repo = try makeTempRepoNoCommits()
+        let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: repo)
+        XCTAssertEqual(try store.currentBranch(repoID: r.id), "master")
+    }
+
     func testCreateWorktreeMakesWorktreeAndPersists() throws {
         let repo = try makeTempRepo()
         let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)

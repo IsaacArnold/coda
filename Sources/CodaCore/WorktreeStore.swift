@@ -46,14 +46,18 @@ public final class WorktreeStore {
     }
 
     /// The current branch of a repo's main checkout, for the synthesized main-checkout label.
-    /// Falls back to the short SHA when HEAD is detached (`rev-parse --abbrev-ref` returns "HEAD").
+    /// Resolved via `symbolic-ref`, which names the branch even on an *unborn* HEAD (a freshly
+    /// `git init`'d repo with no commits). Falls back to the short SHA when HEAD is detached, where
+    /// there is no symbolic ref to resolve.
     public func currentBranch(repoID: String) throws -> String {
         guard let repo = state.repositories.first(where: { $0.id == repoID }) else {
             throw WorktreeStoreError.repoNotFound(repoID)
         }
-        let branch = try git.currentBranch(repo: repo.path)
-        if branch == "HEAD" { return (try? git.shortHead(repo: repo.path)) ?? branch }
-        return branch
+        if let branch = try? git.symbolicRef(repo: repo.path), !branch.isEmpty {
+            return branch
+        }
+        // Detached HEAD: label with the short SHA (or "HEAD" if even that fails, e.g. unborn + detached).
+        return (try? git.shortHead(repo: repo.path)) ?? "HEAD"
     }
 
     /// Forget a repository: removes it and all its worktrees from local state and persists.

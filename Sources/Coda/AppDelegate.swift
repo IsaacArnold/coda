@@ -571,12 +571,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         surfaceTabBar.isHidden = false
         let worktreeColor = selectedWorktree?.color.flatMap { RGB(hex: $0) }
+        let repoName = store.state.worktrees.first { $0.id == wtID }
+            .flatMap { wt in store.state.repositories.first { $0.id == wt.repoID } }?.name
         let items: [SurfaceTabItem] = list.entries.enumerated().map { idx, entry in
             let effective = entry.surface.effectiveColor(worktreeColor: worktreeColor)
             return SurfaceTabItem(
                 id: entry.surface.id,
                 label: surfaceLabel(nameOverride: entry.surface.nameOverride,
-                                    terminalTitle: entry.handle.focusedPane.terminalTitle, index: idx),
+                                    repoName: repoName, index: idx),
                 state: agentStates[surfaceKey(wtID, entry.surface.id)] ?? .idle,
                 isActive: entry.surface.id == list.activeSurfaceID,
                 tint: effective?.nsColor)

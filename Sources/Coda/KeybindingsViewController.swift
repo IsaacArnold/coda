@@ -45,18 +45,36 @@ final class KeybindingsViewController: NSViewController {
         reset.bezelStyle = .rounded
         stack.addArrangedSubview(reset)
 
-        let container = NSView()
+        // The full command list is taller than the settings window, so host it in a vertical
+        // scroll view. A flipped document view keeps (0,0) at the top-left so it scrolls
+        // top-to-bottom and opens scrolled to the first row.
+        let content = FlippedView()
         stack.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(stack)
+        content.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: container.topAnchor),
-            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            container.widthAnchor.constraint(equalToConstant: 460),
+            stack.topAnchor.constraint(equalTo: content.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            content.widthAnchor.constraint(equalToConstant: 460),
         ])
-        view = container
+
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.documentView = content
+        content.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            content.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+        ])
+        view = scroll
         refresh()
+    }
+
+    /// A top-left-origin view so the scroll view's document scrolls down from the top.
+    private final class FlippedView: NSView {
+        override var isFlipped: Bool { true }
     }
 
     private func makeRow(_ command: ShortcutCommand) -> NSView {

@@ -27,11 +27,15 @@ public struct Surface: Equatable {
     public func effectiveColor(worktreeColor: RGB?) -> RGB? { colorOverride ?? worktreeColor }
 }
 
-/// The label to show for a surface tab: an explicit rename wins; otherwise the live
-/// terminal title (OSC-set by the shell/claude) if non-empty; otherwise "Terminal N"
-/// (1-based). Pure so the shell's labeling is unit-testable.
-public func surfaceLabel(nameOverride: String?, terminalTitle: String?, index: Int) -> String {
+/// The label to show for a surface tab: an explicit rename wins; otherwise the repo name
+/// (so tabs default to e.g. "celestial-crater" rather than the noisy shell-set OSC title),
+/// with a 1-based number appended to the second and later tabs so siblings stay distinct;
+/// otherwise "Terminal N" (1-based) when there's no repo name. Pure so the labeling is
+/// unit-testable.
+public func surfaceLabel(nameOverride: String?, repoName: String?, index: Int) -> String {
     if let n = nameOverride, !n.trimmingCharacters(in: .whitespaces).isEmpty { return n }
-    if let t = terminalTitle?.trimmingCharacters(in: .whitespaces), !t.isEmpty { return t }
+    if let r = repoName?.trimmingCharacters(in: .whitespaces), !r.isEmpty {
+        return index == 0 ? r : "\(r) \(index + 1)"
+    }
     return "Terminal \(index + 1)"
 }
