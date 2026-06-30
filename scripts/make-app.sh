@@ -48,18 +48,28 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # Executable
 cp "$BIN_DIR/$APP_NAME" "$APP/Contents/MacOS/$APP_NAME"
 
-# Resource bundles must sit next to the executable (binary uses @loader_path).
-# Copy every SwiftPM resource bundle the build produced.
-for b in "$BIN_DIR"/*.bundle; do
-  [[ -e "$b" ]] && cp -R "$b" "$APP/Contents/MacOS/"
-done
+# App assets live FLAT under Contents/Resources so the bundle code-signs cleanly.
+# A SwiftPM resource bundle (Coda_Coda.bundle) is a directory with a `.bundle`
+# extension and no Info.plist, which `codesign` rejects ("bundle format
+# unrecognized") — that blocks Developer-ID signing and notarization. Worse, its
+# generated accessor falls back to an absolute *build-machine* path, so the old
+# layout crashed on launch on any other Mac. Instead we copy the bundle's
+# *contents* (its Resources/ and Themes/ subdirs) into Contents/Resources, where
+# `Bundle.main` resolves them — see Sources/Coda/ResourceBundle.swift.
+#
+# SwiftTerm_SwiftTerm.bundle (Metal shaders) is intentionally NOT shipped: Coda
+# uses the AppKit renderer and never takes SwiftTerm's Metal path, so SwiftTerm
+# never loads it. (If a future change opts into SwiftTerm's Metal renderer, that
+# bundle must be shipped where SwiftTerm's own Bundle.module accessor finds it.)
+CODA_BUNDLE="$BIN_DIR/Coda_Coda.bundle"
+[[ -d "$CODA_BUNDLE" ]] || { echo "ERROR: $CODA_BUNDLE not found"; exit 1; }
+cp -R "$CODA_BUNDLE/." "$APP/Contents/Resources/"
 
-# App icon for Finder/Dock.
+# App icon for Finder/Dock (CFBundleIconFile).
 cp "$REPO_ROOT/Sources/Coda/Resources/Coda.icns" "$APP/Contents/Resources/$APP_NAME.icns"
 
-# SwiftPM ships some resources read-only (e.g. Shaders.metal). That breaks the
-# `xattr -dr com.apple.quarantine` un-blocking step recipients run, since
-# removing an xattr needs write permission. Make the whole bundle user-writable.
+# Make the bundle user-writable so the recipient's `xattr -dr com.apple.quarantine`
+# unblock step (unsigned path only) can remove the attribute.
 chmod -R u+w "$APP"
 
 # --- Info.plist ------------------------------------------------------------
@@ -83,21 +93,57 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# --- ad-hoc sign -----------------------------------------------------------
-# Required for the arm64 binary to run at all; also quiets some Gatekeeper
-# checks. Not a Developer ID signature — recipients still bypass Gatekeeper once.
-# Signature: `swift build` already applies a linker ad-hoc signature to the
-# Mach-O, which is all Apple Silicon requires to execute, and `cp` preserves it.
-# We intentionally do NOT re-run codesign to seal the whole .app: the SwiftPM
-# resource bundles are flat, Info.plist-less data dirs that codesign refuses to
-# treat as valid nested bundles, and a full bundle seal buys nothing without a
-# Developer ID + notarization. Confirm the executable is signed:
-echo "==> Checking ad-hoc signature"
-codesign -dv "$APP/Contents/MacOS/$APP_NAME" 2>&1 | grep -q "adhoc" \
-  && echo "    executable is ad-hoc signed (ok to run on Apple Silicon)" \
-  || echo "    WARNING: executable not signed — it may not launch"
+# --- sign ------------------------------------------------------------------
+# Two modes:
+#   • Local (default): keep the ad-hoc signature `swift build` already applied to
+#     the Mach-O (all Apple Silicon needs to execute; `cp` preserves it). Now that
+#     assets are flat in Contents/Resources we CAN seal the whole bundle, so we do
+#     an ad-hoc bundle seal too — it costs nothing and keeps the dev/release paths
+#     identical. Gatekeeper still blocks recipients once (see README-INSTALL).
+#   • Release: set DEVELOPER_ID_APP to your
+#       "Developer ID Application: Your Name (TEAMID)"
+#     identity to seal with the Hardened Runtime, which notarization requires.
+#     No --entitlements are passed because Coda needs none: it is NOT sandboxed,
+#     and spawning child processes (/bin/zsh, git, /usr/bin/open) is allowed by
+#     default under the Hardened Runtime. With assets flat in Contents/Resources
+#     there are no nested bundles, so one seal (no --deep) covers everything.
+WILL_NOTARIZE=0
+if [[ -n "${DEVELOPER_ID_APP:-}" ]]; then
+  echo "==> Signing with Developer ID + Hardened Runtime"
+  echo "    identity: $DEVELOPER_ID_APP"
+  SIGN_ARGS=(--force --options runtime --timestamp --sign "$DEVELOPER_ID_APP")
+  [[ -n "${ENTITLEMENTS:-}" ]] && SIGN_ARGS+=(--entitlements "$ENTITLEMENTS")
+  codesign "${SIGN_ARGS[@]}" "$APP"
+  echo "==> Verifying signature"
+  codesign --verify --strict --verbose=2 "$APP"
+  if [[ -n "${NOTARY_PROFILE:-}" ]] \
+     || { [[ -n "${NOTARY_APPLE_ID:-}" && -n "${NOTARY_TEAM_ID:-}" && -n "${NOTARY_PASSWORD:-}" ]]; }; then
+    WILL_NOTARIZE=1
+  else
+    echo "    NOTE: signed but no notary credentials set — skipping notarization."
+    echo "          Recipients stay blocked by Gatekeeper until this is notarized."
+    echo "          Set NOTARY_PROFILE (from: xcrun notarytool store-credentials), or"
+    echo "          NOTARY_APPLE_ID + NOTARY_TEAM_ID + NOTARY_PASSWORD (app-specific pw)."
+  fi
+else
+  echo "==> Ad-hoc signature only (set DEVELOPER_ID_APP to sign + notarize)"
+  codesign --force --sign - "$APP"
+  codesign --verify --strict "$APP" \
+    && echo "    bundle is ad-hoc sealed (ok to run on Apple Silicon)" \
+    || echo "    WARNING: ad-hoc seal failed — the app may not launch"
+fi
 
 # --- install instructions (shipped inside the dmg) -------------------------
+if [[ "$WILL_NOTARIZE" == "1" ]]; then
+cat > "$DIST/README-INSTALL.txt" <<TXT
+Installing Coda
+===============
+
+1. Drag Coda.app into the Applications folder (shortcut provided).
+2. Double-click to open. That's it — Coda is signed and notarized by Apple,
+   so Gatekeeper opens it with no warning, on any Mac.
+TXT
+else
 cat > "$DIST/README-INSTALL.txt" <<TXT
 Installing Coda
 ===============
@@ -123,6 +169,7 @@ Installing Coda
 Tip: if you receive Coda.app via AirDrop or a USB drive instead of a
 download, macOS usually won't quarantine it and it just opens.
 TXT
+fi
 
 # --- dmg -------------------------------------------------------------------
 DMG="$DIST/$APP_NAME-$VERSION.dmg"
@@ -138,7 +185,29 @@ hdiutil create -volname "$APP_NAME $VERSION" \
   -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
 rm -rf "$STAGE"
 
+# --- notarize + staple -----------------------------------------------------
+# Upload to Apple's notary service (automated malware scan; not App Review),
+# then staple the ticket onto the dmg so Gatekeeper verifies it offline.
+if [[ "$WILL_NOTARIZE" == "1" ]]; then
+  if [[ -n "${NOTARY_PROFILE:-}" ]]; then
+    NOTARY_AUTH=(--keychain-profile "$NOTARY_PROFILE")
+  else
+    NOTARY_AUTH=(--apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" --password "$NOTARY_PASSWORD")
+  fi
+  echo "==> Submitting to Apple notary service (can take a few minutes)"
+  xcrun notarytool submit "$DMG" "${NOTARY_AUTH[@]}" --wait
+  echo "==> Stapling the notarization ticket"
+  xcrun stapler staple "$DMG"
+  # The dmg is the distributed artifact; also staple the loose .app (best effort:
+  # its code hash was notarized as part of the dmg, so this normally succeeds).
+  xcrun stapler staple "$APP" \
+    || echo "    (loose .app not stapled — the dmg is stapled, which is what ships)"
+  echo "==> Gatekeeper check"
+  spctl -a -t open --context context:primary-signature -vv "$DMG" || true
+fi
+
 echo ""
 echo "Done."
 echo "  App: $APP"
 echo "  DMG: $DMG"
+[[ "$WILL_NOTARIZE" == "1" ]] && echo "  Signed + notarized — opens with no Gatekeeper warning."

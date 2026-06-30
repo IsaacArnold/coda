@@ -87,7 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// executable with no `.app` bundle (so no `CFBundleIconFile`), so the icon must
     /// be applied programmatically from the bundled multi-resolution `Coda.icns`.
     private func applyDockIcon() {
-        if let url = Bundle.module.url(forResource: "Coda", withExtension: "icns", subdirectory: "Resources"),
+        if let url = Bundle.codaAssets.url(forResource: "Coda", withExtension: "icns", subdirectory: "Resources"),
            let icon = NSImage(contentsOf: url) {
             NSApp.applicationIconImage = icon
         }
@@ -95,7 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The bundled starter `.itermcolors` shipped as app resources.
     private func bundledThemeURLs() -> [URL] {
-        Bundle.module.urls(forResourcesWithExtension: "itermcolors", subdirectory: "Themes") ?? []
+        Bundle.codaAssets.urls(forResourcesWithExtension: "itermcolors", subdirectory: "Themes") ?? []
     }
 
     /// The active terminal theme: the user's chosen one, else the default, else a hard
@@ -760,7 +760,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The bundled "Symbols Nerd Font Mono", registered for this process for use as a glyph
     /// fallback; resolves to its PostScript name once (nil if the resource is missing).
     private static let nerdFallbackFontName: String? = {
-        guard let url = Bundle.module.url(forResource: "SymbolsNerdFontMono-Regular",
+        guard let url = Bundle.codaAssets.url(forResource: "SymbolsNerdFontMono-Regular",
                                           withExtension: "ttf", subdirectory: "Resources") else { return nil }
         CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
         guard let descs = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],

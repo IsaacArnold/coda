@@ -21,7 +21,7 @@ private final class WorktreeNode: NSObject {
 /// Falls back to the SF Symbol on the unlikely chance the asset is missing.
 func branchGlyphImage(diameter: CGFloat = 16) -> NSImage {
     let image: NSImage
-    if let url = Bundle.module.url(forResource: "git-branch", withExtension: "svg", subdirectory: "Resources"),
+    if let url = Bundle.codaAssets.url(forResource: "git-branch", withExtension: "svg", subdirectory: "Resources"),
        let asset = NSImage(contentsOf: url) {
         image = asset
     } else {
