@@ -21,15 +21,21 @@ final class SurfaceTests: XCTestCase {
     }
 
     func testLabelPrefersRename() {
-        XCTAssertEqual(surfaceLabel(nameOverride: "logs", terminalTitle: "zsh", index: 2), "logs")
+        XCTAssertEqual(surfaceLabel(nameOverride: "logs", repoName: "celestial-crater", index: 2), "logs")
     }
 
-    func testLabelUsesTerminalTitleWhenNoRename() {
-        XCTAssertEqual(surfaceLabel(nameOverride: nil, terminalTitle: "claude", index: 0), "claude")
+    func testLabelUsesRepoNameWhenNoRename() {
+        // The first tab is just the repo name; the live shell title is ignored.
+        XCTAssertEqual(surfaceLabel(nameOverride: nil, repoName: "celestial-crater", index: 0), "celestial-crater")
     }
 
-    func testLabelFallsBackToTerminalN() {
-        XCTAssertEqual(surfaceLabel(nameOverride: nil, terminalTitle: "", index: 0), "Terminal 1")
-        XCTAssertEqual(surfaceLabel(nameOverride: "   ", terminalTitle: nil, index: 4), "Terminal 5")
+    func testLabelDisambiguatesAdditionalTabsByNumber() {
+        XCTAssertEqual(surfaceLabel(nameOverride: nil, repoName: "celestial-crater", index: 1), "celestial-crater 2")
+        XCTAssertEqual(surfaceLabel(nameOverride: "  ", repoName: "celestial-crater", index: 3), "celestial-crater 4")
+    }
+
+    func testLabelFallsBackToTerminalNWithoutRepoName() {
+        XCTAssertEqual(surfaceLabel(nameOverride: nil, repoName: nil, index: 0), "Terminal 1")
+        XCTAssertEqual(surfaceLabel(nameOverride: "   ", repoName: "  ", index: 4), "Terminal 5")
     }
 }
