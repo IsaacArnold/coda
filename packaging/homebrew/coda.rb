@@ -1,6 +1,6 @@
 # Homebrew cask for Coda.
 #
-# This is the CANONICAL copy. It lives here (in the private source repo) so the
+# This is the CANONICAL copy. It lives here (in the public source repo) so the
 # cask is versioned alongside the code. `scripts/release.sh` rewrites the
 # `version`/`sha256` lines below, then copies this file into the PUBLIC tap repo
 # (IsaacArnold/homebrew-coda) at Casks/coda.rb, which is what `brew tap` clones.
@@ -19,7 +19,7 @@ cask "coda" do
       verified: "github.com/IsaacArnold/homebrew-coda/"
   name "Coda"
   desc "Native macOS terminal workspace for running Claude Code across git worktrees"
-  homepage "https://github.com/IsaacArnold/homebrew-coda"
+  homepage "https://github.com/IsaacArnold/coda"
 
   depends_on macos: :ventura
 
