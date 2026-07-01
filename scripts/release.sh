@@ -7,8 +7,8 @@
 #   2. verify the dmg is actually stapled          (refuse to ship otherwise)
 #   3. compute its sha256
 #   4. rewrite version + sha256 in the canonical cask (packaging/homebrew/coda.rb)
-#   5. publish the dmg as a GitHub Release on the PUBLIC tap repo
-#   6. copy the cask into the tap repo and push it
+#   5. publish the dmg as a GitHub Release on the SOURCE repo (IsaacArnold/coda)
+#   6. copy the cask into the PUBLIC tap repo and push it (cask url -> source release)
 #
 # After this runs, colleagues (incl. on locked-down Macs) get the new version via:
 #   brew upgrade --cask coda
@@ -18,6 +18,7 @@
 #       export DEVELOPER_ID_APP="Developer ID Application: NAME (TEAMID)"
 #       export NOTARY_PROFILE=coda-notary     # from: xcrun notarytool store-credentials
 #   • The PUBLIC tap repo exists: https://github.com/IsaacArnold/homebrew-coda
+#     (holds only the cask; the dmg is a Release asset on the source repo).
 #   • `gh` CLI installed and authenticated (gh auth status).
 #
 # Usage:
@@ -29,6 +30,9 @@ set -euo pipefail
 
 APP_NAME="Coda"
 TAP_REPO="${TAP_REPO:-IsaacArnold/homebrew-coda}"
+# The dmg is published as a Release asset here (public source repo); the cask's
+# `url` points at these releases. The tap repo holds only the cask.
+SOURCE_REPO="${SOURCE_REPO:-IsaacArnold/coda}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -55,7 +59,7 @@ if [[ -z "${VERSION:-}" ]]; then
   [[ -n "$VERSION" ]] || die "No VERSION given and no git tag found. Pass VERSION=x.y.z."
 fi
 TAG="v$VERSION"
-echo "==> Releasing $APP_NAME $VERSION (tag $TAG) to $TAP_REPO"
+echo "==> Releasing $APP_NAME $VERSION (tag $TAG): dmg -> $SOURCE_REPO, cask -> $TAP_REPO"
 
 # --- 0. test gate ----------------------------------------------------------
 # Never publish a release that fails its own suite. `swift test` needs XCTest,
@@ -109,10 +113,24 @@ if [[ -n "${DRY_RUN:-}" ]]; then
   exit 0
 fi
 
-# --- 5. push the cask into the tap repo ------------------------------------
-# This MUST come before creating the release: a brand-new tap repo has no
-# commits, so it has no default branch for `gh release create` to tag against
-# ("Repository is empty"). Pushing the cask establishes that branch.
+# --- 5. publish the dmg as a GitHub Release on the SOURCE repo --------------
+# The cask's `url` points at these release assets. Uses the $TAG git tag; if it
+# doesn't exist yet, `gh release create` creates it against the repo's default
+# branch. (Prefer tagging the release commit yourself first — see notes below.)
+if gh release view "$TAG" --repo "$SOURCE_REPO" >/dev/null 2>&1; then
+  echo "==> Release $TAG already exists on $SOURCE_REPO — uploading dmg (clobber)"
+  gh release upload "$TAG" "$DMG" --repo "$SOURCE_REPO" --clobber
+else
+  echo "==> Creating release $TAG on $SOURCE_REPO"
+  gh release create "$TAG" "$DMG" \
+    --repo "$SOURCE_REPO" \
+    --title "$APP_NAME $VERSION" \
+    --notes "Coda $VERSION. Install: \`brew tap isaacarnold/coda && brew install --cask coda\`"
+fi
+
+# --- 6. push the cask into the tap repo ------------------------------------
+# The tap holds only the cask (+ a landing README); the dmg lives on the source
+# repo's releases (step 5). The cask's `url` now resolves to that asset.
 if [[ ! -d "$TAP_DIR/.git" ]]; then
   echo "==> Cloning $TAP_REPO into $TAP_DIR"
   gh repo clone "$TAP_REPO" "$TAP_DIR"
@@ -142,18 +160,6 @@ else
   # `push -u origin HEAD` creates the default branch on a first-ever (empty) push.
   git -C "$TAP_DIR" push -u origin HEAD
   echo "==> Pushed cask $VERSION to $TAP_REPO"
-fi
-
-# --- 6. publish the dmg as a GitHub Release on the tap repo -----------------
-if gh release view "$TAG" --repo "$TAP_REPO" >/dev/null 2>&1; then
-  echo "==> Release $TAG already exists on $TAP_REPO — uploading dmg (clobber)"
-  gh release upload "$TAG" "$DMG" --repo "$TAP_REPO" --clobber
-else
-  echo "==> Creating release $TAG on $TAP_REPO"
-  gh release create "$TAG" "$DMG" \
-    --repo "$TAP_REPO" \
-    --title "$APP_NAME $VERSION" \
-    --notes "Coda $VERSION. Install: \`brew tap isaacarnold/coda && brew install --cask coda\`"
 fi
 
 echo ""
