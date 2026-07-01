@@ -15,8 +15,8 @@ cask "coda" do
   version "0.1.0"
   sha256 "d9632a8ca35c49ca73f654ba734c157cab0654e57a19aeaf2cbf077506cfbb6a"
 
-  url "https://github.com/IsaacArnold/homebrew-coda/releases/download/v#{version}/Coda-#{version}.dmg",
-      verified: "github.com/IsaacArnold/homebrew-coda/"
+  url "https://github.com/IsaacArnold/coda/releases/download/v#{version}/Coda-#{version}.dmg",
+      verified: "github.com/IsaacArnold/coda/"
   name "Coda"
   desc "Native macOS terminal workspace for running Claude Code across git worktrees"
   homepage "https://github.com/IsaacArnold/coda"
