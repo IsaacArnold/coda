@@ -6,7 +6,7 @@ import AppKit
 /// sourced from supacode's asset catalog), then a bundled "ClaudeMark" asset, and finally
 /// a drawn terracotta sunburst approximating the mark.
 func claudeMarkImage(diameter: CGFloat = 17) -> NSImage {
-    if let url = Bundle.module.url(forResource: "claude-code-mark", withExtension: "svg", subdirectory: "Resources"),
+    if let url = Bundle.codaAssets.url(forResource: "claude-code-mark", withExtension: "svg", subdirectory: "Resources"),
        let asset = NSImage(contentsOf: url) {
         asset.size = NSSize(width: diameter, height: diameter)
         return asset
