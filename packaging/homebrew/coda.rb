@@ -19,7 +19,7 @@ cask "coda" do
       verified: "github.com/IsaacArnold/homebrew-coda/"
   name "Coda"
   desc "Native macOS terminal workspace for running Claude Code across git worktrees"
-  homepage "https://github.com/IsaacArnold/coda"
+  homepage "https://github.com/IsaacArnold/homebrew-coda"
 
   depends_on macos: :ventura
 
