@@ -195,15 +195,23 @@ if [[ "$WILL_NOTARIZE" == "1" ]]; then
     NOTARY_AUTH=(--apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" --password "$NOTARY_PASSWORD")
   fi
   echo "==> Submitting to Apple notary service (can take a few minutes)"
-  xcrun notarytool submit "$DMG" "${NOTARY_AUTH[@]}" --wait
+  # --timeout bounds the whole submit+wait so a stalled upload/connection can't
+  # hang indefinitely (notarytool has no default timeout). Normal runs finish in
+  # well under this; on timeout the non-zero exit trips `set -e` and we abort
+  # before publishing. Re-running is safe — a hung submit never registers.
+  xcrun notarytool submit "$DMG" "${NOTARY_AUTH[@]}" --wait --timeout 30m
   echo "==> Stapling the notarization ticket"
   xcrun stapler staple "$DMG"
   # The dmg is the distributed artifact; also staple the loose .app (best effort:
   # its code hash was notarized as part of the dmg, so this normally succeeds).
   xcrun stapler staple "$APP" \
     || echo "    (loose .app not stapled — the dmg is stapled, which is what ships)"
-  echo "==> Gatekeeper check"
-  spctl -a -t open --context context:primary-signature -vv "$DMG" || true
+  # Assess the .app, not the .dmg: a dmg is notarized + stapled but never
+  # code-signed, so `spctl` on the dmg reports "no usable signature" — a false
+  # alarm. The .app is what Gatekeeper actually evaluates once Homebrew (or a
+  # manual drag) copies it to /Applications; it should read "Notarized Developer ID".
+  echo "==> Gatekeeper check (assessing the .app)"
+  spctl -a -vv "$APP" || true
 fi
 
 echo ""
