@@ -57,6 +57,28 @@ fi
 TAG="v$VERSION"
 echo "==> Releasing $APP_NAME $VERSION (tag $TAG) to $TAP_REPO"
 
+# --- 0. test gate ----------------------------------------------------------
+# Never publish a release that fails its own suite. `swift test` needs XCTest,
+# which ships only with a full Xcode, not the CommandLineTools. On this machine
+# the CommandLineTools toolchain that builds the release has no XCTest, and the
+# installed Xcode can be a different Swift version — so when we fall back to Xcode
+# for tests we hand it a SEPARATE scratch dir (.build-test) so its build products
+# never collide with the CommandLineTools release build in .build/.
+# SKIP_TESTS=1 bypasses the gate (not recommended for a real release).
+if [[ -n "${SKIP_TESTS:-}" ]]; then
+  echo "==> SKIP_TESTS set — skipping the test gate (not recommended)"
+elif xcode-select -p 2>/dev/null | grep -q "Xcode.app"; then
+  echo "==> Running test suite (swift test)"
+  swift test || die "tests failed — aborting release."
+elif [[ -d /Applications/Xcode.app ]]; then
+  echo "==> Running test suite via /Applications/Xcode.app (CommandLineTools has no XCTest)"
+  DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+    swift test --scratch-path "$REPO_ROOT/.build-test" \
+    || die "tests failed — aborting release."
+else
+  die "no XCTest-capable toolchain found — install full Xcode, or set SKIP_TESTS=1 to bypass."
+fi
+
 # --- 1. build + notarize ---------------------------------------------------
 VERSION="$VERSION" "$REPO_ROOT/scripts/make-app.sh"
 DMG="$REPO_ROOT/dist/$APP_NAME-$VERSION.dmg"
