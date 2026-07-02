@@ -43,6 +43,90 @@ final class ClickableTerminalView: LocalProcessTerminalView {
         return outputSinceLastPoll
     }
 
+    // MARK: - Drag & drop (iTerm-style file/text/URL drop)
+
+    /// True while a valid drag hovers this pane. Intended to drive a drop highlight in
+    /// `draw`, but that override doesn't compile against this SwiftTerm version — see the
+    /// NOTE(task-3) below `sendDroppedText`. Currently has no visible effect.
+    private var isDragHighlighted = false {
+        didSet { if isDragHighlighted != oldValue { needsDisplay = true } }
+    }
+
+    /// Register the pasteboard types we accept once the view is in a window. Done here
+    /// (rather than in an initializer) to avoid overriding SwiftTerm's init chain;
+    /// re-registering on each window move is harmless.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        registerForDraggedTypes([.fileURL, .URL, .string])
+    }
+
+    /// Pull the insertable string out of a drag's pasteboard, or nil if there's nothing
+    /// we handle. File URLs win; then a non-file URL; then plain text.
+    private func droppedText(_ sender: NSDraggingInfo) -> String? {
+        let pb = sender.draggingPasteboard
+        let fileURLs = (pb.readObjects(forClasses: [NSURL.self],
+                                       options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        var url: URL?
+        if fileURLs.isEmpty,
+           let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
+           let first = urls.first, !first.isFileURL {
+            url = first
+        }
+        let text = pb.string(forType: .string)
+        return TerminalDrop.dropText(fileURLs: fileURLs, text: text, url: url)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard droppedText(sender) != nil else { return [] }
+        isDragHighlighted = true
+        return .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        return droppedText(sender) != nil ? .copy : []
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        isDragHighlighted = false
+    }
+
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        isDragHighlighted = false
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        isDragHighlighted = false
+        guard let text = droppedText(sender) else { return false }
+        sendDroppedText(text)
+        return true
+    }
+
+    /// Send dropped text to the PTY. Mirrors SwiftTerm's own paste: when bracketed-paste
+    /// mode is on, wrap the payload so a multi-line text drop can't auto-run lines.
+    private func sendDroppedText(_ text: String) {
+        if getTerminal().bracketedPasteMode {
+            send(data: EscapeSequences.bracketedPasteStart[0...])
+            send(txt: text)
+            send(data: EscapeSequences.bracketedPasteEnd[0...])
+        } else {
+            send(txt: text)
+        }
+    }
+
+    // NOTE(task-3): the brief's `override func draw(_ dirtyRect: NSRect)` highlight paint
+    // does not compile against the pinned SwiftTerm dependency (Package.swift: "from:
+    // 1.2.0"). SwiftTerm's `TerminalView.draw(_:)` is declared `override public func draw`
+    // (MacTerminalView.swift:653) — `public`, not `open` — so Swift forbids overriding it
+    // from outside SwiftTerm's module, with or without the `override` keyword (confirmed by
+    // compiler: "overriding non-open instance method outside of its defining module").
+    // This is not the override-keyword ambiguity the brief anticipated for the
+    // NSDraggingDestination methods below; it's an unconditional compile-time wall. Left
+    // out rather than silently substituting a different highlight mechanism (e.g. a
+    // CALayer border), since the brief said not to redesign — see task-3-report.md for the
+    // escalation. `isDragHighlighted` above is still tracked by the drag handlers (so
+    // wiring up a highlight later is a one-method addition) but currently has no visible
+    // effect.
+
     /// Give a focused terminal first crack at ⌘-combos it owns (clear, line-kill) before
     /// the main menu's key-equivalents see them — otherwise e.g. ⌘⌫ would hit the menu's
     /// "Archive Worktree". AppKit consults a view's `performKeyEquivalent` ahead of the
