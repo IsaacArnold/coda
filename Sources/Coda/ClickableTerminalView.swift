@@ -45,12 +45,27 @@ final class ClickableTerminalView: LocalProcessTerminalView {
 
     // MARK: - Drag & drop (iTerm-style file/text/URL drop)
 
-    /// True while a valid drag hovers this pane. Intended to drive a drop highlight in
-    /// `draw`, but that override doesn't compile against this SwiftTerm version — see the
-    /// NOTE(task-3) below `sendDroppedText`. Currently has no visible effect.
+    /// True while a valid drag hovers this pane; toggles the drop-highlight overlay.
     private var isDragHighlighted = false {
-        didSet { if isDragHighlighted != oldValue { needsDisplay = true } }
+        didSet {
+            guard isDragHighlighted != oldValue else { return }
+            if isDragHighlighted, dropHighlight.superview == nil {
+                dropHighlight.frame = bounds
+                addSubview(dropHighlight)
+            }
+            dropHighlight.isHidden = !isDragHighlighted
+        }
     }
+
+    /// Transparent overlay drawn on top of the terminal to show the drop target. Used
+    /// because SwiftTerm's `TerminalView.draw(_:)` is `public` (not `open`) and so can't
+    /// be overridden from this module.
+    private lazy var dropHighlight: DropHighlightOverlay = {
+        let v = DropHighlightOverlay(frame: bounds)
+        v.autoresizingMask = [.width, .height]
+        v.isHidden = true
+        return v
+    }()
 
     /// Register the pasteboard types we accept once the view is in a window. Done here
     /// (rather than in an initializer) to avoid overriding SwiftTerm's init chain;
@@ -112,20 +127,6 @@ final class ClickableTerminalView: LocalProcessTerminalView {
             send(txt: text)
         }
     }
-
-    // NOTE(task-3): the brief's `override func draw(_ dirtyRect: NSRect)` highlight paint
-    // does not compile against the pinned SwiftTerm dependency (Package.swift: "from:
-    // 1.2.0"). SwiftTerm's `TerminalView.draw(_:)` is declared `override public func draw`
-    // (MacTerminalView.swift:653) — `public`, not `open` — so Swift forbids overriding it
-    // from outside SwiftTerm's module, with or without the `override` keyword (confirmed by
-    // compiler: "overriding non-open instance method outside of its defining module").
-    // This is not the override-keyword ambiguity the brief anticipated for the
-    // NSDraggingDestination methods below; it's an unconditional compile-time wall. Left
-    // out rather than silently substituting a different highlight mechanism (e.g. a
-    // CALayer border), since the brief said not to redesign — see task-3-report.md for the
-    // escalation. `isDragHighlighted` above is still tracked by the drag handlers (so
-    // wiring up a highlight later is a one-method addition) but currently has no visible
-    // effect.
 
     /// Give a focused terminal first crack at ⌘-combos it owns (clear, line-kill) before
     /// the main menu's key-equivalents see them — otherwise e.g. ⌘⌫ would hit the menu's
@@ -258,4 +259,17 @@ final class ClickableTerminalView: LocalProcessTerminalView {
         }
         return nil
     }
+}
+
+/// Non-interactive overlay that strokes a focus-ring border while a drag hovers the
+/// terminal. `hitTest` returns nil so it never intercepts the drop or any mouse event.
+private final class DropHighlightOverlay: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        let inset = bounds.insetBy(dx: 1.5, dy: 1.5)
+        let path = NSBezierPath(roundedRect: inset, xRadius: 4, yRadius: 4)
+        path.lineWidth = 3
+        NSColor.keyboardFocusIndicatorColor.setStroke()
+        path.stroke()
+    }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
