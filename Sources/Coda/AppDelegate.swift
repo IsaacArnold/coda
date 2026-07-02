@@ -57,6 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         seedBranchesAndWatchers()
         refreshSidebar(select: allDisplayWorktrees().first?.id)
         applyChromeTheme()
+        applyUIMetrics()
         // Keep the notch clock current.
         notchTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.updateNotch()
@@ -285,7 +286,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 onApplyTheme: { [weak self] name in self?.setActiveTheme(named: name) },
                 onImportTheme: { [weak self] url in try? self?.themeStore.importTheme(from: url) },
                 terminalFont: resolvedTerminalFont(),
-                onChangeFont: { [weak self] pref in self?.setTerminalFont(pref) })
+                onChangeFont: { [weak self] pref in self?.setTerminalFont(pref) },
+                uiScale: preferences.uiScale,
+                onChangeUIScale: { [weak self] scale in self?.setUIScale(scale) })
             let win = NSWindow(contentViewController: tab)
             win.title = "Settings"
             win.styleMask = [.titled, .closable]
@@ -784,6 +787,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let nerdDescriptor = NSFontDescriptor(fontAttributes: [.name: nerdName])
         let descriptor = base.fontDescriptor.addingAttributes([.cascadeList: [nerdDescriptor]])
         return NSFont(descriptor: descriptor, size: base.pointSize) ?? base
+    }
+
+    /// Current chrome metrics from the saved interface-size preference.
+    private var uiMetrics: UIMetrics { UIMetrics(scale: preferences.uiScale) }
+
+    /// Push the current metrics to every chrome view and relayout live.
+    private func applyUIMetrics() {
+        let m = uiMetrics
+        sidebar.apply(metrics: m)
+        worktreeBar.apply(metrics: m)
+        surfaceTabBar.apply(metrics: m)
+        refreshTabBar()   // rebuild tab views at the new metrics
+    }
+
+    /// Persist a new interface scale and re-apply it live (no relaunch).
+    private func setUIScale(_ scale: UIScale) {
+        preferences.uiScale = scale
+        do { try prefsStore.save(preferences) } catch { presentError(error) }
+        applyUIMetrics()
     }
 
     /// Persist a new terminal font and re-apply it to every live surface.
