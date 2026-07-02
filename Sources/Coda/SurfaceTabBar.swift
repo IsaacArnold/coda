@@ -25,11 +25,14 @@ final class SurfaceTabBar: NSView {
     var onContext: ((String, NSView) -> Void)?
 
     private let stack = NSStackView()
+    private var metrics = UIMetrics(scale: .medium)
+    private var heightConstraint: NSLayoutConstraint!
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
-        heightAnchor.constraint(equalToConstant: Self.height).isActive = true
+        heightConstraint = heightAnchor.constraint(equalToConstant: Self.height)
+        heightConstraint.isActive = true
         stack.orientation = .horizontal
         stack.spacing = 4
         stack.alignment = .centerY
@@ -77,7 +80,7 @@ final class SurfaceTabBar: NSView {
         }
 
         let label = NSTextField(labelWithString: item.label)
-        label.font = .systemFont(ofSize: 11, weight: item.isActive ? .semibold : .regular)
+        label.font = metrics.tabLabel(active: item.isActive)
         label.lineBreakMode = .byTruncatingTail
         label.textColor = item.tint ?? .labelColor
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -107,9 +110,17 @@ final class SurfaceTabBar: NSView {
             close.widthAnchor.constraint(equalToConstant: 14),
             close.heightAnchor.constraint(equalToConstant: 14),
             tab.widthAnchor.constraint(lessThanOrEqualToConstant: 200),
-            tab.heightAnchor.constraint(equalToConstant: 22),
+            tab.heightAnchor.constraint(equalToConstant: metrics.length(22)),
         ])
         return tab
+    }
+
+    /// Adopt a new interface scale. Updates the bar's own height; the caller must re-run
+    /// `update(items:)` so the tabs rebuild at the new metrics (AppDelegate does this via
+    /// its tab-refresh path).
+    func apply(metrics: UIMetrics) {
+        self.metrics = metrics
+        heightConstraint.constant = metrics.length(Self.height)
     }
 }
 
