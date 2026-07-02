@@ -774,8 +774,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The configured terminal font (or the default monospaced font), augmented with the
     /// bundled Nerd Font as a *cascade fallback* so powerline / icon glyphs render even when
-    /// the chosen font lacks them. The base font is untouched — fallback only fills glyphs the
-    /// base font is missing, so e.g. Dank Mono's own characters render from Dank Mono.
+    /// the chosen font lacks them. The base font's own text characters are untouched.
+    ///
+    /// Some coding fonts (e.g. Dank Mono) ship a handful of powerline/icon glyphs in the
+    /// Private Use Area that are taller than the font's ascent. SwiftTerm sizes its cells from
+    /// the ascent, so those glyph tops get clipped (the branch/separator icons in a powerline
+    /// prompt look sliced). To avoid it, we drop from the base font's *declared coverage* any
+    /// PUA codepoint that the bundled Nerd Font also provides, so those icons render from the
+    /// Nerd Font (whose glyphs are sized to fit a terminal cell) instead of the base font. The
+    /// base font's non-PUA glyphs — all normal text — are unaffected.
     private func resolvedTerminalFont() -> NSFont {
         let base: NSFont = {
             if let pref = preferences.terminalFont, let font = NSFont(name: pref.name, size: CGFloat(pref.size)) {
@@ -785,7 +792,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }()
         guard let nerdName = Self.nerdFallbackFontName else { return base }
         let nerdDescriptor = NSFontDescriptor(fontAttributes: [.name: nerdName])
-        let descriptor = base.fontDescriptor.addingAttributes([.cascadeList: [nerdDescriptor]])
+
+        var baseDescriptor = base.fontDescriptor
+        if let nerdFont = NSFont(descriptor: nerdDescriptor, size: base.pointSize) {
+            let baseSet = CTFontCopyCharacterSet(base as CTFont) as CharacterSet
+            let nerdSet = CTFontCopyCharacterSet(nerdFont as CTFont) as CharacterSet
+            // PUA icon codepoints the Nerd Font covers → let it own them (avoids oversized base glyphs).
+            var pua = CharacterSet()
+            pua.insert(charactersIn: UnicodeScalar(0xE000)!...UnicodeScalar(0xF8FF)!)
+            pua.insert(charactersIn: UnicodeScalar(0xF0000)!...UnicodeScalar(0xFFFFD)!)
+            pua.insert(charactersIn: UnicodeScalar(0x100000)!...UnicodeScalar(0x10FFFD)!)
+            let restricted = baseSet.subtracting(nerdSet.intersection(pua))
+            baseDescriptor = baseDescriptor.addingAttributes([.characterSet: restricted as NSCharacterSet])
+        }
+        let descriptor = baseDescriptor.addingAttributes([.cascadeList: [nerdDescriptor]])
         return NSFont(descriptor: descriptor, size: base.pointSize) ?? base
     }
 
