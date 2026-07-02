@@ -29,24 +29,27 @@ echo "terminal size: ${cols}x${rows} (cols x rows) — match this across machine
 echo
 
 # 1) Throughput: dump many colored lines (stresses per-cell CoreText drawing).
-printf 'throughput (20000 colored lines): '
+echo 'running throughput (20000 colored lines)...'
 t0=$(now)
 for i in $(seq 1 20000); do
   printf '\033[3%dm%05d the quick brown fox jumps over the lazy dog 0123456789\033[0m\n' $((i % 8)) "$i"
 done
-printf '%ss\n' "$(elapsed "$t0" "$(now)")"
+throughput=$(elapsed "$t0" "$(now)")
 
 # 2) Clear latency: exactly what ⌘K triggers (full-screen clear + home), 200x.
-printf 'clears (200x full-screen clear):  '
+echo 'running clears (200x full-screen clear)...'
 t0=$(now)
 for _ in $(seq 1 200); do printf '\033[2J\033[H'; done
-printf '%ss\n' "$(elapsed "$t0" "$(now)")"
+clears=$(elapsed "$t0" "$(now)")
 
 # 3) Scroll cost: rapid newlines at the bottom (the "slow new line" feel).
-printf 'scroll (5000 newlines):           '
+echo 'running scroll (5000 newlines)...'
 t0=$(now)
 for i in $(seq 1 5000); do printf 'line %d\n' "$i"; done
-printf '%ss\n' "$(elapsed "$t0" "$(now)")"
+scroll=$(elapsed "$t0" "$(now)")
 
-echo
-echo 'Done. Compare the three numbers across the runs above.'
+# Summary last, so all three numbers stay on screen even with bounded scrollback.
+printf '\n=== term-bench summary (%sx%s cols x rows) ===\n' "$cols" "$rows"
+printf 'throughput (20000 colored lines): %ss\n' "$throughput"
+printf 'clears (200x full-screen clear):  %ss\n' "$clears"
+printf 'scroll (5000 newlines):           %ss\n' "$scroll"
