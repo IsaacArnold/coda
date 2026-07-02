@@ -67,11 +67,11 @@ public enum UIScale: String, Codable, CaseIterable {
 public struct Preferences: Codable, Equatable {
     public var defaultEditor: Editor
     /// Name of the active terminal theme (a file in ~/.coda/themes/). nil → the
-    /// app falls back to its default bundled theme. Synthesized Codable decodes a
-    /// missing key to nil, so older prefs files still load.
+    /// app falls back to its default bundled theme. The custom decoder below decodes
+    /// a missing key to nil, so older prefs files still load.
     public var activeTheme: String?
-    /// The terminal font. nil → the app's default monospaced font. Synthesized Codable
-    /// decodes a missing key to nil, so older prefs files still load.
+    /// The terminal font. nil → the app's default monospaced font. The custom decoder
+    /// below decodes a missing key to nil, so older prefs files still load.
     public var terminalFont: TerminalFontPref?
     /// The interface (chrome) size. Defaults to `.medium`; older prefs files without
     /// the key decode to `.medium` via the custom decoder below.
