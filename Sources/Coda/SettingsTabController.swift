@@ -13,13 +13,16 @@ final class SettingsTabController: NSTabViewController {
          onApplyTheme: @escaping (String) -> Void,
          onImportTheme: @escaping (URL) -> Void,
          terminalFont: NSFont,
-         onChangeFont: @escaping (TerminalFontPref) -> Void) {
+         onChangeFont: @escaping (TerminalFontPref) -> Void,
+         uiScale: UIScale,
+         onChangeUIScale: @escaping (UIScale) -> Void) {
         super.init(nibName: nil, bundle: nil)
         tabStyle = .toolbar
 
-        let general = GeneralSettingsViewController(editor: editor, terminalFont: terminalFont)
+        let general = GeneralSettingsViewController(editor: editor, terminalFont: terminalFont, uiScale: uiScale)
         general.onChangeEditor = onChangeEditor
         general.onChangeFont = onChangeFont
+        general.onChangeUIScale = onChangeUIScale
         let generalItem = NSTabViewItem(viewController: general)
         generalItem.label = "General"
         generalItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "General")

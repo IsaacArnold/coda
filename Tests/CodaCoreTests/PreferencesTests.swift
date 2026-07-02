@@ -78,6 +78,41 @@ final class KnownEditorsTests: XCTestCase {
     }
 }
 
+final class UIScaleTests: XCTestCase {
+    func testMultipliersAreExact() {
+        XCTAssertEqual(UIScale.small.multiplier, 0.9)
+        XCTAssertEqual(UIScale.medium.multiplier, 1.0)
+        XCTAssertEqual(UIScale.large.multiplier, 1.15)
+        XCTAssertEqual(UIScale.xlarge.multiplier, 1.3)
+    }
+
+    func testScaledRoundsToNearestWholePoint() {
+        // 24 * 1.15 = 27.6 → 28; medium is identity.
+        XCTAssertEqual(UIScale.medium.scaled(24), 24)
+        XCTAssertEqual(UIScale.large.scaled(24), 28)
+        XCTAssertEqual(UIScale.small.scaled(13), 12) // 11.7 → 12
+    }
+
+    func testDisplayNamesAreHumanReadable() {
+        XCTAssertEqual(UIScale.xlarge.displayName, "Extra Large")
+        XCTAssertEqual(UIScale.medium.displayName, "Medium")
+    }
+
+    func testUIScaleDefaultsMediumForOldPrefs() {
+        // Prefs written before the UI-scale control carried no uiScale key.
+        let json = #"{"defaultEditor":{"name":"Visual Studio Code","bundleID":"com.microsoft.VSCode","urlScheme":"vscode"}}"#
+        let prefs = try! JSONDecoder().decode(Preferences.self, from: Data(json.utf8))
+        XCTAssertEqual(prefs.uiScale, .medium)
+    }
+
+    func testUIScaleRoundTrips() throws {
+        var prefs = Preferences()
+        prefs.uiScale = .large
+        let back = try JSONDecoder().decode(Preferences.self, from: JSONEncoder().encode(prefs))
+        XCTAssertEqual(back.uiScale, .large)
+    }
+}
+
 final class EditorURLTests: XCTestCase {
     func testBuildsLineJumpURLWhenGivenALine() {
         let url = editorOpenURL(path: "/Users/me/Project/main.swift", line: 42)

@@ -10,16 +10,19 @@ final class WorktreeBar: NSView {
     private let branchLabel = NSTextField(labelWithString: "")
     private let badge = NSView()
     static let height: CGFloat = 26
+    private var metrics = UIMetrics(scale: .medium)
+    private var heightConstraint: NSLayoutConstraint!
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.cornerRadius = 6   // rounded so the inset identity bar reads as a floating chip
         translatesAutoresizingMaskIntoConstraints = false
-        heightAnchor.constraint(equalToConstant: Self.height).isActive = true
+        heightConstraint = heightAnchor.constraint(equalToConstant: Self.height)
+        heightConstraint.isActive = true
 
-        titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
-        branchLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        titleLabel.font = metrics.worktreeTitle
+        branchLabel.font = metrics.worktreeBranch
         titleLabel.lineBreakMode = .byTruncatingTail
         branchLabel.lineBreakMode = .byTruncatingMiddle
 
@@ -61,5 +64,14 @@ final class WorktreeBar: NSView {
         } else {
             badge.isHidden = true
         }
+    }
+
+    /// Adopt a new interface scale: restyle the labels and resize the bar. The next
+    /// `update(...)` (or the current text) re-lays out inside the new height.
+    func apply(metrics: UIMetrics) {
+        self.metrics = metrics
+        titleLabel.font = metrics.worktreeTitle
+        branchLabel.font = metrics.worktreeBranch
+        heightConstraint.constant = metrics.length(Self.height)
     }
 }

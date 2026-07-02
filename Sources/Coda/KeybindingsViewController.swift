@@ -61,6 +61,7 @@ final class KeybindingsViewController: NSViewController {
 
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
+        scroll.scrollerStyle = .overlay
         scroll.drawsBackground = false
         scroll.documentView = content
         content.translatesAutoresizingMaskIntoConstraints = false

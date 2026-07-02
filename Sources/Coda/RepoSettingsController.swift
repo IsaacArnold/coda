@@ -74,6 +74,7 @@ final class RepoSettingsController: NSViewController {
     private func configureEditor(_ scroll: NSScrollView, _ tv: NSTextView) {
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.hasVerticalScroller = true
+        scroll.scrollerStyle = .overlay
         scroll.borderType = .bezelBorder
         tv.isRichText = false
         tv.font = .monospacedSystemFont(ofSize: 12, weight: .regular)

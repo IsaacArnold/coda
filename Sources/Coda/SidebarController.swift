@@ -78,6 +78,7 @@ final class SidebarController: NSViewController {
     private var repoNodes: [RepoNode] = []
     private var agentStates: [String: AgentState] = [:]
     private var chrome: ChromeTheme?
+    private var metrics = UIMetrics(scale: .medium)
 
     /// Selection drives the detail surface; the primary actions (add, new, launch,
     /// archive, settings) now live in the native menu bar and toolbar.
@@ -111,6 +112,15 @@ final class SidebarController: NSViewController {
         if changed { outline.reloadData() }
     }
 
+    /// Adopt a new interface scale and restyle live. Row heights and cell fonts are
+    /// recomputed on `reloadData()`; `noteHeightOfRows` forces the outline to re-measure.
+    func apply(metrics: UIMetrics) {
+        self.metrics = metrics
+        outline.reloadData()
+        let all = IndexSet(integersIn: 0..<outline.numberOfRows)
+        outline.noteHeightOfRows(withIndexesChanged: all)
+    }
+
     private let rowMenu = NSMenu()
 
     override func loadView() {
@@ -127,6 +137,7 @@ final class SidebarController: NSViewController {
         outline.menu = rowMenu
         scroll.documentView = outline
         scroll.hasVerticalScroller = true
+        scroll.scrollerStyle = .overlay
         scroll.drawsBackground = false
         view = scroll
     }
@@ -315,7 +326,7 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     /// Worktree rows are two-line (title + subtitle); repo headers stay single-line.
     func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
-        item is WorktreeNode ? 38 : 24
+        item is WorktreeNode ? metrics.length(38) : metrics.length(24)
     }
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
@@ -323,7 +334,7 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
             // Repo rows are plain section headers, à la Supacode; tinted by the repo's color.
             let cell = makeCell(identifier: "repo", symbol: nil)
             cell.textField?.stringValue = repo.repository.sidebarDisplayName
-            cell.textField?.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+            cell.textField?.font = metrics.sectionHeader
             let repoColor = repo.repository.color.flatMap { NSColor(hex: $0) }
             cell.textField?.textColor = repoColor
                 ?? (chrome?.color(.secondaryText).nsColor) ?? .secondaryLabelColor
@@ -334,6 +345,8 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
             cell.textField?.stringValue = wt.worktree.title
             // Subtitle is just the branch — the repo name is already the section header above.
             cell.subtitleLabel.stringValue = wt.worktree.branch
+            cell.textField?.font = metrics.body
+            cell.subtitleLabel.font = metrics.footnote
             cell.applyBadge(agentStates[wt.worktree.id] ?? .idle)
             let identity = identityOverrides[wt.worktree.id]
                 ?? wt.worktree.color.flatMap { NSColor(hex: $0) }
