@@ -38,4 +38,25 @@ final class LaunchCommandTests: XCTestCase {
         let repo = Repository(id: "r1", path: "/tmp/repo", name: "repo")
         XCTAssertEqual(launchCommand(for: repo), "claude")
     }
+
+    // Regression: shell-first tabs must launch a SINGLE interactive shell, not the old
+    // `-i -c "… exec zsh -i"` that sourced .zshrc twice (~2x new-tab startup on heavy
+    // dotfiles). No `-c` means no nested shell means one .zshrc pass.
+    func testShellFirstArgsAvoidDoubleInit() {
+        let args = terminalShellArgs(workingDirectory: "/tmp/wt", setupScript: "", command: "")
+        XCTAssertEqual(args, ["-i"])
+        XCTAssertFalse(args.contains("-c"), "shell-first must not wrap in -c (that nests a second zsh -i)")
+    }
+
+    // A directly-exec'd command (auto-launch Claude) still needs the outer shell to
+    // source .zshrc, so it keeps the -i -c form — there's no inner shell to source it.
+    func testCommandArgsKeepInteractiveSourcing() {
+        let args = terminalShellArgs(workingDirectory: "/tmp/wt", setupScript: "", command: "claude")
+        XCTAssertEqual(args, ["-i", "-c", "cd '/tmp/wt' && exec claude"])
+    }
+
+    func testSetupArgsKeepInteractiveSourcing() {
+        let args = terminalShellArgs(workingDirectory: "/tmp/wt", setupScript: "npm install", command: "")
+        XCTAssertEqual(args, ["-i", "-c", "cd '/tmp/wt' && { npm install && exec zsh -i || exec zsh; }"])
+    }
 }

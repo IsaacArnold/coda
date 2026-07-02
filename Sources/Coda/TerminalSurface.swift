@@ -116,11 +116,11 @@ final class TerminalSurface: NSViewController {
         // Start the PTY only once bounds are known (viewDidAppear can fire at zero size).
         guard !processStarted, terminal.bounds.width > 0 else { return }
         processStarted = true
-        let line = terminalLaunchLine(workingDirectory: workingDirectory,
-                                      setupScript: setupScript,
-                                      command: command)
+        let args = terminalShellArgs(workingDirectory: workingDirectory,
+                                     setupScript: setupScript,
+                                     command: command)
         terminal.startProcess(executable: "/bin/zsh",
-                              args: ["-i", "-c", line],
+                              args: args,
                               environment: nil,
                               execName: "-zsh",
                               currentDirectory: workingDirectory)

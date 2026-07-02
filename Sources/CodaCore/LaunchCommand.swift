@@ -30,3 +30,27 @@ public func terminalLaunchLine(workingDirectory: String, setupScript: String, co
     }
     return "cd \(dir) && { \(setup) && exec \(target) || exec zsh; }"
 }
+
+/// The argv (after `/bin/zsh`, whose argv0 is always the login `-zsh`) for a terminal
+/// surface. `currentDirectory` is set on the spawn, so the working directory is handled
+/// out-of-band and needs no `cd` for the shell-first path.
+///
+/// - Shell-first (no setup, no command): a single interactive login shell (`-i`), with
+///   NO `-c` wrapper. The previous form `-i -c "cd … && exec zsh -i"` sourced `.zshrc`
+///   twice — once for the outer `-i` shell, once for the exec'd inner `zsh -i` — which
+///   roughly doubled new-tab startup on machines with heavy dotfiles. A single shell
+///   sources `.zprofile`/`.zshrc` exactly once.
+/// - With setup and/or command: keep the `-i -c <line>` form. The `-i` is load-bearing
+///   here — a non-shell target like `claude` is `exec`'d directly (no inner interactive
+///   shell), so the outer shell must source `.zshrc` for it to inherit the interactive
+///   environment (PATH, etc.).
+public func terminalShellArgs(workingDirectory: String, setupScript: String, command: String) -> [String] {
+    let setup = setupScript.trimmingCharacters(in: .whitespacesAndNewlines)
+    let cmd = command.trimmingCharacters(in: .whitespacesAndNewlines)
+    if setup.isEmpty && cmd.isEmpty {
+        return ["-i"]
+    }
+    return ["-i", "-c", terminalLaunchLine(workingDirectory: workingDirectory,
+                                           setupScript: setupScript,
+                                           command: command)]
+}
