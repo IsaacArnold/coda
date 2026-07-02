@@ -107,8 +107,20 @@ final class GeneralSettingsViewController: NSViewController {
         fontValueLabel.stringValue = "\(name) \(Int(terminalFont.pointSize))"
     }
 
+    // NSFontManager delivers `changeFont(_:)` via the *responder chain* (the `target`
+    // property is only reliably honored on some macOS versions / configurations — e.g. a
+    // third-party font manager or a differing key/main window can leave `target` ineffective,
+    // silently dropping the message). So don't rely on `target` alone: make this controller
+    // the settings window's first responder while the panel is up, so the message reaches us
+    // through the chain regardless.
+    override var acceptsFirstResponder: Bool { true }
+
     @objc private func chooseFont() {
+        // Anchor delivery to the responder chain: key window + first responder = self.
+        view.window?.makeKeyAndOrderFront(nil)
+        view.window?.makeFirstResponder(self)
         NSFontManager.shared.target = self
+        NSFontManager.shared.action = #selector(changeFont(_:))
         NSFontManager.shared.setSelectedFont(terminalFont, isMultiple: false)
         NSFontManager.shared.orderFrontFontPanel(self)
     }
