@@ -34,6 +34,34 @@ public struct TerminalFontPref: Codable, Equatable {
     }
 }
 
+/// App-wide interface (chrome) size, as four presets. The multiplier scales chrome
+/// fonts and geometry; `.medium` (1.0) is the app's default look. Pure/UI-free so the
+/// scale math is testable in CodaCore — the AppKit `UIMetrics` type consumes it.
+public enum UIScale: String, Codable, CaseIterable {
+    case small, medium, large, xlarge
+
+    public var multiplier: Double {
+        switch self {
+        case .small:  return 0.9
+        case .medium: return 1.0
+        case .large:  return 1.15
+        case .xlarge: return 1.3
+        }
+    }
+
+    public var displayName: String {
+        switch self {
+        case .small:  return "Small"
+        case .medium: return "Medium"
+        case .large:  return "Large"
+        case .xlarge: return "Extra Large"
+        }
+    }
+
+    /// Scale a base point/length to the nearest whole point.
+    public func scaled(_ base: Double) -> Double { (base * multiplier).rounded() }
+}
+
 /// App-wide, portable preferences (no machine-local absolute paths). Separate from
 /// `Config`, which is the only place absolute paths are allowed.
 public struct Preferences: Codable, Equatable {
@@ -45,11 +73,29 @@ public struct Preferences: Codable, Equatable {
     /// The terminal font. nil → the app's default monospaced font. Synthesized Codable
     /// decodes a missing key to nil, so older prefs files still load.
     public var terminalFont: TerminalFontPref?
+    /// The interface (chrome) size. Defaults to `.medium`; older prefs files without
+    /// the key decode to `.medium` via the custom decoder below.
+    public var uiScale: UIScale
     public init(defaultEditor: Editor = .vsCode, activeTheme: String? = nil,
-                terminalFont: TerminalFontPref? = nil) {
+                terminalFont: TerminalFontPref? = nil, uiScale: UIScale = .medium) {
         self.defaultEditor = defaultEditor
         self.activeTheme = activeTheme
         self.terminalFont = terminalFont
+        self.uiScale = uiScale
+    }
+
+    // Synthesized Codable would make `uiScale` a required key and fail to decode older
+    // prefs files. A custom decoder defaults the missing key to `.medium` (and keeps the
+    // other keys' existing optional/required behavior).
+    private enum CodingKeys: String, CodingKey {
+        case defaultEditor, activeTheme, terminalFont, uiScale
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.defaultEditor = try c.decode(Editor.self, forKey: .defaultEditor)
+        self.activeTheme = try c.decodeIfPresent(String.self, forKey: .activeTheme)
+        self.terminalFont = try c.decodeIfPresent(TerminalFontPref.self, forKey: .terminalFont)
+        self.uiScale = try c.decodeIfPresent(UIScale.self, forKey: .uiScale) ?? .medium
     }
 }
 
