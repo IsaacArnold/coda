@@ -78,6 +78,23 @@ final class TerminalSurface: NSViewController {
         terminal?.containsClick(event) ?? false
     }
 
+    /// Last classified agent state, reused by `currentAgentState()` while the terminal is
+    /// idle. `nil` until the first classification.
+    private var cachedAgentState: AgentState?
+
+    /// Agent state for this surface's terminal, recomputed only when the PTY produced new
+    /// output since the last call — otherwise the previously classified state is returned.
+    /// This keeps the ~1s agent-state poll from snapshotting every pane's full grid on the
+    /// main thread every tick (background panes included), which showed up as periodic
+    /// UI stutter; an unchanged terminal can't have changed state.
+    func currentAgentState() -> AgentState {
+        let changed = terminal?.consumeOutputSinceLastPoll() ?? false
+        if changed || cachedAgentState == nil {
+            cachedAgentState = agentState(fromOutput: outputSnapshot())
+        }
+        return cachedAgentState ?? .idle
+    }
+
     /// Snapshot of the *visible* terminal text, for heuristic agent-state classification.
     /// Uses `getLine` (screen-relative, applies the scroll offset) — NOT `getText` with
     /// absolute rows, which would read the top of scrollback, not the live status line.

@@ -1078,7 +1078,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let list = surfaces.existingSurfaces(for: wtID) else { continue }
             var perSurface: [AgentState] = []
             for entry in list.entries {
-                let paneStates = entry.handle.allPanes.map { agentState(fromOutput: $0.outputSnapshot()) }
+                let paneStates = entry.handle.allPanes.map { $0.currentAgentState() }
                 let surfaceState = rollup(paneStates)
                 states[surfaceKey(wtID, entry.surface.id)] = surfaceState
                 perSurface.append(surfaceState)

@@ -24,6 +24,25 @@ final class ClickableTerminalView: LocalProcessTerminalView {
         }
     }
 
+    /// True when the PTY has delivered output since the agent-state poll last consumed it.
+    /// Starts true so the first poll classifies every pane. Touched only on the main thread
+    /// — SwiftTerm's `LocalProcess` posts `dataReceived` on `DispatchQueue.main` — so a plain
+    /// Bool is race-free against the poll.
+    private var outputSinceLastPoll = true
+
+    /// Records that the shell produced output, then feeds it to the terminal as usual. The
+    /// agent-state poll uses this to skip re-snapshotting panes whose grid hasn't changed.
+    override func dataReceived(slice: ArraySlice<UInt8>) {
+        outputSinceLastPoll = true
+        super.dataReceived(slice: slice)
+    }
+
+    /// Whether new output has arrived since the previous call; resets the flag.
+    func consumeOutputSinceLastPoll() -> Bool {
+        defer { outputSinceLastPoll = false }
+        return outputSinceLastPoll
+    }
+
     /// Give a focused terminal first crack at ⌘-combos it owns (clear, line-kill) before
     /// the main menu's key-equivalents see them — otherwise e.g. ⌘⌫ would hit the menu's
     /// "Archive Worktree". AppKit consults a view's `performKeyEquivalent` ahead of the
