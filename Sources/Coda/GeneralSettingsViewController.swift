@@ -115,20 +115,31 @@ final class GeneralSettingsViewController: NSViewController {
     // through the chain regardless.
     override var acceptsFirstResponder: Bool { true }
 
+    // The system monospaced font (`.monospacedSystemFont`, the default when the user hasn't
+    // picked one) is an *abstract* font whose name is `.AppleSystemUIFontMonospaced-Regular`.
+    // `NSFontManager.convert(_:)` cannot convert FROM such a font — it returns the system font
+    // regardless of what the user picks in the panel, so the selection never takes. Seed the
+    // panel (and the conversion) with a concrete equivalent. Menlo ships on every macOS.
+    private func fontPanelBase() -> NSFont {
+        guard terminalFont.fontName.hasPrefix(".") else { return terminalFont }
+        return NSFont(name: "Menlo", size: terminalFont.pointSize) ?? terminalFont
+    }
+
     @objc private func chooseFont() {
         // Anchor delivery to the responder chain: key window + first responder = self.
         view.window?.makeKeyAndOrderFront(nil)
         view.window?.makeFirstResponder(self)
         NSFontManager.shared.target = self
         NSFontManager.shared.action = #selector(changeFont(_:))
-        NSFontManager.shared.setSelectedFont(terminalFont, isMultiple: false)
+        NSFontManager.shared.setSelectedFont(fontPanelBase(), isMultiple: false)
         NSFontManager.shared.orderFrontFontPanel(self)
     }
 
     /// Sent by NSFontManager (via the responder chain) when the user picks a font.
     @objc func changeFont(_ sender: NSFontManager?) {
         guard let sender else { return }
-        terminalFont = sender.convert(terminalFont)
+        // Convert from a concrete base (see `fontPanelBase`), not the abstract system font.
+        terminalFont = sender.convert(fontPanelBase())
         updateFontLabel()
         onChangeFont?(TerminalFontPref(name: terminalFont.fontName, size: Double(terminalFont.pointSize)))
     }
