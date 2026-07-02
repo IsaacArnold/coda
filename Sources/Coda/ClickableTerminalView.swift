@@ -43,6 +43,91 @@ final class ClickableTerminalView: LocalProcessTerminalView {
         return outputSinceLastPoll
     }
 
+    // MARK: - Drag & drop (iTerm-style file/text/URL drop)
+
+    /// True while a valid drag hovers this pane; toggles the drop-highlight overlay.
+    private var isDragHighlighted = false {
+        didSet {
+            guard isDragHighlighted != oldValue else { return }
+            if isDragHighlighted, dropHighlight.superview == nil {
+                dropHighlight.frame = bounds
+                addSubview(dropHighlight)
+            }
+            dropHighlight.isHidden = !isDragHighlighted
+        }
+    }
+
+    /// Transparent overlay drawn on top of the terminal to show the drop target. Used
+    /// because SwiftTerm's `TerminalView.draw(_:)` is `public` (not `open`) and so can't
+    /// be overridden from this module.
+    private lazy var dropHighlight: DropHighlightOverlay = {
+        let v = DropHighlightOverlay(frame: bounds)
+        v.autoresizingMask = [.width, .height]
+        v.isHidden = true
+        return v
+    }()
+
+    /// Register the pasteboard types we accept once the view is in a window. Done here
+    /// (rather than in an initializer) to avoid overriding SwiftTerm's init chain;
+    /// re-registering on each window move is harmless.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        registerForDraggedTypes([.fileURL, .URL, .string])
+    }
+
+    /// Pull the insertable string out of a drag's pasteboard, or nil if there's nothing
+    /// we handle. File URLs win; then a non-file URL; then plain text.
+    private func droppedText(_ sender: NSDraggingInfo) -> String? {
+        let pb = sender.draggingPasteboard
+        let fileURLs = (pb.readObjects(forClasses: [NSURL.self],
+                                       options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        var url: URL?
+        if fileURLs.isEmpty,
+           let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
+           let first = urls.first, !first.isFileURL {
+            url = first
+        }
+        let text = pb.string(forType: .string)
+        return TerminalDrop.dropText(fileURLs: fileURLs, text: text, url: url)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard droppedText(sender) != nil else { return [] }
+        isDragHighlighted = true
+        return .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        return droppedText(sender) != nil ? .copy : []
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        isDragHighlighted = false
+    }
+
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        isDragHighlighted = false
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        isDragHighlighted = false
+        guard let text = droppedText(sender) else { return false }
+        sendDroppedText(text)
+        return true
+    }
+
+    /// Send dropped text to the PTY. Mirrors SwiftTerm's own paste: when bracketed-paste
+    /// mode is on, wrap the payload so a multi-line text drop can't auto-run lines.
+    private func sendDroppedText(_ text: String) {
+        if getTerminal().bracketedPasteMode {
+            send(data: EscapeSequences.bracketedPasteStart[0...])
+            send(txt: text)
+            send(data: EscapeSequences.bracketedPasteEnd[0...])
+        } else {
+            send(txt: text)
+        }
+    }
+
     /// Give a focused terminal first crack at ⌘-combos it owns (clear, line-kill) before
     /// the main menu's key-equivalents see them — otherwise e.g. ⌘⌫ would hit the menu's
     /// "Archive Worktree". AppKit consults a view's `performKeyEquivalent` ahead of the
@@ -174,4 +259,17 @@ final class ClickableTerminalView: LocalProcessTerminalView {
         }
         return nil
     }
+}
+
+/// Non-interactive overlay that strokes a focus-ring border while a drag hovers the
+/// terminal. `hitTest` returns nil so it never intercepts the drop or any mouse event.
+private final class DropHighlightOverlay: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        let inset = bounds.insetBy(dx: 1.5, dy: 1.5)
+        let path = NSBezierPath(roundedRect: inset, xRadius: 4, yRadius: 4)
+        path.lineWidth = 3
+        NSColor.keyboardFocusIndicatorColor.setStroke()
+        path.stroke()
+    }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
