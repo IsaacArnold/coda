@@ -12,15 +12,21 @@ final class GeneralSettingsViewController: NSViewController {
 
     private let fontValueLabel = NSTextField(labelWithString: "")
     private var terminalFont: NSFont
+    private var uiScale: UIScale
+    private let sizeStepper = NSStepper()
+    private let sizeField = NSTextField()
+    private let scalePopup = NSPopUpButton()
 
     var onChangeEditor: ((Editor) -> Void)?
     var onChangeFont: ((TerminalFontPref) -> Void)?
+    var onChangeUIScale: ((UIScale) -> Void)?
 
     private static let otherTitle = "Other…"
 
-    init(editor: Editor, terminalFont: NSFont) {
+    init(editor: Editor, terminalFont: NSFont, uiScale: UIScale) {
         self.editor = editor
         self.terminalFont = terminalFont
+        self.uiScale = uiScale
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -46,14 +52,50 @@ final class GeneralSettingsViewController: NSViewController {
         fontTitle.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
         updateFontLabel()
         let changeFontButton = NSButton(title: "Change…", target: self, action: #selector(chooseFont))
-        let fontRow = NSStackView(views: [NSTextField(labelWithString: "Font:"), fontValueLabel, changeFontButton])
+
+        // Terminal size, decoupled from the font panel's preset list (which jumps 14→18).
+        sizeStepper.minValue = 8
+        sizeStepper.maxValue = 48
+        sizeStepper.increment = 1
+        sizeStepper.valueWraps = false
+        sizeStepper.integerValue = Int(terminalFont.pointSize.rounded())
+        sizeStepper.target = self
+        sizeStepper.action = #selector(sizeStepperChanged)
+        sizeField.stringValue = "\(Int(terminalFont.pointSize.rounded()))"
+        sizeField.alignment = .right
+        sizeField.target = self
+        sizeField.action = #selector(sizeFieldChanged)
+        sizeField.widthAnchor.constraint(equalToConstant: 44).isActive = true
+
+        let fontRow = NSStackView(views: [
+            NSTextField(labelWithString: "Font:"), fontValueLabel, changeFontButton,
+            NSTextField(labelWithString: "Size:"), sizeField, sizeStepper,
+        ])
         fontRow.orientation = .horizontal
         fontRow.spacing = 8
         let fontHint = NSTextField(labelWithString: "Powerline / Nerd-Font glyphs render only if the chosen font includes them.")
         fontHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         fontHint.textColor = .secondaryLabelColor
 
-        let stack = NSStackView(views: [title, row, hint, fontTitle, fontRow, fontHint])
+        // Interface (chrome) size — four presets, applied live.
+        let scaleTitle = NSTextField(labelWithString: "Interface size")
+        scaleTitle.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        for scale in UIScale.allCases { scalePopup.addItem(withTitle: scale.displayName) }
+        scalePopup.selectItem(at: UIScale.allCases.firstIndex(of: uiScale) ?? 1)
+        scalePopup.target = self
+        scalePopup.action = #selector(scaleChanged)
+        let scaleRow = NSStackView(views: [NSTextField(labelWithString: "Size:"), scalePopup])
+        scaleRow.orientation = .horizontal
+        scaleRow.spacing = 8
+        let scaleHint = NSTextField(labelWithString: "Scales the sidebar, tabs, and labels. Applies immediately.")
+        scaleHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        scaleHint.textColor = .secondaryLabelColor
+
+        let stack = NSStackView(views: [
+            title, row, hint,
+            fontTitle, fontRow, fontHint,
+            scaleTitle, scaleRow, scaleHint,
+        ])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
@@ -141,7 +183,34 @@ final class GeneralSettingsViewController: NSViewController {
         // Convert from a concrete base (see `fontPanelBase`), not the abstract system font.
         terminalFont = sender.convert(fontPanelBase())
         updateFontLabel()
+        sizeStepper.integerValue = Int(terminalFont.pointSize.rounded())
+        sizeField.stringValue = "\(Int(terminalFont.pointSize.rounded()))"
         onChangeFont?(TerminalFontPref(name: terminalFont.fontName, size: Double(terminalFont.pointSize)))
+    }
+
+    /// Emit the current font with a new size. Keeps the typeface; only the size changes.
+    private func commitSize(_ newSize: Int) {
+        let clamped = max(8, min(48, newSize))
+        sizeStepper.integerValue = clamped
+        sizeField.stringValue = "\(clamped)"
+        if let resized = NSFont(name: terminalFont.fontName, size: CGFloat(clamped)) {
+            terminalFont = resized
+        }
+        updateFontLabel()
+        onChangeFont?(TerminalFontPref(name: terminalFont.fontName, size: Double(clamped)))
+    }
+
+    @objc private func sizeStepperChanged() { commitSize(sizeStepper.integerValue) }
+
+    @objc private func sizeFieldChanged() {
+        commitSize(Int(sizeField.stringValue) ?? Int(terminalFont.pointSize.rounded()))
+    }
+
+    @objc private func scaleChanged() {
+        let idx = scalePopup.indexOfSelectedItem
+        guard UIScale.allCases.indices.contains(idx) else { return }
+        uiScale = UIScale.allCases[idx]
+        onChangeUIScale?(uiScale)
     }
 
     private func pickOtherApp() {
