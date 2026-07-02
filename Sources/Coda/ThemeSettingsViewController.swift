@@ -38,6 +38,7 @@ final class ThemeSettingsViewController: NSViewController {
         tableView.backgroundColor = .clear
         scroll.documentView = tableView
         scroll.hasVerticalScroller = true
+        scroll.scrollerStyle = .overlay
         scroll.drawsBackground = false
         scroll.translatesAutoresizingMaskIntoConstraints = false
 
