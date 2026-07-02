@@ -24,4 +24,16 @@ public enum TerminalDrop {
         guard scalars.count == 1, let s = scalars.first, s.value < 128 else { return false }
         return !safeASCII.contains(ch)
     }
+
+    /// Decide what to insert for a drop. Priority: file URLs (escaped absolute paths,
+    /// space-joined) → non-file URL (`absoluteString`) → plain text (verbatim). Returns
+    /// nil when nothing is insertable.
+    public static func dropText(fileURLs: [URL], text: String?, url: URL?) -> String? {
+        if !fileURLs.isEmpty {
+            return fileURLs.map { shellEscape($0.path) }.joined(separator: " ")
+        }
+        if let url { return url.absoluteString }
+        if let text, !text.isEmpty { return text }
+        return nil
+    }
 }
