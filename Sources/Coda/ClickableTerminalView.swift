@@ -56,7 +56,19 @@ final class ClickableTerminalView: LocalProcessTerminalView {
         switch terminalKeyAction(charactersIgnoringModifiers: event.charactersIgnoringModifiers ?? "",
                                  command: mods.contains(.command), shift: mods.contains(.shift)) {
         case .clear:
-            send(txt: "\u{0c}")          // Ctrl-L: the shell clears the screen and redraws
+            // Clear the emulator directly so it's instant and independent of shell state.
+            // Ctrl-L alone only redraws the viewport once the shell is next idle (so it
+            // lags behind a busy shell) and never touches scrollback (so old output
+            // survives a scroll-up). \e[3J trims scrollback, \e[2J clears the screen,
+            // \e[H homes the cursor.
+            feed(text: "\u{1b}[3J\u{1b}[2J\u{1b}[H")
+            // \e[3J trims scrollback, but SwiftTerm's feed() path never refreshes the
+            // scroller — so the scroll bar lingers as if the history were still there.
+            // Re-asserting the current scrollback size forces updateScroller() to recompute
+            // canScroll/knob; it's a no-op on buffer contents (same size => nothing trimmed).
+            changeScrollback(getTerminal().options.scrollback)
+            // Nudge the shell to reprint its prompt on the now-empty screen.
+            send(txt: "\u{0c}")
             return true
         case .deleteToLineStart:
             send(txt: "\u{15}")          // Ctrl-U: kill input line back to the prompt
