@@ -208,12 +208,12 @@ final class ClickableTerminalView: LocalProcessTerminalView {
             guard rr >= 0, rr < rows else { continue }
             let line = term.getText(start: Position(col: 0, row: rr),
                                     end: Position(col: cols - 1, row: rr))
-            if let (path, lineNo) = resolvePath(in: line) {
-                onOpenFile?(path, lineNo)
+            if let url = firstWebURL(in: line) {
+                NSWorkspace.shared.open(url)
                 return true
             }
-            if let url = firstURL(in: line) {
-                NSWorkspace.shared.open(url)
+            if let (path, lineNo) = resolvePath(in: line) {
+                onOpenFile?(path, lineNo)
                 return true
             }
         }
@@ -257,15 +257,6 @@ final class ClickableTerminalView: LocalProcessTerminalView {
         return nil
     }
 
-    private func firstURL(in line: String) -> URL? {
-        for raw in line.split(whereSeparator: { $0 == " " || $0 == "\t" }) {
-            let token = raw.trimmingCharacters(in: CharacterSet(charactersIn: "\"'(),[]{}<>"))
-            if token.hasPrefix("http://") || token.hasPrefix("https://"), let url = URL(string: token) {
-                return url
-            }
-        }
-        return nil
-    }
 }
 
 /// Non-interactive overlay that strokes a focus-ring border while a drag hovers the
