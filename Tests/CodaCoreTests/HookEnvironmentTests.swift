@@ -2,7 +2,7 @@ import XCTest
 @testable import CodaCore
 
 final class HookEnvironmentTests: XCTestCase {
-    func testInjectsTheThreeKeys() {
+    func testSeedsTheThreeKeys() {
         let env = hookEnvironment(base: ["PATH": "/usr/bin"],
                                   socketPath: "/tmp/x.sock",
                                   worktreeID: "wt1", surfaceID: "s1")

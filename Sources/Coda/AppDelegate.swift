@@ -107,7 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     /// Start the Claude Code hook socket server before any surface exists, so every PTY
-    /// spawned afterwards can be handed a live `socketPath` to inject. `isKnownSurface` is
+    /// spawned afterwards can be handed a live `socketPath` to seed. `isKnownSurface` is
     /// invoked on a background thread (the server's read queue) — it reads the lock-protected
     /// `surfaceAllowlistSnapshot`, never the main-thread-owned `surfaces` registry.
     private func startHookServer() {

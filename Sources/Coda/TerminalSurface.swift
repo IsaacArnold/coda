@@ -126,7 +126,7 @@ final class TerminalSurface: NSViewController {
         let args = terminalShellArgs(workingDirectory: workingDirectory,
                                      setupScript: setupScript,
                                      command: command)
-        // Inject the CODA_* hook-correlation vars only when we actually have a socket +
+        // Seed the CODA_* hook-correlation vars only when we actually have a socket +
         // ids (a fully wired-up surface); otherwise pass nil so the shell inherits the
         // app's own environment unmodified, same as before this surface existed.
         var envArray: [String]? = nil

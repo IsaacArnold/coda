@@ -12,8 +12,8 @@ first item (the hook foundation) in detail — including its security requiremen
 
 Two references shaped the design, both confirmed against Supacode's shipping,
 open-source implementation:
-- Correlation by **env-var injection at PTY spawn**, not `cwd`/`session_id` scraping
-  (Supacode injects `SUPACODE_SOCKET_PATH`/`SUPACODE_WORKTREE_ID`/… into every terminal;
+- Correlation by **env-var seeding at PTY spawn**, not `cwd`/`session_id` scraping
+  (Supacode seeds `SUPACODE_SOCKET_PATH`/`SUPACODE_WORKTREE_ID`/… into every terminal;
   the hook process inherits them and self-identifies).
 - Transport over a **Unix domain socket**, self-noop when the env is absent
   ("if any are missing it returns immediately").
@@ -43,7 +43,7 @@ land in parallel or after. This spec covers **2a + 2b**. 2c gets its own spec.
 
 ### The mechanism, end to end
 
-1. **Spawn-time env injection.** When Coda starts a surface's PTY it injects three vars into
+1. **Spawn-time env seeding.** When Coda starts a surface's PTY it seeds three vars into
    the shell environment:
    - `CODA_SOCKET_PATH` — absolute path to Coda's Unix domain socket.
    - `CODA_WORKTREE_ID` — the worktree id already used as the badge key.
@@ -98,7 +98,7 @@ containing spaces/newlines is safe (JSON-escaped). The forwarder emits:
 `{"hook_event_name":"…","message":"…"?, "transcript_path":"…"?}` — it copies `message`
 and `transcript_path` straight from the stdin payload; it does **not** read the transcript
 itself (that stays in Coda — Security §5). Line-framed, bounded (Security §4); IDs are the
-injected env values.
+seeded env values.
 
 ### Worked example — three channels (env ⊕ stdin → socket)
 
@@ -218,14 +218,14 @@ glue in `Coda`).
 - **`lastAssistantText(fromTranscript:)`** — pure parse of transcript JSONL text → the last
   `type:"assistant"` record's concatenated `text` blocks. The bounded *reading* of the file
   is Coda's job; the parsing is pure and tested here.
-- **Env-injection helper** — build the `[String:String]` (inherited env + the three
+- **Env-seeding helper** — build the `[String:String]` (inherited env + the three
   `CODA_*` keys) for a given worktree/surface. Pure, testable.
 
 ### `Sources/Coda/` (AppKit / platform glue)
 - **`AgentHookSocketServer`** — creates/permission-checks the Unix socket (Security §2),
   accepts connections, feeds bytes to the `CodaCore` parser, applies the allowlist
   (Security §3), and dispatches state updates onto the main thread into `agentStates`.
-- **`TerminalSurface.swift:122`** — pass the injected environment instead of `nil`.
+- **`TerminalSurface.swift:122`** — pass the seeded environment instead of `nil`.
 - **Hook installer** — writes/removes the single self-noop hook in `~/.claude/settings.json`
   with consent (Security §5–6); the hook command targets the signed in-bundle forwarder.
 - **`AppDelegate`** — own the socket server's lifecycle; retire/downgrade the 1.2s poll;
@@ -235,7 +235,7 @@ glue in `Coda`).
 - Parser: valid busy flag, valid event+JSON, oversized line (rejected), unknown
   `hook_event_name` (rejected), non-UTF-8 / partial line, missing fields.
 - Event→state mapping: each event yields the expected `AgentState`.
-- Env-injection helper: the three keys present with correct values; inherited env preserved.
+- Env-seeding helper: the three keys present with correct values; inherited env preserved.
 
 ---
 

@@ -4,7 +4,7 @@
 
 **Goal:** Replace the scrollback-scraping agent-state heuristic with authoritative badges driven by Claude Code lifecycle hooks over a Unix domain socket, and add opt-in macOS notifications on those transitions.
 
-**Architecture:** Coda injects `CODA_SOCKET_PATH`/`CODA_WORKTREE_ID`/`CODA_SURFACE_ID` into every terminal's environment at PTY spawn. A single self-noop hook registered once in `~/.claude/settings.json` runs a signed, in-bundle forwarder that pipes each hook event to the socket, tagged with those ids. Coda's socket server validates and maps events to the existing `agentStates` dictionary, so the sidebar/notch/tab-bar light up from real events instead of a poll. Notifications fire from the same transitions via `UNUserNotificationCenter`.
+**Architecture:** Coda seeds `CODA_SOCKET_PATH`/`CODA_WORKTREE_ID`/`CODA_SURFACE_ID` into every terminal's environment at PTY spawn. A single self-noop hook registered once in `~/.claude/settings.json` runs a signed, in-bundle forwarder that pipes each hook event to the socket, tagged with those ids. Coda's socket server validates and maps events to the existing `agentStates` dictionary, so the sidebar/notch/tab-bar light up from real events instead of a poll. Notifications fire from the same transitions via `UNUserNotificationCenter`.
 
 **Tech Stack:** Swift 6 toolchain (language mode v5), SwiftPM, AppKit, SwiftTerm, Darwin POSIX sockets, `UNUserNotificationCenter`. Pure logic in `CodaCore` (unit-tested with XCTest); AppKit/socket glue in `Coda`; a new `CodaHook` executable target for the forwarder.
 
@@ -27,7 +27,7 @@
 
 ### Task 1: Hook environment builder (`CodaCore`, pure)
 
-Builds the environment dictionary injected at PTY spawn, and centralises the env-var names so the forwarder and the injector agree.
+Builds the environment dictionary seeded at PTY spawn, and centralises the env-var names so the forwarder and the seeder agree.
 
 **Files:**
 - Create: `Sources/CodaCore/HookEnvironment.swift`
@@ -45,7 +45,7 @@ import XCTest
 @testable import CodaCore
 
 final class HookEnvironmentTests: XCTestCase {
-    func testInjectsTheThreeKeys() {
+    func testSeedsTheThreeKeys() {
         let env = hookEnvironment(base: ["PATH": "/usr/bin"],
                                   socketPath: "/tmp/x.sock",
                                   worktreeID: "wt1", surfaceID: "s1")
@@ -73,9 +73,9 @@ Expected: FAIL — `cannot find 'hookEnvironment' in scope`.
 ```swift
 import Foundation
 
-/// Environment-variable names Coda injects into every terminal's PTY so a Claude Code
+/// Environment-variable names Coda seeds into every terminal's PTY so a Claude Code
 /// hook (a child of that shell) can identify itself and reach Coda's socket. Shared by the
-/// injector (Coda) and the forwarder (CodaHook) so the two never drift.
+/// seeder (Coda) and the forwarder (CodaHook) so the two never drift.
 public enum HookEnv {
     public static let socketPath = "CODA_SOCKET_PATH"
     public static let worktreeID = "CODA_WORKTREE_ID"
@@ -576,7 +576,7 @@ git commit -m "feat(hook): signed in-bundle forwarder (stdin -> unix socket)"
 
 ### Task 5: Socket server (`Coda` glue)
 
-Creates and permission-checks the Unix socket, accepts connections, decodes each line via `CodaCore`, and hands validated events to a callback on the main thread. Validation against live surface ids (Security §3) is injected as a closure so the server stays testable-by-inspection and AppDelegate owns the source of truth.
+Creates and permission-checks the Unix socket, accepts connections, decodes each line via `CodaCore`, and hands validated events to a callback on the main thread. Validation against live surface ids (Security §3) is supplied as a closure so the server stays testable-by-inspection and AppDelegate owns the source of truth.
 
 **Files:**
 - Create: `Sources/Coda/AgentHookSocketServer.swift`
@@ -702,18 +702,18 @@ git commit -m "feat(app): unix-socket hook server with perms check + allowlist"
 
 ---
 
-### Task 6: Wire injection, server lifecycle, and retire the poll (`Coda` glue)
+### Task 6: Wire env seeding, server lifecycle, and retire the poll (`Coda` glue)
 
 Thread the socket path + ids into PTY spawn, start the server, route events into the existing `agentStates` update path, and downgrade the heuristic poll to a fallback.
 
 **Files:**
-- Modify: `Sources/Coda/TerminalSurface.swift:25-31,114-129` (accept ids, inject env)
+- Modify: `Sources/Coda/TerminalSurface.swift:25-31,114-129` (accept ids, seed env)
 - Modify: `Sources/Coda/AppDelegate.swift` (server lifecycle, event handler, `makePane`, poll interval)
 
 **Interfaces:**
 - Consumes: `AgentHookSocketServer`, `CodaCore.hookEnvironment`, `CodaCore.agentState(for:)`, `CodaCore.HookEventName`.
 
-- [ ] **Step 1: TerminalSurface accepts ids and injects env**
+- [ ] **Step 1: TerminalSurface accepts ids and seeds env**
 
 In `TerminalSurface`, add stored properties + init params:
 
@@ -739,7 +739,7 @@ In `TerminalSurface`, add stored properties + init params:
     }
 ```
 
-Replace the `environment: nil` spawn at `viewDidLayout` (line ~122) with the injected env (only when we have a socket path + ids; otherwise keep inheriting `nil`). `LocalProcessTerminalView.startProcess(environment:)` takes `[String]?` of `KEY=VALUE` strings, so build that array from the `CodaCore` helper:
+Replace the `environment: nil` spawn at `viewDidLayout` (line ~122) with the seeded env (only when we have a socket path + ids; otherwise keep inheriting `nil`). `LocalProcessTerminalView.startProcess(environment:)` takes `[String]?` of `KEY=VALUE` strings, so build that array from the `CodaCore` helper:
 
 ```swift
         var envArray: [String]? = nil
@@ -869,7 +869,7 @@ In `applicationWillTerminate` (add if absent): `hookServer?.stop()`.
 Run: `swift build --product Coda`
 Expected: `Build complete!`.
 
-- [ ] **Step 8: Manual verify — env injection reaches the shell**
+- [ ] **Step 8: Manual verify — env seeding reaches the shell**
 
 Before wiring the forwarder, confirm the vars actually land in the PTY. Launch Coda
 (`swift run Coda`), open a worktree, and in its terminal run:
@@ -881,7 +881,7 @@ CODA_SOCKET_PATH=/Users/<you>/Library/Application Support/Coda/hooks.sock
 CODA_WORKTREE_ID=<the worktree id>
 CODA_SURFACE_ID=<this surface's id, e.g. s7>
 ```
-If they're missing, the injection in Step 1/2 didn't take (check the `environment:`
+If they're missing, the seeding in Step 1/2 didn't take (check the `environment:`
 parameter type against SwiftTerm) — fix before proceeding. This is the cheap insurance that
 correlation will work; the socket line's first two fields come straight from these.
 
@@ -1128,7 +1128,7 @@ git commit -m "feat(app): opt-in macOS notifications on agent needs-you/done"
 ## Self-review
 
 **Spec coverage:**
-- 2a env injection → Tasks 1, 6. ✅
+- 2a env seeding → Tasks 1, 6. ✅
 - Global self-noop forwarder → Tasks 4 (no-op path), 7 (install). ✅
 - Unix socket transport + perms/ownership → Task 5 (§2). ✅
 - Event→state mapping table → Task 2. ✅

@@ -1,8 +1,8 @@
 import Foundation
 
-/// Environment-variable names Coda injects into every terminal's PTY so a Claude Code
+/// Environment-variable names Coda seeds into every terminal's PTY so a Claude Code
 /// hook (a child of that shell) can identify itself and reach Coda's socket. Shared by the
-/// injector (Coda) and the forwarder (CodaHook) so the two never drift.
+/// seeder (Coda) and the forwarder (CodaHook) so the two never drift.
 public enum HookEnv {
     public static let socketPath = "CODA_SOCKET_PATH"
     public static let worktreeID = "CODA_WORKTREE_ID"

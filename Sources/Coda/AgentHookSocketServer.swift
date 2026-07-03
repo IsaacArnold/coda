@@ -12,7 +12,7 @@ final class AgentHookSocketServer {
     // `acceptLoop()` blocks forever in `accept()`, so it gets its own dedicated queue. Reads are
     // dispatched onto a *different, serial* queue so a blocked/slow client can never starve
     // the accept loop. The queue is serial (not concurrent) so `readClient` — and therefore the
-    // injected `isKnownSurface` closure — is always invoked one-at-a-time, never from multiple
+    // supplied `isKnownSurface` closure — is always invoked one-at-a-time, never from multiple
     // threads at once; that keeps no undocumented thread-safety contract on the closure's caller.
     private let acceptQueue = DispatchQueue(label: "coda.hook.socket.accept")
     private let readQueue = DispatchQueue(label: "coda.hook.socket.read")
