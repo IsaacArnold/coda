@@ -73,6 +73,28 @@ final class PreferencesTests: XCTestCase {
         let back = try JSONDecoder().decode(Preferences.self, from: JSONEncoder().encode(prefs))
         XCTAssertTrue(back.declinedHookInstall)
     }
+
+    func testNotificationTogglesDefaultTrue() {
+        XCTAssertTrue(Preferences().notifyOnNeedsYou)
+        XCTAssertTrue(Preferences().notifyOnDone)
+    }
+
+    func testNotificationTogglesDefaultTrueForOldPrefs() throws {
+        // Prefs written before notifications carried neither key.
+        let json = #"{"defaultEditor":{"name":"Visual Studio Code","bundleID":"com.microsoft.VSCode","urlScheme":"vscode"}}"#
+        let prefs = try JSONDecoder().decode(Preferences.self, from: Data(json.utf8))
+        XCTAssertTrue(prefs.notifyOnNeedsYou)
+        XCTAssertTrue(prefs.notifyOnDone)
+    }
+
+    func testNotificationTogglesRoundTrip() throws {
+        var prefs = Preferences()
+        prefs.notifyOnNeedsYou = false
+        prefs.notifyOnDone = false
+        let back = try JSONDecoder().decode(Preferences.self, from: JSONEncoder().encode(prefs))
+        XCTAssertFalse(back.notifyOnNeedsYou)
+        XCTAssertFalse(back.notifyOnDone)
+    }
 }
 
 final class KnownEditorsTests: XCTestCase {

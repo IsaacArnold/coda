@@ -1,7 +1,8 @@
 import AppKit
+import UserNotifications
 import CodaCore
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private var window: NSWindow!
     private var splitVC: NSSplitViewController!
     private let sidebar = SidebarController()
@@ -66,6 +67,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         seedBranchesAndWatchers()
         startHookServer()
         promptForHookInstallIfNeeded()
+        UNUserNotificationCenter.current().delegate = self
+        AgentNotifier.requestAuthorization()
         refreshSidebar(select: allDisplayWorktrees().first?.id)
         applyChromeTheme()
         applyUIMetrics()
@@ -378,7 +381,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 terminalFont: resolvedTerminalFont(),
                 onChangeFont: { [weak self] pref in self?.setTerminalFont(pref) },
                 uiScale: preferences.uiScale,
-                onChangeUIScale: { [weak self] scale in self?.setUIScale(scale) })
+                onChangeUIScale: { [weak self] scale in self?.setUIScale(scale) },
+                notifyOnNeedsYou: preferences.notifyOnNeedsYou,
+                onChangeNotifyOnNeedsYou: { [weak self] on in self?.setNotifyOnNeedsYou(on) },
+                notifyOnDone: preferences.notifyOnDone,
+                onChangeNotifyOnDone: { [weak self] on in self?.setNotifyOnDone(on) })
             let win = NSWindow(contentViewController: tab)
             win.title = "Settings"
             win.styleMask = [.titled, .closable]
@@ -929,6 +936,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyUIMetrics()
     }
 
+    /// Persist the "notify when an agent needs you" toggle.
+    private func setNotifyOnNeedsYou(_ on: Bool) {
+        preferences.notifyOnNeedsYou = on
+        do { try prefsStore.save(preferences) } catch { presentError(error) }
+    }
+
+    /// Persist the "notify when an agent finishes" toggle.
+    private func setNotifyOnDone(_ on: Bool) {
+        preferences.notifyOnDone = on
+        do { try prefsStore.save(preferences) } catch { presentError(error) }
+    }
+
     /// Persist a new terminal font and re-apply it to every live surface.
     private func setTerminalFont(_ pref: TerminalFontPref) {
         preferences.terminalFont = pref
@@ -1296,9 +1315,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return lastAssistantText(fromTranscript: body)
     }
 
-    /// Placeholder for Task 9 (notifications): currently a no-op so the event path compiles
-    /// and runs end-to-end. Task 9 replaces this with the real "post a notification" logic.
-    private func maybeNotify(worktreeID: String, state: AgentState, body: String?) {}
+    /// Post a macOS notification for a needs-you/done transition, gated by the two independent
+    /// Settings toggles. `body` is untrusted (repo/web content the agent read) and is handed to
+    /// `AgentNotifier` for delivery as a plain `UNMutableNotificationContent.body` data field
+    /// only — never built into a shell/AppleScript string (Security §1).
+    private func maybeNotify(worktreeID: String, state: AgentState, body: String?) {
+        let allowed = (state == .needsYou && preferences.notifyOnNeedsYou)
+                   || (state == .done && preferences.notifyOnDone)
+        guard allowed else { return }
+        let title = displayWorktree(id: worktreeID)?.title ?? "Coda"
+        AgentNotifier.notify(worktreeID: worktreeID, title: title, state: state, body: body)
+    }
+
+    /// Bring a worktree to the foreground, reusing the same select+sidebar-highlight path
+    /// every other programmatic "jump to worktree" call site uses (e.g. after creating a
+    /// worktree or removing one), plus bringing the app/window forward since this is invoked
+    /// from a notification click while Coda may not be the active app.
+    private func focus(worktreeID: String) {
+        guard let wt = displayWorktree(id: worktreeID) else { return }
+        refreshSidebar(select: worktreeID)
+        select(wt)
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // MARK: - UNUserNotificationCenterDelegate
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                 didReceive response: UNNotificationResponse,
+                                 withCompletionHandler completionHandler: @escaping () -> Void) {
+        if let worktreeID = response.notification.request.content.userInfo["worktreeID"] as? String {
+            focus(worktreeID: worktreeID)
+        }
+        completionHandler()
+    }
 
     private func updateNotch() {
         let now = Date()

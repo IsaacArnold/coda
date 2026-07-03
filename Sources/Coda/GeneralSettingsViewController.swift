@@ -17,16 +17,28 @@ final class GeneralSettingsViewController: NSViewController {
     private let sizeField = NSTextField()
     private let scalePopup = NSPopUpButton()
 
+    private var notifyOnNeedsYou: Bool
+    private var notifyOnDone: Bool
+    private let notifyNeedsYouCheckbox = NSButton(checkboxWithTitle: "Notify when an agent needs you",
+                                                  target: nil, action: nil)
+    private let notifyDoneCheckbox = NSButton(checkboxWithTitle: "Notify when an agent finishes",
+                                              target: nil, action: nil)
+
     var onChangeEditor: ((Editor) -> Void)?
     var onChangeFont: ((TerminalFontPref) -> Void)?
     var onChangeUIScale: ((UIScale) -> Void)?
+    var onChangeNotifyOnNeedsYou: ((Bool) -> Void)?
+    var onChangeNotifyOnDone: ((Bool) -> Void)?
 
     private static let otherTitle = "Other…"
 
-    init(editor: Editor, terminalFont: NSFont, uiScale: UIScale) {
+    init(editor: Editor, terminalFont: NSFont, uiScale: UIScale,
+         notifyOnNeedsYou: Bool, notifyOnDone: Bool) {
         self.editor = editor
         self.terminalFont = terminalFont
         self.uiScale = uiScale
+        self.notifyOnNeedsYou = notifyOnNeedsYou
+        self.notifyOnDone = notifyOnDone
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -91,10 +103,25 @@ final class GeneralSettingsViewController: NSViewController {
         scaleHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         scaleHint.textColor = .secondaryLabelColor
 
+        // Notifications — opt-in per event, independently toggleable.
+        let notifyTitle = NSTextField(labelWithString: "Notifications")
+        notifyTitle.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        notifyNeedsYouCheckbox.state = notifyOnNeedsYou ? .on : .off
+        notifyNeedsYouCheckbox.target = self
+        notifyNeedsYouCheckbox.action = #selector(notifyNeedsYouChanged)
+        notifyDoneCheckbox.state = notifyOnDone ? .on : .off
+        notifyDoneCheckbox.target = self
+        notifyDoneCheckbox.action = #selector(notifyDoneChanged)
+        let notifyStack = NSStackView(views: [notifyNeedsYouCheckbox, notifyDoneCheckbox])
+        notifyStack.orientation = .vertical
+        notifyStack.alignment = .leading
+        notifyStack.spacing = 6
+
         let stack = NSStackView(views: [
             title, row, hint,
             fontTitle, fontRow, fontHint,
             scaleTitle, scaleRow, scaleHint,
+            notifyTitle, notifyStack,
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -211,6 +238,16 @@ final class GeneralSettingsViewController: NSViewController {
         guard UIScale.allCases.indices.contains(idx) else { return }
         uiScale = UIScale.allCases[idx]
         onChangeUIScale?(uiScale)
+    }
+
+    @objc private func notifyNeedsYouChanged() {
+        notifyOnNeedsYou = notifyNeedsYouCheckbox.state == .on
+        onChangeNotifyOnNeedsYou?(notifyOnNeedsYou)
+    }
+
+    @objc private func notifyDoneChanged() {
+        notifyOnDone = notifyDoneCheckbox.state == .on
+        onChangeNotifyOnDone?(notifyOnDone)
     }
 
     private func pickOtherApp() {
