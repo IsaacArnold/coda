@@ -65,6 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wireSidebar()
         seedBranchesAndWatchers()
         startHookServer()
+        promptForHookInstallIfNeeded()
         refreshSidebar(select: allDisplayWorktrees().first?.id)
         applyChromeTheme()
         applyUIMetrics()
@@ -109,6 +110,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onEvent: { [weak self] event in self?.handleHookEvent(event) })
         try? server.start()
         hookServer = server
+    }
+
+    /// One-time consent prompt (Security §6): only shown when the hook isn't already
+    /// installed AND the user hasn't previously declined. States exactly what changes
+    /// (a single hook entry added to ~/.claude/settings.json) and how to remove it.
+    private func promptForHookInstallIfNeeded() {
+        guard !HookInstaller.isInstalled(), !preferences.declinedHookInstall else { return }
+        let alert = NSAlert()
+        alert.messageText = "Enable live agent status?"
+        alert.informativeText = """
+        Coda can show accurate 🟡/🔴/🟢 badges and notifications by adding one hook to \
+        ~/.claude/settings.json. It only reports to Coda while a terminal is open here, and \
+        is ignored by any claude you run elsewhere. You can remove it anytime from the menu.
+        """
+        alert.addButton(withTitle: "Enable")
+        alert.addButton(withTitle: "Not now")
+        if alert.runModal() == .alertFirstButtonReturn {
+            try? HookInstaller.install()
+        } else {
+            preferences.declinedHookInstall = true
+            do { try prefsStore.save(preferences) } catch { presentError(error) }
+        }
     }
 
     // MARK: - Thread-safe surface allowlist (read by the hook socket server's background queue)
@@ -972,6 +995,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                    command: .openSettings)
         _ = settingsItem
         appMenu.addItem(.separator())
+        let enableHookItem = NSMenuItem(title: "Enable Agent Status Hook",
+                                        action: #selector(enableAgentStatusHookAction), keyEquivalent: "")
+        enableHookItem.target = self
+        appMenu.addItem(enableHookItem)
+        let removeHookItem = NSMenuItem(title: "Remove Agent Status Hook",
+                                        action: #selector(removeAgentStatusHookAction), keyEquivalent: "")
+        removeHookItem.target = self
+        appMenu.addItem(removeHookItem)
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Coda",
                         action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(withTitle: "Quit Coda",
@@ -1076,6 +1108,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func newWorktreeAction() { newWorktree() }
     @objc private func addRepoAction() { addRepo() }
     @objc private func openSettingsAction() { openSettings() }
+
+    @objc private func enableAgentStatusHookAction() {
+        do {
+            try HookInstaller.install()
+            presentMessage("The agent-status hook is now enabled in ~/.claude/settings.json.")
+        } catch {
+            presentError(error)
+        }
+    }
+
+    @objc private func removeAgentStatusHookAction() {
+        do {
+            try HookInstaller.uninstall()
+            presentMessage("The agent-status hook has been removed from ~/.claude/settings.json.")
+        } catch {
+            presentError(error)
+        }
+    }
 
     @objc private func archiveSelectedAction() {
         guard let wt = selectedWorktree else { presentMessage("Select a worktree first."); return }
