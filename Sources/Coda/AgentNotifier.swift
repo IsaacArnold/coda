@@ -16,6 +16,9 @@ enum AgentNotifier {
 
     /// title = worktree display name, body = the agent's last message (plain text data field).
     static func notify(worktreeID: String, title: String, state: AgentState, body: String?) {
+        // No app bundle (e.g. `swift run`/`swift test`) → `UNUserNotificationCenter.current()`
+        // throws NSInternalInconsistencyException. Skip delivery rather than crash a dev run.
+        guard Bundle.main.bundleIdentifier != nil else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body ?? (state == .needsYou ? "Needs your input" : "Finished")

@@ -29,6 +29,12 @@ let fd = socket(AF_UNIX, SOCK_STREAM, 0)
 guard fd >= 0 else { exit(0) }
 defer { close(fd) }
 
+// A peer that closes between connect and send would otherwise raise SIGPIPE and kill this
+// process (exit 141), which Claude could surface as a "hook failed" line. SO_NOSIGPIPE makes
+// send() fail cleanly with EPIPE instead, so we just fall through and exit(0).
+var on: Int32 = 1
+setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+
 var addr = sockaddr_un()
 addr.sun_family = sa_family_t(AF_UNIX)
 _ = socketPath.withCString { src in

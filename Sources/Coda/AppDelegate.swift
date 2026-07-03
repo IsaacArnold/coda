@@ -67,8 +67,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         seedBranchesAndWatchers()
         startHookServer()
         promptForHookInstallIfNeeded()
-        UNUserNotificationCenter.current().delegate = self
-        AgentNotifier.requestAuthorization()
+        // UNUserNotificationCenter requires a real app bundle (CFBundleIdentifier); under
+        // `swift run`/`swift test` there is none, and just touching `.current()` throws
+        // NSInternalInconsistencyException, crashing the dev workflow. Badges still work
+        // without this — only banner notifications are unavailable when unbundled.
+        if Bundle.main.bundleIdentifier != nil {
+            UNUserNotificationCenter.current().delegate = self
+            AgentNotifier.requestAuthorization()
+        }
         refreshSidebar(select: allDisplayWorktrees().first?.id)
         applyChromeTheme()
         applyUIMetrics()

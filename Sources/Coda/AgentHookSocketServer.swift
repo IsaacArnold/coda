@@ -109,7 +109,19 @@ final class AgentHookSocketServer {
             let fd = currentListenFD()
             guard fd >= 0 else { break }
             let clientFD = accept(fd, nil, nil)
-            if clientFD < 0 { if isRunning() { continue } else { break } }
+            if clientFD < 0 {
+                // Security §4: a persistent accept() error (e.g. EMFILE) must not busy-spin
+                // this loop at 100% CPU. A few ms of backoff keeps it well-behaved without
+                // meaningfully delaying recovery once the error condition clears.
+                if isRunning() { usleep(5_000); continue } else { break }
+            }
+            // Security §4: bound how long a connected-but-silent client can occupy the read
+            // queue. Without this, a client that connects and never sends would block the
+            // SERIAL readQueue forever, wedging every subsequent hook event (and therefore
+            // every badge update) behind it. A timed-out read() returns -1 and the loop below
+            // breaks + closes the fd, same as any other short read.
+            var tv = timeval(tv_sec: 2, tv_usec: 0)
+            setsockopt(clientFD, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
             // Dispatched onto `readQueue`, NOT `acceptQueue` — reads must never share a serial
             // lane with the accept loop, or a pending/slow read would block future accepts.
             readQueue.async { [weak self] in self?.readClient(clientFD) }

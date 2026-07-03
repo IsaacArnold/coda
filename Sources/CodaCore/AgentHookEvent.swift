@@ -70,6 +70,9 @@ public func agentState(for event: HookEventName) -> AgentState? {
 /// Last assistant record's text from transcript JSONL (its `content[]` `text` blocks
 /// joined). Pure; Coda does the bounded file read and passes the tail here (Security §4).
 public func lastAssistantText(fromTranscript jsonl: String) -> String? {
+    // Scans backward and returns the most-recent assistant record that HAS text, so a
+    // trailing text-less/tool-only turn (e.g. a bare tool_use) falls back to the prior
+    // turn's text — intended as the body for the "done" notification.
     for raw in jsonl.split(separator: "\n", omittingEmptySubsequences: true).reversed() {
         guard let data = raw.data(using: .utf8),
               let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
