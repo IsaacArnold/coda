@@ -103,8 +103,13 @@ Once transitions are event-driven and trustworthy:
 - Fire a macOS notification on `→ .needsYou` and on `→ .done`, gated by **two independent
   toggles** (notify-on-needs-you / notify-on-done) per decision #16.
 - Body = `last_assistant_message` (plain text — Security §1). Title = worktree name.
-- Click the banner → focus that worktree (reuse existing focus path). Also honour the
-  existing in-app cue (move-needy-worktree-to-top).
+- Click the banner → focus that worktree (reuse existing focus path).
+
+**No sidebar reorganization (decided 2026-07-03).** Authoritative badges recolor sidebar
+rows in place; the sidebar keeps its repo→worktree grouping and order untouched. A dedicated
+"Active" section / state-based sorting (Supacode-style) is **out of scope** — YAGNI until
+we've lived with reliable badges. Note `DECISIONS.md:16`'s "move-needy-worktree-to-top" cue
+was decided but never built; it stays unbuilt here rather than being resurrected.
 
 ---
 
