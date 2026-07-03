@@ -739,19 +739,7 @@ In `TerminalSurface`, add stored properties + init params:
     }
 ```
 
-Replace the `environment: nil` spawn at `viewDidLayout` (line ~122) with the injected env (only when we have a socket path + ids; otherwise keep inheriting):
-
-```swift
-        let env: [String: String]?
-        if !hookSocketPath.isEmpty, !hookWorktreeID.isEmpty, !hookSurfaceID.isEmpty {
-            env = hookEnvironment(base: ProcessInfo.processInfo.environment,
-                                  socketPath: hookSocketPath,
-                                  worktreeID: hookWorktreeID, surfaceID: hookSurfaceID)
-                .map { "\($0)=\($1)" }.reduce(into: [String: String]()) { _, _ in }  // see note
-        } else { env = nil }
-```
-
-Note: `LocalProcessTerminalView.startProcess(environment:)` takes `[String]?` of `KEY=VALUE` strings. Build that array directly:
+Replace the `environment: nil` spawn at `viewDidLayout` (line ~122) with the injected env (only when we have a socket path + ids; otherwise keep inheriting `nil`). `LocalProcessTerminalView.startProcess(environment:)` takes `[String]?` of `KEY=VALUE` strings, so build that array from the `CodaCore` helper:
 
 ```swift
         var envArray: [String]? = nil
