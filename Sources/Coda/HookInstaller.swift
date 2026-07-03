@@ -24,8 +24,16 @@ enum HookInstaller {
 
     static func install() throws {
         var obj: [String: Any] = [:]
-        if let data = try? Data(contentsOf: settingsURL),
-           let existing = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] { obj = existing }
+        if FileManager.default.fileExists(atPath: settingsURL.path) {
+            let data = try Data(contentsOf: settingsURL)
+            guard let existing = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+                throw NSError(domain: "coda.hook", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "~/.claude/settings.json exists but couldn't be parsed; not modifying it to avoid data loss. Fix or remove the file, then try again.",
+                ])
+            }
+            obj = existing
+        }
         let updated = addCodaHook(to: obj, forwarderPath: forwarderPath)
         try write(updated)
     }
