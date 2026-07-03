@@ -419,7 +419,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 notifyOnNeedsYou: preferences.notifyOnNeedsYou,
                 onChangeNotifyOnNeedsYou: { [weak self] on in self?.setNotifyOnNeedsYou(on) },
                 notifyOnDone: preferences.notifyOnDone,
-                onChangeNotifyOnDone: { [weak self] on in self?.setNotifyOnDone(on) })
+                onChangeNotifyOnDone: { [weak self] on in self?.setNotifyOnDone(on) },
+                shell: preferences.shell,
+                onChangeShell: { [weak self] choice in self?.setShell(choice) })
             let win = NSWindow(contentViewController: tab)
             win.title = "Settings"
             win.styleMask = [.titled, .closable]
@@ -680,7 +682,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private func makePane(in wt: Worktree, command: String, setup: String, surfaceID: String) -> TerminalSurface {
         let pane = TerminalSurface(workingDirectory: wt.worktreePath, command: command, setupScript: setup,
                                    hookWorktreeID: wt.id, hookSurfaceID: surfaceID,
-                                   hookSocketPath: hookServer?.socketPath ?? "")
+                                   hookSocketPath: hookServer?.socketPath ?? "",
+                                   shell: resolvedShell())
         pane.onOpenFile = { [weak self] path, line in self?.openInDefaultEditor(path: path, line: line) }
         pane.onTitleChange = { [weak self] _ in self?.refreshTabBar() }
         pane.applyTheme(activeTheme)
@@ -953,6 +956,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return NSFont(descriptor: descriptor, size: base.pointSize) ?? base
     }
 
+    /// The shell to spawn in new terminals, per the user's preference. `.automatic` uses the
+    /// login shell from `$SHELL`, falling back to the password DB, then to /bin/zsh.
+    private func resolvedShell() -> ResolvedShell {
+        let login = ProcessInfo.processInfo.environment["SHELL"] ?? loginShellFromPasswordDB()
+        return resolveShell(choice: preferences.shell, loginShell: login)
+    }
+
+    /// The current user's login shell from the password database (getpwuid), or nil.
+    /// Fallback for the rare case `$SHELL` is absent (e.g. an unusual launch context).
+    private func loginShellFromPasswordDB() -> String? {
+        guard let pw = getpwuid(getuid()), let shell = pw.pointee.pw_shell else { return nil }
+        let path = String(cString: shell)
+        return path.isEmpty ? nil : path
+    }
+
     /// Current chrome metrics from the saved interface-size preference.
     private var uiMetrics: UIMetrics { UIMetrics(scale: preferences.uiScale) }
 
@@ -970,6 +988,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         preferences.uiScale = scale
         do { try prefsStore.save(preferences) } catch { presentError(error) }
         applyUIMetrics()
+    }
+
+    /// Persist the shell preference. Applies to new terminals only; running shells keep
+    /// their process.
+    private func setShell(_ shell: ShellChoice) {
+        preferences.shell = shell
+        do { try prefsStore.save(preferences) } catch { presentError(error) }
+        // Applies to new terminals only; running shells keep their process.
     }
 
     /// Persist the "notify when an agent needs you" toggle.
