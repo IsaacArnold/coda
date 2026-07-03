@@ -75,19 +75,30 @@ land in parallel or after. This spec covers **2a + 2b**. 2c gets its own spec.
 | Claude Code hook event | Effect |
 |---|---|
 | `UserPromptSubmit`, `PreToolUse`, `PostToolUse` | surface → `.working` |
-| `Notification` (waiting for input/permission) | surface → `.needsYou` |
-| `Stop` | surface → `.done`; carries `last_assistant_message` for the notification body |
+| `Notification` (waiting for input/permission) | surface → `.needsYou`; the payload's own `message` field is the notification body |
+| `Stop` | surface → `.done`; body comes from `transcript_path` (see below) |
 | `SessionStart` / `SessionEnd` | lifecycle: mark a Claude run present/absent (absent → `.idle`) |
 
 Worktree roll-up (`needsYou > working > done > idle`, `rollup(_:)`) is unchanged.
 
-### Wire protocol (Supacode-style, line-framed)
+**Payload reality (verified against the installed hooks reference, `DECISIONS.md:124`):**
+every hook payload carries `session_id`, `transcript_path`, `cwd`, `hook_event_name`.
+There is **no** `last_assistant_message` field on any event — the docs direct you to read
+`transcript_path` for conversation content. `Notification` carries a human-readable
+`message` (used directly as the needs-you body). So:
+- **needs-you body** = the `Notification` payload's `message` (no file read).
+- **done body** = the last assistant text extracted from `transcript_path` (a JSONL; scan
+  from the end for the last `type:"assistant"` record and concatenate its `content[]`
+  `text` blocks). Bounded read (Security §4 extends to it): read only the tail, cap bytes.
 
-- **Busy flag:** `<worktreeID> <surfaceID> 1|0\n` — `1` on working, `0` on stop.
-- **Event:** header line `<worktreeID> <surfaceID> claude\n` then one JSON line
-  `{"hook_event_name":"Stop","last_assistant_message":"…"}\n`.
+### Wire protocol (single physical line)
 
-Line-framed, bounded (Security §4). IDs are the injected env values.
+`<worktreeID> <surfaceID> <json>\n` — the JSON is the rest of the line, so a `message`
+containing spaces/newlines is safe (JSON-escaped). The forwarder emits:
+`{"hook_event_name":"…","message":"…"?, "transcript_path":"…"?}` — it copies `message`
+and `transcript_path` straight from the stdin payload; it does **not** read the transcript
+itself (that stays in Coda — Security §5). Line-framed, bounded (Security §4); IDs are the
+injected env values.
 
 ### Fate of the heuristic
 
@@ -102,7 +113,8 @@ sweep or go away; decided at implementation once the socket path is proven live.
 Once transitions are event-driven and trustworthy:
 - Fire a macOS notification on `→ .needsYou` and on `→ .done`, gated by **two independent
   toggles** (notify-on-needs-you / notify-on-done) per decision #16.
-- Body = `last_assistant_message` (plain text — Security §1). Title = worktree name.
+- Body: needs-you → the `Notification` `message`; done → last assistant text from
+  `transcript_path`. Both are plain text set as a data field (Security §1). Title = worktree name.
 - Click the banner → focus that worktree (reuse existing focus path).
 
 **No sidebar reorganization (decided 2026-07-03).** Authoritative badges recolor sidebar
@@ -135,7 +147,9 @@ and are **mandatory** in the implementation:
    which exists only in that PTY's environment.
 4. **Parser hardening.** Bounded line and JSON length; `hook_event_name` treated as a closed
    enum (unknown → drop); tolerate partial writes and non-UTF-8; rate-limit so a socket
-   flood cannot spin CPU; never crash on malformed input.
+   flood cannot spin CPU; never crash on malformed input. The transcript read (for the done
+   body) is bounded too: read only the file's tail (cap bytes) and treat its content as
+   untrusted (rendered only as a plain-text notification data field, per §1).
 5. **Forwarder is tamper-evident and non-blocking.** Hooks run synchronously inside Claude's
    turn: the forwarder writes with a short timeout and fails silently+fast — it must never
    wedge the agent. It runs on *every* `claude`, so the no-op path (env absent) must be
@@ -154,11 +168,14 @@ Follows the existing pure-core + AppKit-glue split (logic + tests in `CodaCore`;
 glue in `Coda`).
 
 ### `Sources/CodaCore/` (pure, tested)
-- **`AgentHookEvent.swift`** — parse one framed socket message → a typed value
-  (`worktreeID`, `surfaceID`, `hookEventName` enum, optional `lastAssistantMessage`).
-  Enforces the bounds/enum rules of Security §4. No I/O.
+- **`AgentHookEvent.swift`** — encode/decode one socket line → a typed value
+  (`worktreeID`, `surfaceID`, `hookEventName` enum, optional `message`, optional
+  `transcriptPath`). Enforces the bounds/enum rules of Security §4. No I/O.
 - **`AgentHookEvent → AgentState`** — pure mapping per the event table (extends the existing
   `AgentState.swift`; the heuristic classifier stays only as the idle/Claude-open fallback).
+- **`lastAssistantText(fromTranscript:)`** — pure parse of transcript JSONL text → the last
+  `type:"assistant"` record's concatenated `text` blocks. The bounded *reading* of the file
+  is Coda's job; the parsing is pure and tested here.
 - **Env-injection helper** — build the `[String:String]` (inherited env + the three
   `CODA_*` keys) for a given worktree/surface. Pure, testable.
 
@@ -194,7 +211,8 @@ own brainstorm → spec once 2a/2b land.
 ## Non-goals / risks
 - No merge, PR, resume, or CLI work in this milestone (explicitly deferred above).
 - No change to sidebar/notch/worktree-bar **rendering** — only the badge's data source.
-- Main risk is Claude Code hook-payload field names/versions (`last_assistant_message`,
-  event names) drifting; verify against the installed version at implementation
-  (`DECISIONS.md:124` already flags this). The parser's closed-enum + drop-unknown behaviour
-  fails safe if a field is missing.
+- Main risk is Claude Code hook-payload field names/versions (`message`, `transcript_path`,
+  event names, `Notification` subtypes) drifting; verified against the installed reference
+  now (`DECISIONS.md:124`), re-check at implementation. The parser's closed-enum +
+  drop-unknown behaviour and optional `message`/`transcript_path` fail safe if a field is
+  missing (a done notification just falls back to a generic body).

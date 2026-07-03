@@ -122,10 +122,17 @@ The wire protocol lives here so both the forwarder (encode) and the socket serve
 - Consumes: `AgentState` (existing, `AgentState.swift`).
 - Produces:
   - `enum HookEventName: String { case sessionStart = "SessionStart", userPromptSubmit = "UserPromptSubmit", preToolUse = "PreToolUse", postToolUse = "PostToolUse", notification = "Notification", stop = "Stop", sessionEnd = "SessionEnd" }`
-  - `struct AgentHookEvent: Equatable { let worktreeID: String; let surfaceID: String; let event: HookEventName; let lastAssistantMessage: String? }`
-  - `func encodeHookMessage(worktreeID: String, surfaceID: String, event: HookEventName, lastAssistantMessage: String?) -> String`
+  - `struct AgentHookEvent: Equatable { let worktreeID: String; let surfaceID: String; let event: HookEventName; let message: String?; let transcriptPath: String? }`
+  - `func encodeHookMessage(worktreeID: String, surfaceID: String, event: HookEventName, message: String?, transcriptPath: String?) -> String`
   - `func decodeHookMessage(_ line: String, maxLength: Int = 64_000) -> AgentHookEvent?`
   - `func agentState(for event: HookEventName) -> AgentState?`  (nil = no state change, e.g. SessionStart)
+  - `func lastAssistantText(fromTranscript jsonl: String) -> String?`  (last `type:"assistant"` record's text blocks)
+
+**Payload reality (verified):** hook stdin has `session_id`, `transcript_path`, `cwd`,
+`hook_event_name`. There is **no** `last_assistant_message`. `Notification` carries a
+`message` string (used as the needs-you body); the done body is read from `transcript_path`.
+The forwarder copies `message` + `transcript_path` onto the wire; Coda does the transcript
+read (Task 6). Hence the codec carries `message` + `transcriptPath`, not an assistant message.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -135,29 +142,33 @@ import XCTest
 
 final class AgentHookEventTests: XCTestCase {
     func testRoundTrip() {
-        let line = encodeHookMessage(worktreeID: "w", surfaceID: "s",
-                                     event: .stop, lastAssistantMessage: "done: 2 files")
-        let decoded = decodeHookMessage(line)
-        XCTAssertEqual(decoded, AgentHookEvent(worktreeID: "w", surfaceID: "s",
-                                               event: .stop, lastAssistantMessage: "done: 2 files"))
+        let line = encodeHookMessage(worktreeID: "w", surfaceID: "s", event: .notification,
+                                     message: "needs your input", transcriptPath: nil)
+        XCTAssertEqual(decodeHookMessage(line),
+            AgentHookEvent(worktreeID: "w", surfaceID: "s", event: .notification,
+                           message: "needs your input", transcriptPath: nil))
     }
 
-    func testDecodeWithoutMessage() {
-        let line = encodeHookMessage(worktreeID: "w", surfaceID: "s",
-                                     event: .preToolUse, lastAssistantMessage: nil)
+    func testCarriesTranscriptPath() {
+        let line = encodeHookMessage(worktreeID: "w", surfaceID: "s", event: .stop,
+                                     message: nil, transcriptPath: "/t/x.jsonl")
+        XCTAssertEqual(decodeHookMessage(line)?.transcriptPath, "/t/x.jsonl")
+        XCTAssertNil(decodeHookMessage(line)?.message)
+    }
+
+    func testDecodeBareEvent() {
+        let line = encodeHookMessage(worktreeID: "w", surfaceID: "s", event: .preToolUse,
+                                     message: nil, transcriptPath: nil)
         XCTAssertEqual(decodeHookMessage(line)?.event, .preToolUse)
-        XCTAssertNil(decodeHookMessage(line)?.lastAssistantMessage)
     }
 
     func testRejectsUnknownEventName() {
-        // A well-formed line whose event name is not in the closed enum → dropped.
-        let line = #"w s {"hook_event_name":"Bogus","last_assistant_message":"x"}"#
-        XCTAssertNil(decodeHookMessage(line))
+        XCTAssertNil(decodeHookMessage(#"w s {"hook_event_name":"Bogus"}"#))
     }
 
     func testRejectsOversizedLine() {
         let huge = String(repeating: "a", count: 100_000)
-        let line = #"w s {"hook_event_name":"Stop","last_assistant_message":"\#(huge)"}"#
+        let line = #"w s {"hook_event_name":"Notification","message":"\#(huge)"}"#
         XCTAssertNil(decodeHookMessage(line, maxLength: 64_000))
     }
 
@@ -169,9 +180,9 @@ final class AgentHookEventTests: XCTestCase {
 
     func testMessageWithSpacesAndNewlinesSurvives() {
         let msg = "line one\nline two with spaces"
-        let line = encodeHookMessage(worktreeID: "w", surfaceID: "s",
-                                     event: .notification, lastAssistantMessage: msg)
-        XCTAssertEqual(decodeHookMessage(line)?.lastAssistantMessage, msg)
+        let line = encodeHookMessage(worktreeID: "w", surfaceID: "s", event: .notification,
+                                     message: msg, transcriptPath: nil)
+        XCTAssertEqual(decodeHookMessage(line)?.message, msg)
     }
 
     func testStateMapping() {
@@ -183,6 +194,31 @@ final class AgentHookEventTests: XCTestCase {
         XCTAssertEqual(agentState(for: .sessionEnd), .idle)
         XCTAssertNil(agentState(for: .sessionStart))   // presence handled separately
     }
+
+    // MARK: - transcript parsing (for the done-notification body)
+
+    func testLastAssistantTextFromTranscript() {
+        // One assistant line per record; content is an array of typed blocks.
+        let jsonl = """
+        {"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}
+        {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"first"}]}}
+        {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"final answer"}]}}
+        """
+        XCTAssertEqual(lastAssistantText(fromTranscript: jsonl), "final answer")
+    }
+
+    func testLastAssistantTextSkipsToolUseBlocks() {
+        // The last assistant record may contain a tool_use block plus text; take the text.
+        let jsonl = """
+        {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{}},{"type":"text","text":"ran it"}]}}
+        """
+        XCTAssertEqual(lastAssistantText(fromTranscript: jsonl), "ran it")
+    }
+
+    func testLastAssistantTextNilWhenNoAssistant() {
+        let jsonl = #"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}"#
+        XCTAssertNil(lastAssistantText(fromTranscript: jsonl))
+    }
 }
 ```
 
@@ -193,7 +229,7 @@ Expected: FAIL — `cannot find 'encodeHookMessage' in scope`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-The message is a single physical line: `worktreeID surfaceID <json>`. IDs never contain spaces (worktree ids are slugs/`repo#main`; surface ids are `s<int>`), and the JSON is the rest of the line — so the message body (which may contain spaces/newlines JSON-escaped) is safe to carry. Newlines inside the assistant message are escaped by JSON, so the physical line has no raw `\n`.
+The message is a single physical line: `worktreeID surfaceID <json>`. IDs never contain spaces (worktree ids are slugs/`repo#main`; surface ids are `s<int>`), and the JSON is the rest of the line — so any `message` (spaces/newlines JSON-escaped) is safe to carry. Newlines inside a message are escaped by JSON, so the physical line has no raw `\n`.
 
 ```swift
 import Foundation
@@ -210,23 +246,29 @@ public enum HookEventName: String {
     case sessionEnd       = "SessionEnd"
 }
 
+/// `message` is present on Notification events (the needs-you body). `transcriptPath` is
+/// forwarded so Coda can read the last assistant turn for the done body. There is no
+/// assistant-message field on the wire — the payload doesn't have one (verified).
 public struct AgentHookEvent: Equatable {
     public let worktreeID: String
     public let surfaceID: String
     public let event: HookEventName
-    public let lastAssistantMessage: String?
-    public init(worktreeID: String, surfaceID: String, event: HookEventName, lastAssistantMessage: String?) {
-        self.worktreeID = worktreeID; self.surfaceID = surfaceID
-        self.event = event; self.lastAssistantMessage = lastAssistantMessage
+    public let message: String?
+    public let transcriptPath: String?
+    public init(worktreeID: String, surfaceID: String, event: HookEventName,
+                message: String?, transcriptPath: String?) {
+        self.worktreeID = worktreeID; self.surfaceID = surfaceID; self.event = event
+        self.message = message; self.transcriptPath = transcriptPath
     }
 }
 
-/// One physical line: "<worktreeID> <surfaceID> <json>". JSON escapes any spaces/newlines
-/// in the message, so the line is always single-physical-line and space-splittable into 3.
-public func encodeHookMessage(worktreeID: String, surfaceID: String,
-                              event: HookEventName, lastAssistantMessage: String?) -> String {
+/// One physical line: "<worktreeID> <surfaceID> <json>". JSON escapes any spaces/newlines,
+/// so the line is always single-physical-line and space-splittable into 3.
+public func encodeHookMessage(worktreeID: String, surfaceID: String, event: HookEventName,
+                              message: String?, transcriptPath: String?) -> String {
     var obj: [String: String] = ["hook_event_name": event.rawValue]
-    if let m = lastAssistantMessage { obj["last_assistant_message"] = m }
+    if let message { obj["message"] = message }
+    if let transcriptPath { obj["transcript_path"] = transcriptPath }
     let json = (try? JSONSerialization.data(withJSONObject: obj))
         .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
     return "\(worktreeID) \(surfaceID) \(json)"
@@ -242,9 +284,9 @@ public func decodeHookMessage(_ line: String, maxLength: Int = 64_000) -> AgentH
           let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
           let name = obj["hook_event_name"] as? String,
           let event = HookEventName(rawValue: name) else { return nil }
-    let msg = obj["last_assistant_message"] as? String
-    return AgentHookEvent(worktreeID: worktreeID, surfaceID: surfaceID,
-                          event: event, lastAssistantMessage: msg)
+    return AgentHookEvent(worktreeID: worktreeID, surfaceID: surfaceID, event: event,
+                          message: obj["message"] as? String,
+                          transcriptPath: obj["transcript_path"] as? String)
 }
 
 /// Event → state. nil means "no state change from this event alone" (SessionStart just
@@ -258,12 +300,29 @@ public func agentState(for event: HookEventName) -> AgentState? {
     case .sessionStart: return nil
     }
 }
+
+/// Last assistant record's text from transcript JSONL (its `content[]` `text` blocks
+/// joined). Pure; Coda does the bounded file read and passes the tail here (Security §4).
+public func lastAssistantText(fromTranscript jsonl: String) -> String? {
+    for raw in jsonl.split(separator: "\n", omittingEmptySubsequences: true).reversed() {
+        guard let data = raw.data(using: .utf8),
+              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              (obj["type"] as? String) == "assistant",
+              let msg = obj["message"] as? [String: Any],
+              let content = msg["content"] as? [[String: Any]] else { continue }
+        let text = content.compactMap { block -> String? in
+            (block["type"] as? String) == "text" ? block["text"] as? String : nil
+        }.joined(separator: "\n")
+        if !text.isEmpty { return text }
+    }
+    return nil
+}
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `swift test --filter AgentHookEventTests`
-Expected: PASS (7 tests).
+Expected: PASS (11 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -441,7 +500,7 @@ Add to `targets:` (after the `Coda` executable target):
 
 - [ ] **Step 2: Write the forwarder**
 
-Reads all of stdin (the hook payload), extracts `hook_event_name` + `last_assistant_message`, and forwards. No arguments; everything comes from stdin + env. Uses a connect timeout and never blocks longer than that.
+Reads all of stdin (the hook payload), extracts `hook_event_name` + optional `message` + optional `transcript_path`, and forwards them. No arguments; everything comes from stdin + env. Uses a connect timeout and never blocks longer than that. It never reads the transcript itself (Security §5).
 
 ```swift
 import Foundation
@@ -463,10 +522,12 @@ guard stdinData.count <= 256_000,
       let obj = (try? JSONSerialization.jsonObject(with: stdinData)) as? [String: Any],
       let name = obj["hook_event_name"] as? String,
       let event = HookEventName(rawValue: name) else { exit(0) }
-let message = obj["last_assistant_message"] as? String
+// Copy only what Coda needs onto the wire; do NOT read the transcript here (Security §5).
+let message = obj["message"] as? String                 // present on Notification events
+let transcriptPath = obj["transcript_path"] as? String  // present on every event
 
 let line = encodeHookMessage(worktreeID: worktreeID, surfaceID: surfaceID,
-                             event: event, lastAssistantMessage: message) + "\n"
+                             event: event, message: message, transcriptPath: transcriptPath) + "\n"
 
 // Connect to the Unix stream socket with a short send timeout; fail silently+fast.
 let fd = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -758,12 +819,35 @@ Add the handler. It updates `agentStates` for the surface, tracks presence (Sess
         case .sessionEnd:   claudePresent.remove(key)
         default: break
         }
-        if let newState = agentState(for: event.event) {
-            agentStates[key] = newState
+        guard let newState = agentState(for: event.event) else {
+            recomputeRollupsAndRefreshUI(); return    // e.g. SessionStart: presence only
         }
-        // 2b: fire notification on needsYou / done transitions.
-        if let s = agentState(for: event.event) { maybeNotify(worktreeID: event.worktreeID, state: s, body: event.lastAssistantMessage) }
+        agentStates[key] = newState
+        // 2b: needs-you body = the Notification's own message; done body = last assistant
+        // text from the transcript (bounded read). No payload carries the assistant message.
+        let body: String?
+        switch newState {
+        case .needsYou: body = event.message
+        case .done:     body = event.transcriptPath.flatMap(Self.lastAssistantMessage(fromTranscriptAt:))
+        default:        body = nil
+        }
+        maybeNotify(worktreeID: event.worktreeID, state: newState, body: body)
         recomputeRollupsAndRefreshUI()
+    }
+
+    /// Bounded read of a transcript JSONL's tail → last assistant text (Security §4). Reads
+    /// only the last ~64 KB, drops a partial leading line, and delegates parsing to CodaCore.
+    private static func lastAssistantMessage(fromTranscriptAt path: String) -> String? {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        let tailBytes: UInt64 = 64_000
+        let start = size > tailBytes ? size - tailBytes : 0
+        try? handle.seek(toOffset: start)
+        guard let data = try? handle.readToEnd(),
+              let text = String(data: data, encoding: .utf8) else { return nil }
+        let body = start > 0 ? String(text.drop { $0 != "\n" }.dropFirst()) : text
+        return lastAssistantText(fromTranscript: body)
     }
 ```
 
@@ -955,7 +1039,7 @@ git commit -m "chore(packaging): bundle + sign the coda-hook forwarder"
 
 ### Task 9: Notifications (2b) — `UNUserNotificationCenter`
 
-Fire a macOS notification on `→ needsYou` / `→ done`, gated by two independent toggles, body = `last_assistant_message` as plain data (Security §1); click → focus the worktree.
+Fire a macOS notification on `→ needsYou` / `→ done`, gated by two independent toggles; body is the caller-supplied `body` (Notification message for needs-you, transcript-derived text for done) set as plain data (Security §1); click → focus the worktree.
 
 **Files:**
 - Modify: `Sources/Coda/AppDelegate.swift` (the `maybeNotify` referenced in Task 6)
@@ -1044,10 +1128,11 @@ git commit -m "feat(app): opt-in macOS notifications on agent needs-you/done"
 - Global self-noop forwarder → Tasks 4 (no-op path), 7 (install). ✅
 - Unix socket transport + perms/ownership → Task 5 (§2). ✅
 - Event→state mapping table → Task 2. ✅
-- Wire protocol (busy flag / event line) → Task 2 codec (event line form; the `1|0` busy flag is subsumed by the working/stop events which the mapping already produces — no separate flag needed since the server derives working/idle from the event enum). ✅
+- Wire protocol (single line `wt surface <json>`, carrying `message` + `transcript_path`) → Task 2 codec. ✅
+- Notification-message vs transcript-read body split → Task 2 (`lastAssistantText`), Task 4 (forward fields), Task 6 (bounded read + handler), Task 9 (use `body`). ✅
 - Retire/downgrade heuristic → Task 6 Step 5. ✅
 - Notifications + two toggles + click-to-focus (2b) → Task 9. ✅
-- Security §1 (no osascript interpolation) → Task 9 Step 2, Task 3 command form. §2 → Task 5. §3 allowlist → Tasks 5, 6 Step 3. §4 parser bounds → Task 2. §5 forwarder → Tasks 4, 8. §6 consent/reversible → Task 7. ✅
+- Security §1 (no osascript interpolation) → Task 9 Step 2, Task 3 command form. §2 → Task 5. §3 allowlist → Tasks 5, 6 Step 3. §4 parser bounds + bounded transcript tail read → Tasks 2, 6. §5 forwarder (copies fields, never reads transcript) → Tasks 4, 8. §6 consent/reversible → Task 7. ✅
 - No sidebar reorg → honoured (no task adds sorting/sections). ✅
 
 **Placeholder scan:** the one soft edge is the SwiftTerm `startProcess(environment:)` parameter *type* (Task 6 Step 1) — flagged as a build-time confirmation with both branches spelled out, not a TBD. `make-app.sh` variable names (Task 8) are "match existing" because the script's exact vars aren't quoted here — the implementer has the file open. No true placeholders.
