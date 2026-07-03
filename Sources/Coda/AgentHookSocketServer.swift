@@ -8,8 +8,18 @@ final class AgentHookSocketServer {
     private let socketURL: URL
     private let isKnownSurface: (String, String) -> Bool
     private let onEvent: (AgentHookEvent) -> Void
+
+    // `acceptLoop()` blocks forever in `accept()`, so it gets its own dedicated queue. Reads are
+    // dispatched onto a *different* concurrent queue so a blocked/slow client can never starve
+    // the accept loop (and multiple clients can be read concurrently).
+    private let acceptQueue = DispatchQueue(label: "coda.hook.socket.accept")
+    private let readQueue = DispatchQueue(label: "coda.hook.socket.read", attributes: .concurrent)
+
+    // `running`/`listenFD` are written from `start()`/`stop()` (caller thread) and read from
+    // `acceptLoop()` (accept-queue thread); guard them with a lock so there's no unsynchronized
+    // shared mutable access.
+    private let stateLock = NSLock()
     private var listenFD: Int32 = -1
-    private let queue = DispatchQueue(label: "coda.hook.socket")
     private var running = false
 
     var socketPath: String { socketURL.path }
@@ -26,6 +36,10 @@ final class AgentHookSocketServer {
         let dir = socketURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700])
+        // `attributes:` above only applies when createDirectory actually creates the directory;
+        // an already-existing app-support dir keeps whatever perms it had. Enforce 0700
+        // unconditionally so Security §2's directory protection holds either way.
+        guard chmod(dir.path, 0o700) == 0 else { throw NSError(domain: "coda.hook", code: 5) }
         // Remove a stale socket only if we own it (Security §2).
         if FileManager.default.fileExists(atPath: socketURL.path) {
             let attrs = try? FileManager.default.attributesOfItem(atPath: socketURL.path)
@@ -36,8 +50,9 @@ final class AgentHookSocketServer {
                     userInfo: [NSLocalizedDescriptionKey: "socket path not owned by us"])
             }
         }
-        listenFD = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard listenFD >= 0 else { throw NSError(domain: "coda.hook", code: 2) }
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw NSError(domain: "coda.hook", code: 2) }
+        stateLock.lock(); listenFD = fd; stateLock.unlock()
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         let sunPathSize = MemoryLayout.size(ofValue: addr.sun_path)
@@ -50,37 +65,57 @@ final class AgentHookSocketServer {
         }
         let len = socklen_t(MemoryLayout<sockaddr_un>.size)
         let bound = withUnsafePointer(to: &addr) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(listenFD, $0, len) }
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, len) }
         }
-        guard bound == 0 else { close(listenFD); throw NSError(domain: "coda.hook", code: 3) }
+        guard bound == 0 else { close(fd); throw NSError(domain: "coda.hook", code: 3) }
         chmod(socketURL.path, 0o600)               // Security §2
-        guard listen(listenFD, 16) == 0 else { close(listenFD); throw NSError(domain: "coda.hook", code: 4) }
-        running = true
-        queue.async { [weak self] in self?.acceptLoop() }
+        guard listen(fd, 16) == 0 else { close(fd); throw NSError(domain: "coda.hook", code: 4) }
+        stateLock.lock(); running = true; stateLock.unlock()
+        acceptQueue.async { [weak self] in self?.acceptLoop() }
     }
 
     func stop() {
+        stateLock.lock()
         running = false
-        if listenFD >= 0 { close(listenFD); listenFD = -1 }
+        let fd = listenFD
+        listenFD = -1
+        stateLock.unlock()
+        if fd >= 0 { close(fd) }
         try? FileManager.default.removeItem(at: socketURL)
     }
 
+    private func isRunning() -> Bool {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return running
+    }
+
+    private func currentListenFD() -> Int32 {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return listenFD
+    }
+
     private func acceptLoop() {
-        while running {
-            let clientFD = accept(listenFD, nil, nil)
-            if clientFD < 0 { if running { continue } else { break } }
-            queue.async { [weak self] in self?.readClient(clientFD) }
+        while isRunning() {
+            let fd = currentListenFD()
+            guard fd >= 0 else { break }
+            let clientFD = accept(fd, nil, nil)
+            if clientFD < 0 { if isRunning() { continue } else { break } }
+            // Dispatched onto `readQueue`, NOT `acceptQueue` — reads must never share a serial
+            // lane with the accept loop, or a pending/slow read would block future accepts.
+            readQueue.async { [weak self] in self?.readClient(clientFD) }
         }
     }
 
     private func readClient(_ fd: Int32) {
         defer { close(fd) }
         var buffer = Data()
+        let maxBytes = 128_000
         var chunk = [UInt8](repeating: 0, count: 4096)
-        while buffer.count <= 128_000 {              // Security §4: bounded
+        while buffer.count < maxBytes {               // Security §4: bounded
             let n = read(fd, &chunk, chunk.count)
             if n <= 0 { break }
-            buffer.append(contentsOf: chunk[0..<n])
+            let room = maxBytes - buffer.count
+            buffer.append(contentsOf: chunk[0..<min(n, room)])
             if chunk[0..<n].contains(0x0A) { break }  // got a newline; one message per connection
         }
         guard let text = String(data: buffer, encoding: .utf8) else { return }  // §4 non-UTF-8 → drop
