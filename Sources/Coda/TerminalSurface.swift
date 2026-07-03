@@ -9,6 +9,9 @@ final class TerminalSurface: NSViewController {
     private let workingDirectory: String
     private let command: String
     private let setupScript: String
+    private let hookWorktreeID: String
+    private let hookSurfaceID: String
+    private let hookSocketPath: String
     private var terminal: ClickableTerminalView!
     private var pendingTheme: TerminalTheme?
     private var pendingFont: NSFont?
@@ -22,10 +25,14 @@ final class TerminalSurface: NSViewController {
     /// Fired when this surface's terminal gains focus (forwarded from the terminal view).
     var onFocused: (() -> Void)?
 
-    init(workingDirectory: String, command: String, setupScript: String = "") {
+    init(workingDirectory: String, command: String, setupScript: String = "",
+         hookWorktreeID: String = "", hookSurfaceID: String = "", hookSocketPath: String = "") {
         self.workingDirectory = workingDirectory
         self.command = command
         self.setupScript = setupScript
+        self.hookWorktreeID = hookWorktreeID
+        self.hookSurfaceID = hookSurfaceID
+        self.hookSocketPath = hookSocketPath
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -119,9 +126,19 @@ final class TerminalSurface: NSViewController {
         let args = terminalShellArgs(workingDirectory: workingDirectory,
                                      setupScript: setupScript,
                                      command: command)
+        // Inject the CODA_* hook-correlation vars only when we actually have a socket +
+        // ids (a fully wired-up surface); otherwise pass nil so the shell inherits the
+        // app's own environment unmodified, same as before this surface existed.
+        var envArray: [String]? = nil
+        if !hookSocketPath.isEmpty, !hookWorktreeID.isEmpty, !hookSurfaceID.isEmpty {
+            let dict = hookEnvironment(base: ProcessInfo.processInfo.environment,
+                                       socketPath: hookSocketPath,
+                                       worktreeID: hookWorktreeID, surfaceID: hookSurfaceID)
+            envArray = dict.map { "\($0.key)=\($0.value)" }
+        }
         terminal.startProcess(executable: "/bin/zsh",
                               args: args,
-                              environment: nil,
+                              environment: envArray,
                               execName: "-zsh",
                               currentDirectory: workingDirectory)
         if let pendingFont { applyFont(pendingFont) }
