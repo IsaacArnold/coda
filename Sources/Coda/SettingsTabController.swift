@@ -15,14 +15,21 @@ final class SettingsTabController: NSTabViewController {
          terminalFont: NSFont,
          onChangeFont: @escaping (TerminalFontPref) -> Void,
          uiScale: UIScale,
-         onChangeUIScale: @escaping (UIScale) -> Void) {
+         onChangeUIScale: @escaping (UIScale) -> Void,
+         notifyOnNeedsYou: Bool,
+         onChangeNotifyOnNeedsYou: @escaping (Bool) -> Void,
+         notifyOnDone: Bool,
+         onChangeNotifyOnDone: @escaping (Bool) -> Void) {
         super.init(nibName: nil, bundle: nil)
         tabStyle = .toolbar
 
-        let general = GeneralSettingsViewController(editor: editor, terminalFont: terminalFont, uiScale: uiScale)
+        let general = GeneralSettingsViewController(editor: editor, terminalFont: terminalFont, uiScale: uiScale,
+                                                    notifyOnNeedsYou: notifyOnNeedsYou, notifyOnDone: notifyOnDone)
         general.onChangeEditor = onChangeEditor
         general.onChangeFont = onChangeFont
         general.onChangeUIScale = onChangeUIScale
+        general.onChangeNotifyOnNeedsYou = onChangeNotifyOnNeedsYou
+        general.onChangeNotifyOnDone = onChangeNotifyOnDone
         let generalItem = NSTabViewItem(viewController: general)
         generalItem.label = "General"
         generalItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "General")

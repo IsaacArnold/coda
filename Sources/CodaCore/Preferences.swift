@@ -76,19 +76,37 @@ public struct Preferences: Codable, Equatable {
     /// The interface (chrome) size. Defaults to `.medium`; older prefs files without
     /// the key decode to `.medium` via the custom decoder below.
     public var uiScale: UIScale
+    /// Whether the user declined the "Enable live agent status" hook-install consent
+    /// prompt. Defaults to `false`; older prefs files without the key decode to `false`
+    /// via the custom decoder below, so they still see the prompt once.
+    public var declinedHookInstall: Bool
+    /// Whether to post a macOS notification when an agent transitions to "needs you".
+    /// Defaults to `true`; older prefs files without the key decode to `true` via the
+    /// custom decoder below, so existing users get notifications on by default.
+    public var notifyOnNeedsYou: Bool
+    /// Whether to post a macOS notification when an agent transitions to "done".
+    /// Defaults to `true`; older prefs files without the key decode to `true` via the
+    /// custom decoder below, so existing users get notifications on by default.
+    public var notifyOnDone: Bool
     public init(defaultEditor: Editor = .vsCode, activeTheme: String? = nil,
-                terminalFont: TerminalFontPref? = nil, uiScale: UIScale = .medium) {
+                terminalFont: TerminalFontPref? = nil, uiScale: UIScale = .medium,
+                declinedHookInstall: Bool = false, notifyOnNeedsYou: Bool = true,
+                notifyOnDone: Bool = true) {
         self.defaultEditor = defaultEditor
         self.activeTheme = activeTheme
         self.terminalFont = terminalFont
         self.uiScale = uiScale
+        self.declinedHookInstall = declinedHookInstall
+        self.notifyOnNeedsYou = notifyOnNeedsYou
+        self.notifyOnDone = notifyOnDone
     }
 
-    // Synthesized Codable would make `uiScale` a required key and fail to decode older
-    // prefs files. A custom decoder defaults the missing key to `.medium` (and keeps the
-    // other keys' existing optional/required behavior).
+    // Synthesized Codable would make `uiScale`/`declinedHookInstall`/`notifyOnNeedsYou`/
+    // `notifyOnDone` required keys and fail to decode older prefs files. A custom decoder
+    // defaults each missing key (and keeps the other keys' existing optional/required behavior).
     private enum CodingKeys: String, CodingKey {
-        case defaultEditor, activeTheme, terminalFont, uiScale
+        case defaultEditor, activeTheme, terminalFont, uiScale, declinedHookInstall
+        case notifyOnNeedsYou, notifyOnDone
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -96,6 +114,9 @@ public struct Preferences: Codable, Equatable {
         self.activeTheme = try c.decodeIfPresent(String.self, forKey: .activeTheme)
         self.terminalFont = try c.decodeIfPresent(TerminalFontPref.self, forKey: .terminalFont)
         self.uiScale = try c.decodeIfPresent(UIScale.self, forKey: .uiScale) ?? .medium
+        self.declinedHookInstall = try c.decodeIfPresent(Bool.self, forKey: .declinedHookInstall) ?? false
+        self.notifyOnNeedsYou = try c.decodeIfPresent(Bool.self, forKey: .notifyOnNeedsYou) ?? true
+        self.notifyOnDone = try c.decodeIfPresent(Bool.self, forKey: .notifyOnDone) ?? true
     }
 }
 

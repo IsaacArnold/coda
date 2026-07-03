@@ -39,6 +39,14 @@ swift build -c release
 BIN_DIR="$(swift build -c release --show-bin-path)"
 [[ -x "$BIN_DIR/$APP_NAME" ]] || { echo "ERROR: $BIN_DIR/$APP_NAME not found"; exit 1; }
 
+# CodaHook is the `coda-hook` forwarder installed into agent CLI hook configs
+# (see HookInstaller.forwarderPath). It must ship inside the signed app bundle
+# so the hook path is tamper-evident (Security §5); an explicit build call
+# here documents that requirement even though the `swift build -c release`
+# above already builds every target in the package, CodaHook included.
+swift build -c release --product CodaHook
+[[ -x "$BIN_DIR/CodaHook" ]] || { echo "ERROR: $BIN_DIR/CodaHook not found"; exit 1; }
+
 # --- assemble bundle -------------------------------------------------------
 DIST="$REPO_ROOT/dist"
 APP="$DIST/$APP_NAME.app"
@@ -47,6 +55,10 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 # Executable
 cp "$BIN_DIR/$APP_NAME" "$APP/Contents/MacOS/$APP_NAME"
+
+# coda-hook forwarder (renamed on copy) — installed hooks in agent CLI configs
+# invoke it by this exact name via Bundle.main's executable directory.
+cp "$BIN_DIR/CodaHook" "$APP/Contents/MacOS/coda-hook"
 
 # App assets live FLAT under Contents/Resources so the bundle code-signs cleanly.
 # A SwiftPM resource bundle (Coda_Coda.bundle) is a directory with a `.bundle`
@@ -106,11 +118,20 @@ PLIST
 #     No --entitlements are passed because Coda needs none: it is NOT sandboxed,
 #     and spawning child processes (/bin/zsh, git, /usr/bin/open) is allowed by
 #     default under the Hardened Runtime. With assets flat in Contents/Resources
-#     there are no nested bundles, so one seal (no --deep) covers everything.
+#     there are no nested bundles, so one seal (no --deep) covers everything —
+#     EXCEPT coda-hook: it's a second loose Mach-O executable under Contents/MacOS,
+#     not the bundle's designated main executable, so a non-deep `codesign` on
+#     $APP does not re-sign it — it only hashes its bytes into the resource seal.
+#     Sign it explicitly, inside-out (helper before the outer bundle), so it ships
+#     with a real signature under the same identity instead of just its leftover
+#     ad-hoc `swift build` signature — required for Hardened Runtime/notarization
+#     and for Security §5 tamper-evidence.
 WILL_NOTARIZE=0
 if [[ -n "${DEVELOPER_ID_APP:-}" ]]; then
   echo "==> Signing with Developer ID + Hardened Runtime"
   echo "    identity: $DEVELOPER_ID_APP"
+  codesign --force --options runtime --timestamp --sign "$DEVELOPER_ID_APP" \
+    "$APP/Contents/MacOS/coda-hook"
   SIGN_ARGS=(--force --options runtime --timestamp --sign "$DEVELOPER_ID_APP")
   [[ -n "${ENTITLEMENTS:-}" ]] && SIGN_ARGS+=(--entitlements "$ENTITLEMENTS")
   codesign "${SIGN_ARGS[@]}" "$APP"
@@ -127,6 +148,7 @@ if [[ -n "${DEVELOPER_ID_APP:-}" ]]; then
   fi
 else
   echo "==> Ad-hoc signature only (set DEVELOPER_ID_APP to sign + notarize)"
+  codesign --force --sign - "$APP/Contents/MacOS/coda-hook"
   codesign --force --sign - "$APP"
   codesign --verify --strict "$APP" \
     && echo "    bundle is ad-hoc sealed (ok to run on Apple Silicon)" \

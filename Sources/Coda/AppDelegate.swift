@@ -1,7 +1,8 @@
 import AppKit
+import UserNotifications
 import CodaCore
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private var window: NSWindow!
     private var splitVC: NSSplitViewController!
     private let sidebar = SidebarController()
@@ -25,6 +26,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notchTimer: Timer?
     private var stateTimer: Timer?
     private var agentStates: [String: AgentState] = [:]
+    private var hookServer: AgentHookSocketServer?
+    // surfaceKeys with a live Claude run (SessionStart..SessionEnd) — these own their agent
+    // state via hook events; the heuristic poll skips them so it never fights an event.
+    private var claudePresent: Set<String> = []
+    // Lock-protected snapshot of known surfaceKeys, read by AgentHookSocketServer's
+    // `isKnownSurface` closure from a BACKGROUND thread — never read `surfaces` (main-thread
+    // owned) from there directly, that would be a data race.
+    private let surfaceAllowlistLock = NSLock()
+    private var surfaceAllowlistSnapshot: Set<String> = []
     private var prefsStore: PreferencesStore!
     private var preferences = Preferences()
     private var themeStore: ThemeStore!
@@ -55,6 +65,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildWindow()
         wireSidebar()
         seedBranchesAndWatchers()
+        startHookServer()
+        promptForHookInstallIfNeeded()
+        // UNUserNotificationCenter requires a real app bundle (CFBundleIdentifier); under
+        // `swift run`/`swift test` there is none, and just touching `.current()` throws
+        // NSInternalInconsistencyException, crashing the dev workflow. Badges still work
+        // without this — only banner notifications are unavailable when unbundled.
+        if Bundle.main.bundleIdentifier != nil {
+            UNUserNotificationCenter.current().delegate = self
+            AgentNotifier.requestAuthorization()
+        }
         refreshSidebar(select: allDisplayWorktrees().first?.id)
         applyChromeTheme()
         applyUIMetrics()
@@ -62,8 +82,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.updateNotch()
         }
-        // Poll each live surface's output to drive the heuristic agent-state badges.
-        stateTimer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: true) { [weak self] _ in
+        // Fallback sweep for surfaces that never emitted a hook event (plain shells, or a
+        // Claude run started before the hook was installed): event-owned surfaces
+        // (`claudePresent`) are skipped here, so this is just a safety net. 2s keeps the
+        // non-event path reasonably snappy without the old 1.2s per-tick full-grid scan cost.
+        stateTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             self?.pollAgentStates()
         }
         // iTerm-style ⌘+click to open a path:line in the editor, routed to the focused
@@ -80,6 +103,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         headWatcher.unwatchAll()
+        hookServer?.stop()
+    }
+
+    /// Start the Claude Code hook socket server before any surface exists, so every PTY
+    /// spawned afterwards can be handed a live `socketPath` to seed. `isKnownSurface` is
+    /// invoked on a background thread (the server's read queue) — it reads the lock-protected
+    /// `surfaceAllowlistSnapshot`, never the main-thread-owned `surfaces` registry.
+    private func startHookServer() {
+        let socketURL = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Coda/hooks.sock")
+        let server = AgentHookSocketServer(
+            socketURL: socketURL,
+            isKnownSurface: { [weak self] wt, s in self?.isKnownSurface(wt, s) ?? false },
+            onEvent: { [weak self] event in self?.handleHookEvent(event) })
+        try? server.start()
+        hookServer = server
+    }
+
+    /// One-time consent prompt (Security §6): only shown when the hook isn't already
+    /// installed AND the user hasn't previously declined. States exactly what changes
+    /// (a single hook entry added to ~/.claude/settings.json) and how to remove it.
+    private func promptForHookInstallIfNeeded() {
+        guard !HookInstaller.isInstalled(), !preferences.declinedHookInstall else { return }
+        let alert = NSAlert()
+        alert.messageText = "Enable live agent status?"
+        alert.informativeText = """
+        Coda can show accurate 🟡/🔴/🟢 badges and notifications by adding one hook to \
+        ~/.claude/settings.json. It only reports to Coda while a terminal is open here, and \
+        is ignored by any claude you run elsewhere. You can remove it anytime from the menu.
+        """
+        alert.addButton(withTitle: "Enable")
+        alert.addButton(withTitle: "Not now")
+        if alert.runModal() == .alertFirstButtonReturn {
+            try? HookInstaller.install()
+        } else {
+            preferences.declinedHookInstall = true
+            do { try prefsStore.save(preferences) } catch { presentError(error) }
+        }
+    }
+
+    // MARK: - Thread-safe surface allowlist (read by the hook socket server's background queue)
+
+    private func allowlistAdd(_ key: String) {
+        surfaceAllowlistLock.lock(); surfaceAllowlistSnapshot.insert(key); surfaceAllowlistLock.unlock()
+    }
+
+    private func allowlistRemove(_ key: String) {
+        surfaceAllowlistLock.lock(); surfaceAllowlistSnapshot.remove(key); surfaceAllowlistLock.unlock()
+    }
+
+    /// Called from AgentHookSocketServer's background read queue — must not touch anything
+    /// main-thread-owned. Reads only the lock-protected snapshot.
+    private func isKnownSurface(_ worktreeID: String, _ surfaceID: String) -> Bool {
+        let key = surfaceKey(worktreeID, surfaceID)
+        surfaceAllowlistLock.lock(); defer { surfaceAllowlistLock.unlock() }
+        return surfaceAllowlistSnapshot.contains(key)
+    }
+
+    /// Drop every trace of a closed/evicted surface: it can no longer receive hook events
+    /// (allowlist), isn't mid-Claude-run any more (claudePresent), and its stale badge
+    /// shouldn't linger in the map (agentStates). Call on every path that removes a surface.
+    private func forgetSurface(worktreeID: String, surfaceID: String) {
+        let key = surfaceKey(worktreeID, surfaceID)
+        allowlistRemove(key)
+        claudePresent.remove(key)
+        agentStates[key] = nil
+    }
+
+    /// `surfaces.evict(worktreeID:)`, plus allowlist/claudePresent/agentStates cleanup for
+    /// every surface that worktree had. Use this instead of calling `surfaces.evict` directly.
+    @discardableResult
+    private func evictSurfaces(worktreeID: String) -> [SplitSurface] {
+        let ids = surfaces.existingSurfaces(for: worktreeID)?.entries.map { $0.surface.id } ?? []
+        let handles = surfaces.evict(worktreeID: worktreeID)
+        ids.forEach { forgetSurface(worktreeID: worktreeID, surfaceID: $0) }
+        return handles
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -288,7 +388,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 terminalFont: resolvedTerminalFont(),
                 onChangeFont: { [weak self] pref in self?.setTerminalFont(pref) },
                 uiScale: preferences.uiScale,
-                onChangeUIScale: { [weak self] scale in self?.setUIScale(scale) })
+                onChangeUIScale: { [weak self] scale in self?.setUIScale(scale) },
+                notifyOnNeedsYou: preferences.notifyOnNeedsYou,
+                onChangeNotifyOnNeedsYou: { [weak self] on in self?.setNotifyOnNeedsYou(on) },
+                notifyOnDone: preferences.notifyOnDone,
+                onChangeNotifyOnDone: { [weak self] on in self?.setNotifyOnDone(on) })
             let win = NSWindow(contentViewController: tab)
             win.title = "Settings"
             win.styleMask = [.titled, .closable]
@@ -389,7 +493,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             var evictIDs = removed.map { $0.id }
             evictIDs.append("\(repoID)#main")
             for id in evictIDs {
-                for split in surfaces.evict(worktreeID: id) { tearDown(split) }
+                for split in evictSurfaces(worktreeID: id) { tearDown(split) }
             }
             headWatcher.unwatch(repoID: repoID)
             currentBranches[repoID] = nil
@@ -440,7 +544,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try store.archiveWorktree(id: s.id, deleteBranch: true)
             // Tear down all of the archived worktree’s surfaces (kills every PTY, no leak).
-            for split in surfaces.evict(worktreeID: s.id) { tearDown(split) }
+            for split in evictSurfaces(worktreeID: s.id) { tearDown(split) }
             if shownWorktreeID == s.id {
                 shownWorktreeID = nil
                 currentSurface = nil
@@ -484,8 +588,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             active.view.isHidden = false
             currentSurface = active
         }
-        refreshChromeForActiveSurface()
-        refreshTabBar()
+        // Force an immediate repaint from current agent state so the switched-to worktree's
+        // badges (sidebar + notch + tabs) are correct instantly, rather than waiting for the
+        // next hook event or the fallback poll. (Superset of refreshChrome+refreshTabBar.)
+        recomputeRollupsAndRefreshUI()
     }
 
     /// Build a fresh SplitSurface (single-pane) for `wt`, register it, install it in the detail
@@ -502,21 +608,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pendingSetupWorktreeIDs.remove(wt.id)
         let command = (isNewlyCreated && repo?.autoLaunchClaude == true) ? launchCommand(for: repo!) : ""
 
+        // The surface id is minted up front (not after) so every pane in this split — the
+        // first one and any split later adds — can be tagged with the SAME hookSurfaceID;
+        // all panes of one tab correlate hook events under one surface key.
+        surfaceSeq += 1
+        let id = "surface-\(surfaceSeq)"
+
         // The first pane carries setup/command; split panes are plain shells (makePane).
-        let firstPane = makePane(in: wt, command: command, setup: setup)
+        let firstPane = makePane(in: wt, command: command, setup: setup, surfaceID: id)
         let split = SplitSurface(
             firstPane: firstPane, firstID: nextPaneID(),
-            makePane: { [weak self, wt] in
-                let pane = self?.makePane(in: wt, command: "", setup: "") ?? TerminalSurface(workingDirectory: wt.worktreePath, command: "", setupScript: "")
+            makePane: { [weak self, wt, id] in
+                let pane = self?.makePane(in: wt, command: "", setup: "", surfaceID: id)
+                    ?? TerminalSurface(workingDirectory: wt.worktreePath, command: "", setupScript: "")
                 return (self?.nextPaneID() ?? UUID().uuidString, pane)
             })
         split.onFocusChange = { [weak self] in self?.refreshTabBar(); self?.refreshChromeForActiveSurface() }
 
-        surfaceSeq += 1
-        let id = "surface-\(surfaceSeq)"
         let list = surfaces.surfaces(for: wt.id)
         list.activeHandle?.view.isHidden = true
         list.add(split, surface: Surface(id: id))
+        allowlistAdd(surfaceKey(wt.id, id))
 
         detail.addChild(split)
         split.view.translatesAutoresizingMaskIntoConstraints = false
@@ -536,8 +648,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Build a fully-configured terminal pane for a worktree (cwd, theme, font, callbacks).
-    private func makePane(in wt: Worktree, command: String, setup: String) -> TerminalSurface {
-        let pane = TerminalSurface(workingDirectory: wt.worktreePath, command: command, setupScript: setup)
+    /// `surfaceID` is the owning `Surface.id` (shared by every pane in a split), used both to
+    /// tag the PTY's hook-correlation env vars and to key `agentStates`/the allowlist.
+    private func makePane(in wt: Worktree, command: String, setup: String, surfaceID: String) -> TerminalSurface {
+        let pane = TerminalSurface(workingDirectory: wt.worktreePath, command: command, setupScript: setup,
+                                   hookWorktreeID: wt.id, hookSurfaceID: surfaceID,
+                                   hookSocketPath: hookServer?.socketPath ?? "")
         pane.onOpenFile = { [weak self] path, line in self?.openInDefaultEditor(path: path, line: line) }
         pane.onTitleChange = { [weak self] _ in self?.refreshTabBar() }
         pane.applyTheme(activeTheme)
@@ -624,6 +740,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
         if let removed = list.close(id: targetID) {
+            forgetSurface(worktreeID: wtID, surfaceID: targetID)
             removed.allPanes.forEach { $0.view.removeFromSuperview(); $0.removeFromParent() }
             removed.view.removeFromSuperview()
             removed.removeFromParent()
@@ -828,6 +945,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyUIMetrics()
     }
 
+    /// Persist the "notify when an agent needs you" toggle.
+    private func setNotifyOnNeedsYou(_ on: Bool) {
+        preferences.notifyOnNeedsYou = on
+        do { try prefsStore.save(preferences) } catch { presentError(error) }
+    }
+
+    /// Persist the "notify when an agent finishes" toggle.
+    private func setNotifyOnDone(_ on: Bool) {
+        preferences.notifyOnDone = on
+        do { try prefsStore.save(preferences) } catch { presentError(error) }
+    }
+
     /// Persist a new terminal font and re-apply it to every live surface.
     private func setTerminalFont(_ pref: TerminalFontPref) {
         preferences.terminalFont = pref
@@ -893,6 +1022,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let settingsItem = addItem(to: appMenu, "Settings…", #selector(openSettingsAction),
                                    command: .openSettings)
         _ = settingsItem
+        appMenu.addItem(.separator())
+        let enableHookItem = NSMenuItem(title: "Enable Agent Status Hook",
+                                        action: #selector(enableAgentStatusHookAction), keyEquivalent: "")
+        enableHookItem.target = self
+        appMenu.addItem(enableHookItem)
+        let removeHookItem = NSMenuItem(title: "Remove Agent Status Hook",
+                                        action: #selector(removeAgentStatusHookAction), keyEquivalent: "")
+        removeHookItem.target = self
+        appMenu.addItem(removeHookItem)
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Coda",
                         action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
@@ -999,6 +1137,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func addRepoAction() { addRepo() }
     @objc private func openSettingsAction() { openSettings() }
 
+    @objc private func enableAgentStatusHookAction() {
+        do {
+            try HookInstaller.install()
+            presentMessage("The agent-status hook is now enabled in ~/.claude/settings.json.")
+        } catch {
+            presentError(error)
+        }
+    }
+
+    @objc private func removeAgentStatusHookAction() {
+        do {
+            try HookInstaller.uninstall()
+            presentMessage("The agent-status hook has been removed from ~/.claude/settings.json.")
+        } catch {
+            presentError(error)
+        }
+    }
+
     @objc private func archiveSelectedAction() {
         guard let wt = selectedWorktree else { presentMessage("Select a worktree first."); return }
         if wt.isMain {
@@ -1091,26 +1247,116 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Fallback heuristic sweep. Surfaces with a live hook-reported Claude run
+    /// (`claudePresent`) are event-owned and are left untouched here — this only classifies
+    /// surfaces the event path has never heard from (plain shells, or a Claude run predating
+    /// the hook install).
     private func pollAgentStates() {
         var states: [String: AgentState] = [:]
+        for wtID in surfaces.worktreeIDs {
+            guard let list = surfaces.existingSurfaces(for: wtID) else { continue }
+            for entry in list.entries {
+                let key = surfaceKey(wtID, entry.surface.id)
+                states[key] = claudePresent.contains(key)
+                    ? (agentStates[key] ?? .idle)
+                    : rollup(entry.handle.allPanes.map { $0.currentAgentState() })
+            }
+        }
+        agentStates = states
+        recomputeRollupsAndRefreshUI()
+    }
+
+    /// Roll each worktree's per-surface states up to a worktree-level badge and push the
+    /// result to every UI surface that shows agent state. Shared tail of `pollAgentStates`
+    /// (the heuristic fallback) and `handleHookEvent` (the event-driven path) — DRY.
+    private func recomputeRollupsAndRefreshUI() {
         var rollups: [String: AgentState] = [:]
         for wtID in surfaces.worktreeIDs {
             guard let list = surfaces.existingSurfaces(for: wtID) else { continue }
-            var perSurface: [AgentState] = []
-            for entry in list.entries {
-                let paneStates = entry.handle.allPanes.map { $0.currentAgentState() }
-                let surfaceState = rollup(paneStates)
-                states[surfaceKey(wtID, entry.surface.id)] = surfaceState
-                perSurface.append(surfaceState)
-            }
+            let perSurface = list.entries.map { agentStates[surfaceKey(wtID, $0.surface.id)] ?? .idle }
             rollups[wtID] = rollup(perSurface)
         }
-        for (k, v) in rollups { states[k] = v }
-        agentStates = states
+        for (k, v) in rollups { agentStates[k] = v }
         sidebar.updateAgentStates(rollups)
         updateNotch()
         refreshChromeForActiveSurface()
         refreshTabBar()
+    }
+
+    /// Route one decoded Claude Code hook event into the same `agentStates` map the poll
+    /// maintains, so the sidebar/notch/tab badges are driven by real lifecycle events instead
+    /// of scraped terminal text — no more 1.2s lag or stale-line stickiness.
+    private func handleHookEvent(_ event: AgentHookEvent) {
+        let key = surfaceKey(event.worktreeID, event.surfaceID)
+        switch event.event {
+        case .sessionStart: claudePresent.insert(key)
+        case .sessionEnd:   claudePresent.remove(key)
+        default: break
+        }
+        guard let newState = agentState(for: event.event) else {
+            recomputeRollupsAndRefreshUI(); return    // e.g. SessionStart: presence only
+        }
+        agentStates[key] = newState
+        // needs-you body = the Notification's own message; done body = last assistant text
+        // from the transcript (bounded read). No payload carries the assistant message directly.
+        let body: String?
+        switch newState {
+        case .needsYou: body = event.message
+        case .done:     body = event.transcriptPath.flatMap(Self.lastAssistantMessage(fromTranscriptAt:))
+        default:        body = nil
+        }
+        maybeNotify(worktreeID: event.worktreeID, state: newState, body: body)
+        recomputeRollupsAndRefreshUI()
+    }
+
+    /// Bounded read of a transcript JSONL's tail → last assistant text (Security §4). Reads
+    /// only the last ~64 KB, drops a partial leading line, and delegates parsing to CodaCore.
+    private static func lastAssistantMessage(fromTranscriptAt path: String) -> String? {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        let tailBytes: UInt64 = 64_000
+        let start = size > tailBytes ? size - tailBytes : 0
+        try? handle.seek(toOffset: start)
+        guard let data = try? handle.readToEnd(),
+              let text = String(data: data, encoding: .utf8) else { return nil }
+        let body = start > 0 ? String(text.drop { $0 != "\n" }.dropFirst()) : text
+        return lastAssistantText(fromTranscript: body)
+    }
+
+    /// Post a macOS notification for a needs-you/done transition, gated by the two independent
+    /// Settings toggles. `body` is untrusted (repo/web content the agent read) and is handed to
+    /// `AgentNotifier` for delivery as a plain `UNMutableNotificationContent.body` data field
+    /// only — never built into a shell/AppleScript string (Security §1).
+    private func maybeNotify(worktreeID: String, state: AgentState, body: String?) {
+        let allowed = (state == .needsYou && preferences.notifyOnNeedsYou)
+                   || (state == .done && preferences.notifyOnDone)
+        guard allowed else { return }
+        let title = displayWorktree(id: worktreeID)?.title ?? "Coda"
+        AgentNotifier.notify(worktreeID: worktreeID, title: title, state: state, body: body)
+    }
+
+    /// Bring a worktree to the foreground, reusing the same select+sidebar-highlight path
+    /// every other programmatic "jump to worktree" call site uses (e.g. after creating a
+    /// worktree or removing one), plus bringing the app/window forward since this is invoked
+    /// from a notification click while Coda may not be the active app.
+    private func focus(worktreeID: String) {
+        guard let wt = displayWorktree(id: worktreeID) else { return }
+        refreshSidebar(select: worktreeID)
+        select(wt)
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // MARK: - UNUserNotificationCenterDelegate
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                 didReceive response: UNNotificationResponse,
+                                 withCompletionHandler completionHandler: @escaping () -> Void) {
+        if let worktreeID = response.notification.request.content.userInfo["worktreeID"] as? String {
+            focus(worktreeID: worktreeID)
+        }
+        completionHandler()
     }
 
     private func updateNotch() {

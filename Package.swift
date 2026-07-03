@@ -17,6 +17,10 @@ let package = Package(
             ],
             resources: [.copy("Themes"), .copy("Resources")]
         ),
+        .executableTarget(
+            name: "CodaHook",
+            dependencies: ["CodaCore"]
+        ),
         .testTarget(name: "CodaCoreTests", dependencies: ["CodaCore"])
     ],
     swiftLanguageModes: [.v5]
