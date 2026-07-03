@@ -84,8 +84,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
         // Fallback sweep for surfaces that never emitted a hook event (plain shells, or a
         // Claude run started before the hook was installed): event-owned surfaces
-        // (`claudePresent`) are skipped here, so this is just a slow safety net now.
-        stateTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+        // (`claudePresent`) are skipped here, so this is just a safety net. 2s keeps the
+        // non-event path reasonably snappy without the old 1.2s per-tick full-grid scan cost.
+        stateTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             self?.pollAgentStates()
         }
         // iTerm-style ⌘+click to open a path:line in the editor, routed to the focused
@@ -587,8 +588,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             active.view.isHidden = false
             currentSurface = active
         }
-        refreshChromeForActiveSurface()
-        refreshTabBar()
+        // Force an immediate repaint from current agent state so the switched-to worktree's
+        // badges (sidebar + notch + tabs) are correct instantly, rather than waiting for the
+        // next hook event or the fallback poll. (Superset of refreshChrome+refreshTabBar.)
+        recomputeRollupsAndRefreshUI()
     }
 
     /// Build a fresh SplitSurface (single-pane) for `wt`, register it, install it in the detail
