@@ -88,10 +88,14 @@ public struct Preferences: Codable, Equatable {
     /// Defaults to `true`; older prefs files without the key decode to `true` via the
     /// custom decoder below, so existing users get notifications on by default.
     public var notifyOnDone: Bool
+    /// The shell to spawn in new terminals. Defaults to `.automatic` (the login shell);
+    /// older prefs files without the key decode to `.automatic` via the custom decoder below.
+    /// Changing this affects new terminals only. Portable (an enum, never a path).
+    public var shell: ShellChoice
     public init(defaultEditor: Editor = .vsCode, activeTheme: String? = nil,
                 terminalFont: TerminalFontPref? = nil, uiScale: UIScale = .medium,
                 declinedHookInstall: Bool = false, notifyOnNeedsYou: Bool = true,
-                notifyOnDone: Bool = true) {
+                notifyOnDone: Bool = true, shell: ShellChoice = .automatic) {
         self.defaultEditor = defaultEditor
         self.activeTheme = activeTheme
         self.terminalFont = terminalFont
@@ -99,6 +103,7 @@ public struct Preferences: Codable, Equatable {
         self.declinedHookInstall = declinedHookInstall
         self.notifyOnNeedsYou = notifyOnNeedsYou
         self.notifyOnDone = notifyOnDone
+        self.shell = shell
     }
 
     // Synthesized Codable would make `uiScale`/`declinedHookInstall`/`notifyOnNeedsYou`/
@@ -106,7 +111,7 @@ public struct Preferences: Codable, Equatable {
     // defaults each missing key (and keeps the other keys' existing optional/required behavior).
     private enum CodingKeys: String, CodingKey {
         case defaultEditor, activeTheme, terminalFont, uiScale, declinedHookInstall
-        case notifyOnNeedsYou, notifyOnDone
+        case notifyOnNeedsYou, notifyOnDone, shell
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -117,6 +122,7 @@ public struct Preferences: Codable, Equatable {
         self.declinedHookInstall = try c.decodeIfPresent(Bool.self, forKey: .declinedHookInstall) ?? false
         self.notifyOnNeedsYou = try c.decodeIfPresent(Bool.self, forKey: .notifyOnNeedsYou) ?? true
         self.notifyOnDone = try c.decodeIfPresent(Bool.self, forKey: .notifyOnDone) ?? true
+        self.shell = try c.decodeIfPresent(ShellChoice.self, forKey: .shell) ?? .automatic
     }
 }
 

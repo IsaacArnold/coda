@@ -59,4 +59,28 @@ final class LaunchCommandTests: XCTestCase {
         let args = terminalShellArgs(workingDirectory: "/tmp/wt", setupScript: "npm install", command: "")
         XCTAssertEqual(args, ["-i", "-c", "cd '/tmp/wt' && { npm install && exec zsh -i || exec zsh; }"])
     }
+
+    func testBashEmptyCommandExecsBashInteractive() {
+        let line = terminalLaunchLine(workingDirectory: "/tmp/wt", setupScript: "", command: "", shell: "bash")
+        XCTAssertEqual(line, "cd '/tmp/wt' && exec bash -i")
+    }
+
+    func testBashSetupFallsBackToBash() {
+        let line = terminalLaunchLine(workingDirectory: "/tmp/wt", setupScript: "npm install",
+                                      command: "", shell: "bash")
+        XCTAssertEqual(line, "cd '/tmp/wt' && { npm install && exec bash -i || exec bash; }")
+    }
+
+    func testBashCommandArgs() {
+        let args = terminalShellArgs(workingDirectory: "/tmp/wt", setupScript: "",
+                                     command: "claude", shell: "bash")
+        // A non-empty command is exec'd directly; the shell name only affects the fallback path.
+        XCTAssertEqual(args, ["-i", "-c", "cd '/tmp/wt' && exec claude"])
+    }
+
+    func testShellNameDefaultsToZsh() {
+        // Existing call sites that omit `shell:` keep zsh behavior.
+        let line = terminalLaunchLine(workingDirectory: "/tmp/wt", setupScript: "", command: "")
+        XCTAssertEqual(line, "cd '/tmp/wt' && exec zsh -i")
+    }
 }
