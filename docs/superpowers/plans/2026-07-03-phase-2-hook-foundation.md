@@ -881,11 +881,27 @@ In `applicationWillTerminate` (add if absent): `hookServer?.stop()`.
 Run: `swift build --product Coda`
 Expected: `Build complete!`.
 
-- [ ] **Step 8: Manual end-to-end (with a running socket, before the installer exists)**
+- [ ] **Step 8: Manual verify — env injection reaches the shell**
+
+Before wiring the forwarder, confirm the vars actually land in the PTY. Launch Coda
+(`swift run Coda`), open a worktree, and in its terminal run:
+
+Run: `env | grep CODA`
+Expected: three lines —
+```
+CODA_SOCKET_PATH=/Users/<you>/Library/Application Support/Coda/hooks.sock
+CODA_WORKTREE_ID=<the worktree id>
+CODA_SURFACE_ID=<this surface's id, e.g. s7>
+```
+If they're missing, the injection in Step 1/2 didn't take (check the `environment:`
+parameter type against SwiftTerm) — fix before proceeding. This is the cheap insurance that
+correlation will work; the socket line's first two fields come straight from these.
+
+- [ ] **Step 9: Manual end-to-end (with a running socket, before the installer exists)**
 
 Temporarily add the hook by hand to `~/.claude/settings.json` pointing at `.build/debug/coda-hook`, launch Coda (`swift run Coda`), open a worktree, run `claude`, submit a prompt. Expected: the sidebar badge turns 🟡 working on submit, 🔴/🟢 on stop — without the old 1.2s lag or stale-line stickiness.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add Sources/Coda/TerminalSurface.swift Sources/Coda/AppDelegate.swift

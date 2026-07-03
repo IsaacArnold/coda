@@ -100,6 +100,48 @@ and `transcript_path` straight from the stdin payload; it does **not** read the 
 itself (that stays in Coda — Security §5). Line-framed, bounded (Security §4); IDs are the
 injected env values.
 
+### Worked example — three channels (env ⊕ stdin → socket)
+
+The `CODA_*` values are **not** in Claude Code's JSON payload. Claude knows nothing about
+Coda; it writes its normal payload to the hook's **stdin**. Our identity rides the inherited
+**process environment**. The forwarder fuses the two. This split is the whole point:
+identity is set by Coda at spawn and can't be spoofed by, or drift from, the payload.
+
+**(1) Environment** in the surface's PTY (same for every event in that pane — identifies
+*which pane*, not *what happened*):
+```
+CODA_SOCKET_PATH=/Users/isaac/Library/Application Support/Coda/hooks.sock
+CODA_WORKTREE_ID=coda#feat-hooks
+CODA_SURFACE_ID=s7
+PATH=…  TERM=xterm-256color  SHELL=/bin/zsh      # inherited; plus Claude Code's own env
+```
+
+**(2) stdin payload** Claude Code sends (no `CODA_*` in it):
+```json
+// PreToolUse (→ working)
+{ "session_id":"3f2b…", "transcript_path":"/Users/…/3f2b….jsonl", "cwd":"/Users/…/feat-hooks",
+  "hook_event_name":"PreToolUse", "permission_mode":"default",
+  "tool_name":"Bash", "tool_input":{ "command":"swift test" } }
+// Notification (→ needsYou)
+{ "session_id":"3f2b…", "transcript_path":"/Users/…/3f2b….jsonl", "cwd":"/Users/…/feat-hooks",
+  "hook_event_name":"Notification", "message":"Claude needs your permission to run swift test" }
+// Stop (→ done)
+{ "session_id":"3f2b…", "transcript_path":"/Users/…/3f2b….jsonl", "cwd":"/Users/…/feat-hooks",
+  "hook_event_name":"Stop" }
+```
+
+**(3) Socket line** the forwarder emits (env IDs + selected stdin fields):
+```
+coda#feat-hooks s7 {"hook_event_name":"PreToolUse","transcript_path":"/Users/…/3f2b….jsonl"}
+coda#feat-hooks s7 {"hook_event_name":"Notification","message":"Claude needs your permission to run swift test","transcript_path":"/Users/…/3f2b….jsonl"}
+coda#feat-hooks s7 {"hook_event_name":"Stop","transcript_path":"/Users/…/3f2b….jsonl"}
+```
+
+Coda decodes each line, checks `s7` is a live surface in `coda#feat-hooks` (allowlist §3),
+maps the event to a state (`agentStates["coda#feat-hooks|s7"]`), and for `Stop` opens that
+`transcript_path` (bounded tail read) for the done-notification body. (`session_id` and
+`transcript_path` being on every payload is also what makes the deferred `--resume` cheap.)
+
 ### Fate of the heuristic
 
 The scrollback poll (`AppDelegate.swift:66` → `pollAgentStates()`, 1.2s) and
