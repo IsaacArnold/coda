@@ -258,3 +258,21 @@ own brainstorm → spec once 2a/2b land.
   now (`DECISIONS.md:124`), re-check at implementation. The parser's closed-enum +
   drop-unknown behaviour and optional `message`/`transcript_path` fail safe if a field is
   missing (a done notification just falls back to a generic body).
+
+### Known limitation — needs-you (🔴) latency (measured 2026-07-03)
+
+The 🔴 needs-you badge is driven by the `Notification` event, and **Claude Code fires that
+hook ~6s *after* the permission/input prompt actually appears** (it's really an
+"idle/waiting" notification, not a prompt-time one). Consequences, confirmed by timestamped
+instrumentation of the live pipeline:
+- 🟡→🟢 (`Stop`) is immediate; 🟡→🔴 (`Notification`) lags ~6s.
+- Coda's own pipeline is **instant** — socket receive → decode → allowlist → main-thread
+  repaint all land in the same millisecond. The delay is entirely upstream in Claude Code.
+- `PermissionRequest` (a plausible prompt-time signal) **does not fire** in this flow, so
+  there is no faster event to switch to.
+
+The only prompt-time signal is the on-screen prompt itself. We **deliberately do not**
+reintroduce a scrollback heuristic to beat the delay (decided 2026-07-03) — it would walk
+back the "authoritative, no heuristic" design for a latency issue we don't own. Accepted as
+a known Claude-Code limitation; revisit if Claude adds a prompt-time hook event (or a
+configurable Notification delay).
