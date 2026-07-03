@@ -10,10 +10,12 @@ final class AgentHookSocketServer {
     private let onEvent: (AgentHookEvent) -> Void
 
     // `acceptLoop()` blocks forever in `accept()`, so it gets its own dedicated queue. Reads are
-    // dispatched onto a *different* concurrent queue so a blocked/slow client can never starve
-    // the accept loop (and multiple clients can be read concurrently).
+    // dispatched onto a *different, serial* queue so a blocked/slow client can never starve
+    // the accept loop. The queue is serial (not concurrent) so `readClient` — and therefore the
+    // injected `isKnownSurface` closure — is always invoked one-at-a-time, never from multiple
+    // threads at once; that keeps no undocumented thread-safety contract on the closure's caller.
     private let acceptQueue = DispatchQueue(label: "coda.hook.socket.accept")
-    private let readQueue = DispatchQueue(label: "coda.hook.socket.read", attributes: .concurrent)
+    private let readQueue = DispatchQueue(label: "coda.hook.socket.read")
 
     // `running`/`listenFD` are written from `start()`/`stop()` (caller thread) and read from
     // `acceptLoop()` (accept-queue thread); guard them with a lock so there's no unsynchronized
@@ -67,9 +69,17 @@ final class AgentHookSocketServer {
         let bound = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, len) }
         }
-        guard bound == 0 else { close(fd); throw NSError(domain: "coda.hook", code: 3) }
+        guard bound == 0 else {
+            close(fd)
+            stateLock.lock(); listenFD = -1; stateLock.unlock()
+            throw NSError(domain: "coda.hook", code: 3)
+        }
         chmod(socketURL.path, 0o600)               // Security §2
-        guard listen(fd, 16) == 0 else { close(fd); throw NSError(domain: "coda.hook", code: 4) }
+        guard listen(fd, 16) == 0 else {
+            close(fd)
+            stateLock.lock(); listenFD = -1; stateLock.unlock()
+            throw NSError(domain: "coda.hook", code: 4)
+        }
         stateLock.lock(); running = true; stateLock.unlock()
         acceptQueue.async { [weak self] in self?.acceptLoop() }
     }
