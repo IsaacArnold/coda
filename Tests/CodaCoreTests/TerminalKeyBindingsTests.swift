@@ -33,4 +33,24 @@ final class TerminalKeyBindingsTests: XCTestCase {
             XCTAssertEqual(action(key), .passThrough, "⌘\(key) should pass through")
         }
     }
+
+    func testCommandEnterInsertsNewline() {
+        XCTAssertEqual(action("\r", command: true, shift: false), .insertNewline)
+    }
+
+    func testShiftEnterInsertsNewline() {
+        XCTAssertEqual(terminalKeyAction(charactersIgnoringModifiers: "\r",
+                                         command: false, shift: true, option: false), .insertNewline)
+    }
+
+    func testOptionEnterInsertsNewline() {
+        XCTAssertEqual(terminalKeyAction(charactersIgnoringModifiers: "\r",
+                                         command: false, shift: false, option: true), .insertNewline)
+    }
+
+    func testPlainEnterPassesThrough() {
+        // A bare Return is normal terminal input (submit), not a soft newline.
+        XCTAssertEqual(terminalKeyAction(charactersIgnoringModifiers: "\r",
+                                         command: false, shift: false, option: false), .passThrough)
+    }
 }

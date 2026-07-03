@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var kbStore: KeybindingsStore!
     private var keybindings = Keybindings()
     private var clickMonitor: Any?
+    private var keyMonitor: Any?
     private var settingsWC: NSWindowController?
     // Open-in toolbar item ref, so its icon/tooltip/menu track the chosen default editor.
     private weak var openInItem: NSMenuToolbarItem?
@@ -99,6 +100,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             if event.type == .leftMouseDown { pane.handleCommandClick(event) }
             return nil
         }
+        // ⌘/⇧/⌥+Enter → soft newline (LF), Claude Code's chat:newline. SwiftTerm seals
+        // keyDown (public, not open), so we can't override it on the terminal view; an
+        // app-level keyDown monitor (like the ⌘+click monitor above) reliably catches these
+        // combos and routes LF to the focused terminal. Plain Enter passes through (submit).
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            guard let self, event.window === self.window else { return event }
+            let mods = event.modifierFlags
+            guard terminalKeyAction(charactersIgnoringModifiers: event.charactersIgnoringModifiers ?? "",
+                                    command: mods.contains(.command), shift: mods.contains(.shift),
+                                    option: mods.contains(.option)) == .insertNewline,
+                  let term = self.focusedTerminalView() else { return event }
+            term.sendSoftNewline()
+            return nil
+        }
+    }
+
+    /// The ClickableTerminalView that currently holds keyboard focus in the main window, or
+    /// nil. Walks up from the first responder, since the responder may be the terminal view
+    /// itself or a descendant.
+    private func focusedTerminalView() -> ClickableTerminalView? {
+        var view = window.firstResponder as? NSView
+        while let current = view {
+            if let terminal = current as? ClickableTerminalView { return terminal }
+            view = current.superview
+        }
+        return nil
     }
 
     func applicationWillTerminate(_ notification: Notification) {

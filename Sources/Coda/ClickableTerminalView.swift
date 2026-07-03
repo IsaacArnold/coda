@@ -158,9 +158,16 @@ final class ClickableTerminalView: LocalProcessTerminalView {
         case .deleteToLineStart:
             send(txt: "\u{15}")          // Ctrl-U: kill input line back to the prompt
             return true
-        case .passThrough:
+        case .passThrough, .insertNewline:
             return super.performKeyEquivalent(with: event)
         }
+    }
+
+    /// Send a soft newline (LF, 0x0a — Claude Code's chat:newline) to the PTY. Called by the
+    /// app-level key monitor for ⌘/⇧/⌥+Enter: SwiftTerm seals `keyDown` (public, not open),
+    /// so these combos can't be intercepted by overriding keyDown on the terminal view.
+    func sendSoftNewline() {
+        send(data: [UInt8(0x0a)][0...])
     }
 
     /// True only for the visible terminal that currently holds keyboard focus — AppKit
