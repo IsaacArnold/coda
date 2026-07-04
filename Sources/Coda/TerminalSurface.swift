@@ -88,6 +88,11 @@ final class TerminalSurface: NSViewController {
         terminal?.containsClick(event) ?? false
     }
 
+    /// Whether a ⌘+click here would open a link/file — drives the ⌘-hover pointer cursor.
+    func linkExists(at event: NSEvent) -> Bool {
+        terminal?.linkExists(at: event) ?? false
+    }
+
     /// Last classified agent state, reused by `currentAgentState()` while the terminal is
     /// idle. `nil` until the first classification.
     private var cachedAgentState: AgentState?
