@@ -266,4 +266,52 @@ final class WorktreeStoreTests: XCTestCase {
         let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
         XCTAssertThrowsError(try store.currentBranch(repoID: "nope"))
     }
+
+    func testCreateWorktreeForksFromExplicitBase() throws {
+        let repo = try makeTempRepo()   // branch "main", has README.md
+        func git(_ args: [String]) throws {
+            let r = try ProcessRunner.run("/usr/bin/git", ["-C", repo] + args, cwd: nil)
+            XCTAssertEqual(r.exitCode, 0, r.stderr)
+        }
+        // A develop-only file marks develop's tip; main does not have it.
+        try git(["checkout", "-b", "develop"])
+        try "dev".write(toFile: repo + "/DEV.md", atomically: true, encoding: .utf8)
+        try git(["add", "."]); try git(["commit", "-m", "dev-only"])
+        try git(["checkout", "main"])
+
+        let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: repo)
+        let s = try store.createWorktree(repoID: r.id, title: "From Develop", base: "develop")
+
+        XCTAssertEqual(s.branch, "from-develop")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: s.worktreePath + "/DEV.md"),
+                      "worktree should be forked from develop, which has DEV.md")
+    }
+
+    func testCreateWorktreeDefaultsToCurrentHeadWhenBaseNil() throws {
+        let repo = try makeTempRepo()   // on main; DEV.md lives only on develop
+        func git(_ args: [String]) throws {
+            let r = try ProcessRunner.run("/usr/bin/git", ["-C", repo] + args, cwd: nil)
+            XCTAssertEqual(r.exitCode, 0, r.stderr)
+        }
+        try git(["checkout", "-b", "develop"])
+        try "dev".write(toFile: repo + "/DEV.md", atomically: true, encoding: .utf8)
+        try git(["add", "."]); try git(["commit", "-m", "dev-only"])
+        try git(["checkout", "main"])
+
+        let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: repo)
+        let s = try store.createWorktree(repoID: r.id, title: "From Head")   // base omitted → main
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: s.worktreePath + "/DEV.md"),
+                       "omitting base should fork from current HEAD (main), which lacks DEV.md")
+    }
+
+    func testLocalBranchesForRepo() throws {
+        let repo = try makeTempRepo()
+        _ = try ProcessRunner.run("/usr/bin/git", ["-C", repo, "branch", "develop"], cwd: nil)
+        let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: repo)
+        XCTAssertEqual(Set(try store.localBranches(repoID: r.id)), ["main", "develop"])
+    }
 }

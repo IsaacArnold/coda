@@ -60,6 +60,14 @@ public final class WorktreeStore {
         return (try? git.shortHead(repo: repo.path)) ?? "HEAD"
     }
 
+    /// The repo's local branch names, for the "base branch" picker in New Worktree.
+    public func localBranches(repoID: String) throws -> [String] {
+        guard let repo = state.repositories.first(where: { $0.id == repoID }) else {
+            throw WorktreeStoreError.repoNotFound(repoID)
+        }
+        return try git.localBranches(repo: repo.path)
+    }
+
     /// Forget a repository: removes it and all its worktrees from local state and persists.
     /// Returns the removed worktrees so the shell can evict their surfaces. NEVER deletes any
     /// branch, worktree directory, or repo on disk — this is purely a Coda-side forget.
@@ -75,16 +83,16 @@ public final class WorktreeStore {
         return removed
     }
 
-    public func createWorktree(repoID: String, title: String) throws -> Worktree {
+    public func createWorktree(repoID: String, title: String, base: String? = nil) throws -> Worktree {
         guard let repo = state.repositories.first(where: { $0.id == repoID }) else {
             throw WorktreeStoreError.repoNotFound(repoID)
         }
-        let base = try git.currentBranch(repo: repo.path)
+        let resolvedBase = try base ?? git.currentBranch(repo: repo.path)
         let branch = uniqueBranch(base: slugify(title), repo: repo)
         let worktreePath = (worktreeRoot as NSString)
             .appendingPathComponent(repo.name)
             .appending("/").appending(branch)
-        try git.add(repo: repo.path, path: worktreePath, branch: branch, base: base)
+        try git.add(repo: repo.path, path: worktreePath, branch: branch, base: resolvedBase)
 
         do {
             // Seed the fresh worktree with repo-configured untracked files (e.g. .env).
