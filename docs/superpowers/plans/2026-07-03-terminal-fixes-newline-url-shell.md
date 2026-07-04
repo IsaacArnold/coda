@@ -1007,6 +1007,28 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ### Task 5: Diagnose & fix intermittent invisible typed text in Claude's TUI (#3)
 
+> **STATUS (2026-07-04): DEFERRED.** Not reproduced/fixed in this branch. The bug is
+> intermittent and GUI-only; it cannot be reproduced or observed autonomously (no Screen
+> Recording permission — see [[debugging-terminal-rendering]]) and the maintainer reports it
+> is now rare/uncertain on the current build. Deferred until it can be reliably reproduced.
+>
+> **Corrections to the fix specs below, from a static read of SwiftTerm 1.13.0 — do not
+> follow Step 4a as written:**
+> - In Claude's TUI the shell is in **raw mode with no local echo**: a typed key only sends
+>   bytes to the PTY. The glyph appears when the app **echoes it back as output** —
+>   `dataReceived` → `feed` → SwiftTerm's `Terminal.updateRange` marks the row dirty →
+>   throttled `updateDisplay` (queued at ~1/60s) calls `setNeedsDisplay` on just
+>   `refreshStart…refreshEnd`. So "invisible typed text" is really "echoed output not painted."
+> - Therefore Step 4a's lever is wrong: it sets `needsDisplay = true` in a `keyDown` override,
+>   but (a) that override no longer exists — soft-newline (Task 1) became an **app-level
+>   NSEvent monitor** (`ClickableTerminalView.sendSoftNewline()`) because SwiftTerm seals
+>   `keyDown` (public, not open), and (b) at keyDown time the echoed glyph isn't in the model
+>   yet, so repainting then paints nothing new.
+> - If this is pursued as H1, the correct app-layer lever is in the **`dataReceived` path**
+>   (already overridden in `ClickableTerminalView`), forcing a fuller repaint after output —
+>   not `keyDown`. The likely true cause is upstream in SwiftTerm's throttled `updateDisplay`
+>   dirty-region math (`AppleTerminalView.updateDisplay` + `Terminal.getUpdateRange`).
+
 This is a **diagnosis-first** task: the symptom (typed glyphs render in the background color; cursor advances; intermittent; recovers on redraw; mostly in Claude's TUI on SwiftTerm 1.13.0) does not yet have a confirmed root cause, so we reproduce and observe before committing a fix. Two candidate fixes are fully specified below; the diagnosis selects one. **Use the superpowers:systematic-debugging skill for this task.**
 
 **Files:**
