@@ -1480,7 +1480,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 6
-        stack.frame = NSRect(x: 0, y: 0, width: 260, height: 100)
+        stack.frame = NSRect(x: 0, y: 0, width: 260, height: 120)
         titleField.widthAnchor.constraint(equalToConstant: 260).isActive = true
         basePopup.widthAnchor.constraint(equalToConstant: 260).isActive = true
         alert.accessoryView = stack
