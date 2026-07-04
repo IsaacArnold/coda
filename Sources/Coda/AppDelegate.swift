@@ -570,9 +570,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             presentMessage("Add a repo first (Add Repo…).")
             return
         }
-        let title = promptForText(prompt: "Worktree title:", defaultValue: "New Worktree") ?? "New Worktree"
+        guard let (title, base) = promptForNewWorktree(repo: repo) else { return }
         do {
-            let s = try store.createWorktree(repoID: repo.id, title: title)
+            let s = try store.createWorktree(repoID: repo.id, title: title, base: base)
             pendingSetupWorktreeIDs.insert(s.id)
             refreshSidebar(select: s.id)
             select(s)
@@ -1449,6 +1449,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     // MARK: - small helpers
+
+    /// Prompt for a new worktree's title and the local branch it forks from. Returns nil on
+    /// Cancel. When branch enumeration yields nothing (e.g. an unborn repo), falls back to the
+    /// title-only prompt with the base left at the repo's current HEAD.
+    private func promptForNewWorktree(repo: Repository) -> (title: String, base: String)? {
+        let branches = (try? store.localBranches(repoID: repo.id)) ?? []
+        let currentHead = try? store.currentBranch(repoID: repo.id)
+
+        guard !branches.isEmpty else {
+            guard let title = promptForText(prompt: "Worktree title:", defaultValue: "New Worktree") else { return nil }
+            return (title, currentHead ?? "HEAD")
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "New Worktree"
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Cancel")
+
+        let titleLabel = NSTextField(labelWithString: "Title")
+        let titleField = NSTextField(string: "New Worktree")
+        let baseLabel = NSTextField(labelWithString: "Base branch")
+        let basePopup = NSPopUpButton()
+        for b in branches { basePopup.addItem(withTitle: b) }
+        if let head = currentHead, let idx = branches.firstIndex(of: head) {
+            basePopup.selectItem(at: idx)
+        }
+
+        let stack = NSStackView(views: [titleLabel, titleField, baseLabel, basePopup])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        stack.frame = NSRect(x: 0, y: 0, width: 260, height: 100)
+        titleField.widthAnchor.constraint(equalToConstant: 260).isActive = true
+        basePopup.widthAnchor.constraint(equalToConstant: 260).isActive = true
+        alert.accessoryView = stack
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let title = titleField.stringValue.isEmpty ? "New Worktree" : titleField.stringValue
+        let base = basePopup.titleOfSelectedItem ?? currentHead ?? "HEAD"
+        return (title, base)
+    }
 
     private func promptForText(prompt: String, defaultValue: String) -> String? {
         let alert = NSAlert()
