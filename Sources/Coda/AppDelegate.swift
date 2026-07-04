@@ -43,6 +43,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var kbStore: KeybindingsStore!
     private var keybindings = Keybindings()
     private var clickMonitor: Any?
+    private var keyMonitor: Any?
+    private var hoverMonitor: Any?
     private var settingsWC: NSWindowController?
     // Open-in toolbar item ref, so its icon/tooltip/menu track the chosen default editor.
     private weak var openInItem: NSMenuToolbarItem?
@@ -99,6 +101,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             if event.type == .leftMouseDown { pane.handleCommandClick(event) }
             return nil
         }
+        // ⌘/⇧/⌥+Enter → soft newline (LF), Claude Code's chat:newline. SwiftTerm seals
+        // keyDown (public, not open), so we can't override it on the terminal view; an
+        // app-level keyDown monitor (like the ⌘+click monitor above) reliably catches these
+        // combos and routes LF to the focused terminal. Plain Enter passes through (submit).
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            guard let self, event.window === self.window else { return event }
+            let mods = event.modifierFlags
+            guard terminalKeyAction(charactersIgnoringModifiers: event.charactersIgnoringModifiers ?? "",
+                                    command: mods.contains(.command), shift: mods.contains(.shift),
+                                    option: mods.contains(.option)) == .insertNewline,
+                  let term = self.focusedTerminalView() else { return event }
+            term.sendSoftNewline()
+            return nil
+        }
+        // ⌘-hover over a link → pointing-hand cursor, like a browser. Mirrors the ⌘+click
+        // monitor. Only meaningful while ⌘ is held — which is also when SwiftTerm turns on its
+        // mouse-move tracking area, so these events reliably flow to us.
+        hoverMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .flagsChanged]) { [weak self] event in
+            self?.updateLinkCursor(for: event)
+            return event
+        }
+    }
+
+    /// Show the pointing-hand cursor while ⌘ is held over a clickable link/file. SwiftTerm
+    /// hard-codes an I-beam cursor rect and seals its mouse/cursor methods (`public`, not
+    /// `open`), so we can't set the cursor on the terminal view directly. Our monitor runs
+    /// *before* the window re-applies that I-beam rect for the same event, so we defer the
+    /// hand cursor to the next runloop tick to land after it. When not over a link we do
+    /// nothing — SwiftTerm's I-beam rect already reasserts itself for the event.
+    private func updateLinkCursor(for event: NSEvent) {
+        let overLink: Bool = {
+            guard window != nil, window.isKeyWindow, event.window === window,
+                  event.modifierFlags.contains(.command),
+                  let pane = currentSurface?.paneContaining(event) else { return false }
+            return pane.linkExists(at: event)
+        }()
+        guard overLink else { return }
+        DispatchQueue.main.async { NSCursor.pointingHand.set() }
+    }
+
+    /// The ClickableTerminalView that currently holds keyboard focus in the main window, or
+    /// nil. Walks up from the first responder, since the responder may be the terminal view
+    /// itself or a descendant.
+    private func focusedTerminalView() -> ClickableTerminalView? {
+        var view = window.firstResponder as? NSView
+        while let current = view {
+            if let terminal = current as? ClickableTerminalView { return terminal }
+            view = current.superview
+        }
+        return nil
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -392,7 +444,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 notifyOnNeedsYou: preferences.notifyOnNeedsYou,
                 onChangeNotifyOnNeedsYou: { [weak self] on in self?.setNotifyOnNeedsYou(on) },
                 notifyOnDone: preferences.notifyOnDone,
-                onChangeNotifyOnDone: { [weak self] on in self?.setNotifyOnDone(on) })
+                onChangeNotifyOnDone: { [weak self] on in self?.setNotifyOnDone(on) },
+                shell: preferences.shell,
+                onChangeShell: { [weak self] choice in self?.setShell(choice) })
             let win = NSWindow(contentViewController: tab)
             win.title = "Settings"
             win.styleMask = [.titled, .closable]
@@ -653,7 +707,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private func makePane(in wt: Worktree, command: String, setup: String, surfaceID: String) -> TerminalSurface {
         let pane = TerminalSurface(workingDirectory: wt.worktreePath, command: command, setupScript: setup,
                                    hookWorktreeID: wt.id, hookSurfaceID: surfaceID,
-                                   hookSocketPath: hookServer?.socketPath ?? "")
+                                   hookSocketPath: hookServer?.socketPath ?? "",
+                                   shell: resolvedShell())
         pane.onOpenFile = { [weak self] path, line in self?.openInDefaultEditor(path: path, line: line) }
         pane.onTitleChange = { [weak self] _ in self?.refreshTabBar() }
         pane.applyTheme(activeTheme)
@@ -926,6 +981,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return NSFont(descriptor: descriptor, size: base.pointSize) ?? base
     }
 
+    /// The shell to spawn in new terminals, per the user's preference. `.automatic` uses the
+    /// login shell from `$SHELL`, falling back to the password DB, then to /bin/zsh.
+    private func resolvedShell() -> ResolvedShell {
+        let login = ProcessInfo.processInfo.environment["SHELL"] ?? loginShellFromPasswordDB()
+        return resolveShell(choice: preferences.shell, loginShell: login)
+    }
+
+    /// The current user's login shell from the password database (getpwuid), or nil.
+    /// Fallback for the rare case `$SHELL` is absent (e.g. an unusual launch context).
+    private func loginShellFromPasswordDB() -> String? {
+        guard let pw = getpwuid(getuid()), let shell = pw.pointee.pw_shell else { return nil }
+        let path = String(cString: shell)
+        return path.isEmpty ? nil : path
+    }
+
     /// Current chrome metrics from the saved interface-size preference.
     private var uiMetrics: UIMetrics { UIMetrics(scale: preferences.uiScale) }
 
@@ -943,6 +1013,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         preferences.uiScale = scale
         do { try prefsStore.save(preferences) } catch { presentError(error) }
         applyUIMetrics()
+    }
+
+    /// Persist the shell preference. Applies to new terminals only; running shells keep
+    /// their process.
+    private func setShell(_ shell: ShellChoice) {
+        preferences.shell = shell
+        do { try prefsStore.save(preferences) } catch { presentError(error) }
+        // Applies to new terminals only; running shells keep their process.
     }
 
     /// Persist the "notify when an agent needs you" toggle.

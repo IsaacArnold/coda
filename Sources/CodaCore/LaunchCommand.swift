@@ -12,39 +12,34 @@ public func launchCommand(for repo: Repository) -> String {
     "claude"
 }
 
-/// Build the `zsh -i -c` line for a terminal surface.
-/// - Empty `command` (shell-first): exec a live interactive shell (`zsh -i`) so the
-///   worktree drops into a plain shell rather than a command-then-dead terminal.
+/// Build the `<shell> -i -c` line for a terminal surface.
+/// - Empty `command` (shell-first): exec a live interactive shell (`<shell> -i`).
 /// - Non-empty `command`: `exec <command>` (the command replaces the shell).
-/// - With setupScript: run setup first; on success exec the target; on failure
-///   drop into an interactive shell so the user can investigate, instead of the
-///   terminal dying. `exec` must NOT precede the setup chain, so it sits only in
-///   front of the final target.
-/// `command` is intentionally not quoted (it is a single token like `claude`).
-public func terminalLaunchLine(workingDirectory: String, setupScript: String, command: String) -> String {
+/// - With setupScript: run setup first; on success exec the target; on failure drop into
+///   an interactive shell (`exec <shell>`) so the user can investigate.
+/// `shell` is the interactive shell's name (e.g. "zsh", "bash"); it only appears in the
+/// shell-first target and the setup-failure fallback. `command` is not quoted (a single
+/// token like `claude`).
+public func terminalLaunchLine(workingDirectory: String, setupScript: String,
+                               command: String, shell: String = "zsh") -> String {
     let dir = shellSingleQuote(workingDirectory)
     let setup = setupScript.trimmingCharacters(in: .whitespacesAndNewlines)
-    let target = command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "zsh -i" : command
+    let target = command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "\(shell) -i" : command
     if setup.isEmpty {
         return "cd \(dir) && exec \(target)"
     }
-    return "cd \(dir) && { \(setup) && exec \(target) || exec zsh; }"
+    return "cd \(dir) && { \(setup) && exec \(target) || exec \(shell); }"
 }
 
-/// The argv (after `/bin/zsh`, whose argv0 is always the login `-zsh`) for a terminal
-/// surface. `currentDirectory` is set on the spawn, so the working directory is handled
-/// out-of-band and needs no `cd` for the shell-first path.
-///
-/// - Shell-first (no setup, no command): a single interactive login shell (`-i`), with
-///   NO `-c` wrapper. The previous form `-i -c "cd … && exec zsh -i"` sourced `.zshrc`
-///   twice — once for the outer `-i` shell, once for the exec'd inner `zsh -i` — which
-///   roughly doubled new-tab startup on machines with heavy dotfiles. A single shell
-///   sources `.zprofile`/`.zshrc` exactly once.
-/// - With setup and/or command: keep the `-i -c <line>` form. The `-i` is load-bearing
-///   here — a non-shell target like `claude` is `exec`'d directly (no inner interactive
-///   shell), so the outer shell must source `.zshrc` for it to inherit the interactive
-///   environment (PATH, etc.).
-public func terminalShellArgs(workingDirectory: String, setupScript: String, command: String) -> [String] {
+/// The argv (after the shell executable, whose argv0 is the login `-<shell>`) for a terminal
+/// surface. `currentDirectory` is set on the spawn, so no `cd` is needed for the shell-first
+/// path.
+/// - Shell-first (no setup, no command): a single interactive login shell (`-i`), NO `-c`
+///   wrapper — a `-c` form would nest a second interactive shell and source rc files twice.
+/// - With setup and/or command: keep the `-i -c <line>` form; a directly-exec'd target
+///   (e.g. `claude`) needs the outer shell's `-i` to source the interactive environment.
+public func terminalShellArgs(workingDirectory: String, setupScript: String,
+                              command: String, shell: String = "zsh") -> [String] {
     let setup = setupScript.trimmingCharacters(in: .whitespacesAndNewlines)
     let cmd = command.trimmingCharacters(in: .whitespacesAndNewlines)
     if setup.isEmpty && cmd.isEmpty {
@@ -52,5 +47,5 @@ public func terminalShellArgs(workingDirectory: String, setupScript: String, com
     }
     return ["-i", "-c", terminalLaunchLine(workingDirectory: workingDirectory,
                                            setupScript: setupScript,
-                                           command: command)]
+                                           command: command, shell: shell)]
 }

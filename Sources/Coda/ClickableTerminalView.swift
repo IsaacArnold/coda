@@ -158,9 +158,16 @@ final class ClickableTerminalView: LocalProcessTerminalView {
         case .deleteToLineStart:
             send(txt: "\u{15}")          // Ctrl-U: kill input line back to the prompt
             return true
-        case .passThrough:
+        case .passThrough, .insertNewline:
             return super.performKeyEquivalent(with: event)
         }
+    }
+
+    /// Send a soft newline (LF, 0x0a — Claude Code's chat:newline) to the PTY. Called by the
+    /// app-level key monitor for ⌘/⇧/⌥+Enter: SwiftTerm seals `keyDown` (public, not open),
+    /// so these combos can't be intercepted by overriding keyDown on the terminal view.
+    func sendSoftNewline() {
+        send(data: [UInt8(0x0a)][0...])
     }
 
     /// True only for the visible terminal that currently holds keyboard focus — AppKit
@@ -178,39 +185,81 @@ final class ClickableTerminalView: LocalProcessTerminalView {
         return bounds.contains(convert(event.locationInWindow, from: nil))
     }
 
+    /// A ⌘-clickable target under the pointer. iTerm parity: URLs open in the browser, files
+    /// in the editor, and directories (e.g. the cwd printed in the shell prompt) in Finder.
+    private enum ClickTarget {
+        case url(URL)
+        case file(path: String, line: Int?)
+        case directory(path: String)
+    }
+
     /// Called by the app's ⌘+click monitor (SwiftTerm's `mouseDown`/`requestOpenLink`
     /// are `public` but not `open`, so we can't override them). Returns true if it
     /// opened something.
     @discardableResult
     func handleCommandClick(_ event: NSEvent) -> Bool {
-        guard containsClick(event) else { return false }
+        switch clickTarget(at: event) {
+        case .url(let url):
+            NSWorkspace.shared.open(url)
+            return true
+        case .file(let path, let line):
+            onOpenFile?(path, line)
+            return true
+        case .directory(let path):
+            // iTerm opens a clicked directory (typically the prompt's cwd) in Finder.
+            NSWorkspace.shared.open(URL(fileURLWithPath: path, isDirectory: true))
+            return true
+        case nil:
+            return false
+        }
+    }
+
+    /// Whether a ⌘+click at this location would open something. Used by the app's ⌘-hover
+    /// monitor to show the pointing-hand cursor over links without acting on them.
+    func linkExists(at event: NSEvent) -> Bool {
+        clickTarget(at: event) != nil
+    }
+
+    /// The URL or file path under `event`, or nil — the single source of truth shared by the
+    /// ⌘+click handler and the ⌘-hover cursor, so the affordance and the action never disagree.
+    private func clickTarget(at event: NSEvent) -> ClickTarget? {
+        guard containsClick(event) else { return nil }
         let point = convert(event.locationInWindow, from: nil)
 
         let term = getTerminal()
         let cols = term.cols, rows = term.rows
-        guard rows > 0, cols > 0, bounds.height > 0 else { return false }
+        guard rows > 0, cols > 0, bounds.height > 0 else { return nil }
 
         let cellHeight = bounds.height / CGFloat(rows)
         let yFromTop = isFlipped ? point.y : (bounds.height - point.y)
         let screenRow = max(0, min(rows - 1, Int(yFromTop / cellHeight)))
+        // `getText` addresses the absolute buffer (scrollback + on-screen rows), but the
+        // click gives a screen-relative row. Add the scroll offset — `getTopVisibleRow()`
+        // is `buffer.yDisp`, the top visible buffer row — to land on the line actually under
+        // the cursor, mirroring SwiftTerm's own `bufferRow = screenRow + yDisp`. Without this,
+        // any scrollback (i.e. almost always in a busy session) read a stale line from the top
+        // of history, so URLs fell through to the file route or matched nothing.
+        let bufferRow = screenRow + term.getTopVisibleRow()
 
-        // Scan the clicked row plus neighbors: row math is approximate and a path can
-        // wrap. Assumes no scrollback offset (screen row == buffer row).
+        // Scan the clicked row plus neighbors: row math is approximate and a path/URL can
+        // wrap. `getText` clamps the upper bound itself, so only guard against negatives.
+        // A URL on a line wins over the file/directory route. Directories are only honoured on
+        // the clicked row (dr == 0): the prompt's cwd is an existing directory, and matching it
+        // from a *neighbouring* row would let it hijack a click aimed at a (non-resolving) file.
         for dr in [0, -1, 1] {
-            let rr = screenRow + dr
-            guard rr >= 0, rr < rows else { continue }
+            let rr = bufferRow + dr
+            guard rr >= 0 else { continue }
             let line = term.getText(start: Position(col: 0, row: rr),
                                     end: Position(col: cols - 1, row: rr))
-            if let (path, lineNo) = resolvePath(in: line) {
-                onOpenFile?(path, lineNo)
-                return true
+            if let url = firstWebURL(in: line) {
+                return .url(url)
             }
-            if let url = firstURL(in: line) {
-                NSWorkspace.shared.open(url)
-                return true
+            if let hit = resolvePath(in: line, allowDirectory: dr == 0) {
+                return hit.isDirectory ? .directory(path: hit.path)
+                                       : .file(path: hit.path, line: hit.line)
             }
         }
-        return false
+        return nil
     }
 
     private var baseDirs: [String] {
@@ -226,12 +275,18 @@ final class ClickableTerminalView: LocalProcessTerminalView {
         return dirs
     }
 
-    /// First token on the line that resolves to a file that exists. Supports
-    /// `path`, `path:line`, and `path:line:col`.
-    private func resolvePath(in line: String) -> (path: String, line: Int?)? {
+    /// First token on the line that resolves to an existing filesystem path, with whether it's
+    /// a directory. Supports `path`, `path:line`, and `path:line:col`. When `allowDirectory` is
+    /// false, directory matches are skipped (so a neighbouring prompt's cwd can't hijack a click
+    /// aimed at a file) — the editor route ignores the line number for directories anyway.
+    private func resolvePath(in line: String,
+                             allowDirectory: Bool) -> (path: String, line: Int?, isDirectory: Bool)? {
         let tokens = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
         for raw in tokens {
-            var token = raw.trimmingCharacters(in: CharacterSet(charactersIn: "\"'(),[]{}<>"))
+            // Backticks included: this terminal shows Claude's markdown output, where file
+            // paths routinely appear as `inline code`. A leading backtick would make the path
+            // fail to resolve, sending the click to a neighbouring URL/editor route instead.
+            var token = raw.trimmingCharacters(in: CharacterSet(charactersIn: "\"'`(),[]{}<>"))
             if let r = token.range(of: "\\") { token = String(token[..<r.lowerBound]) }
             if token.isEmpty { continue }
 
@@ -243,22 +298,16 @@ final class ClickableTerminalView: LocalProcessTerminalView {
             let candidates = expanded.hasPrefix("/")
                 ? [expanded]
                 : baseDirs.map { ($0 as NSString).appendingPathComponent(expanded) }
-            for candidate in candidates where FileManager.default.fileExists(atPath: candidate) {
-                return (candidate, lineNo)
+            for candidate in candidates {
+                var isDir: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: candidate, isDirectory: &isDir) else { continue }
+                if isDir.boolValue && !allowDirectory { continue }
+                return (candidate, lineNo, isDir.boolValue)
             }
         }
         return nil
     }
 
-    private func firstURL(in line: String) -> URL? {
-        for raw in line.split(whereSeparator: { $0 == " " || $0 == "\t" }) {
-            let token = raw.trimmingCharacters(in: CharacterSet(charactersIn: "\"'(),[]{}<>"))
-            if token.hasPrefix("http://") || token.hasPrefix("https://"), let url = URL(string: token) {
-                return url
-            }
-        }
-        return nil
-    }
 }
 
 /// Non-interactive overlay that strokes a focus-ring border while a drag hovers the

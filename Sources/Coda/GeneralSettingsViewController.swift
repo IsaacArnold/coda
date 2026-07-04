@@ -17,6 +17,9 @@ final class GeneralSettingsViewController: NSViewController {
     private let sizeField = NSTextField()
     private let scalePopup = NSPopUpButton()
 
+    private let shellPopup = NSPopUpButton()
+    private var shell: ShellChoice
+
     private var notifyOnNeedsYou: Bool
     private var notifyOnDone: Bool
     private let notifyNeedsYouCheckbox = NSButton(checkboxWithTitle: "Notify when an agent needs you",
@@ -29,16 +32,18 @@ final class GeneralSettingsViewController: NSViewController {
     var onChangeUIScale: ((UIScale) -> Void)?
     var onChangeNotifyOnNeedsYou: ((Bool) -> Void)?
     var onChangeNotifyOnDone: ((Bool) -> Void)?
+    var onChangeShell: ((ShellChoice) -> Void)?
 
     private static let otherTitle = "Other…"
 
     init(editor: Editor, terminalFont: NSFont, uiScale: UIScale,
-         notifyOnNeedsYou: Bool, notifyOnDone: Bool) {
+         notifyOnNeedsYou: Bool, notifyOnDone: Bool, shell: ShellChoice) {
         self.editor = editor
         self.terminalFont = terminalFont
         self.uiScale = uiScale
         self.notifyOnNeedsYou = notifyOnNeedsYou
         self.notifyOnDone = notifyOnDone
+        self.shell = shell
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -117,11 +122,26 @@ final class GeneralSettingsViewController: NSViewController {
         notifyStack.alignment = .leading
         notifyStack.spacing = 6
 
+        // Shell — which shell new terminals launch. Applies to new terminals only.
+        let shellTitle = NSTextField(labelWithString: "Shell")
+        shellTitle.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        for choice in ShellChoice.allCases { shellPopup.addItem(withTitle: choice.displayName) }
+        shellPopup.selectItem(at: ShellChoice.allCases.firstIndex(of: shell) ?? 0)
+        shellPopup.target = self
+        shellPopup.action = #selector(shellChanged)
+        let shellRow = NSStackView(views: [NSTextField(labelWithString: "Shell:"), shellPopup])
+        shellRow.orientation = .horizontal
+        shellRow.spacing = 8
+        let shellHint = NSTextField(labelWithString: "Automatic uses your login shell. Applies to new terminals.")
+        shellHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        shellHint.textColor = .secondaryLabelColor
+
         let stack = NSStackView(views: [
             title, row, hint,
             fontTitle, fontRow, fontHint,
             scaleTitle, scaleRow, scaleHint,
             notifyTitle, notifyStack,
+            shellTitle, shellRow, shellHint,
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -238,6 +258,13 @@ final class GeneralSettingsViewController: NSViewController {
         guard UIScale.allCases.indices.contains(idx) else { return }
         uiScale = UIScale.allCases[idx]
         onChangeUIScale?(uiScale)
+    }
+
+    @objc private func shellChanged() {
+        let idx = shellPopup.indexOfSelectedItem
+        guard ShellChoice.allCases.indices.contains(idx) else { return }
+        shell = ShellChoice.allCases[idx]
+        onChangeShell?(shell)
     }
 
     @objc private func notifyNeedsYouChanged() {

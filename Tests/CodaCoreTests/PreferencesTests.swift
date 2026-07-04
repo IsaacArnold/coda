@@ -95,6 +95,24 @@ final class PreferencesTests: XCTestCase {
         XCTAssertFalse(back.notifyOnNeedsYou)
         XCTAssertFalse(back.notifyOnDone)
     }
+
+    func testShellDefaultsAutomatic() {
+        XCTAssertEqual(Preferences().shell, .automatic)
+    }
+
+    func testShellDefaultsAutomaticForOldPrefs() throws {
+        // Prefs written before the shell picker carried no shell key.
+        let json = #"{"defaultEditor":{"name":"Visual Studio Code","bundleID":"com.microsoft.VSCode","urlScheme":"vscode"}}"#
+        let prefs = try JSONDecoder().decode(Preferences.self, from: Data(json.utf8))
+        XCTAssertEqual(prefs.shell, .automatic)
+    }
+
+    func testShellRoundTrips() throws {
+        var prefs = Preferences()
+        prefs.shell = .bash
+        let back = try JSONDecoder().decode(Preferences.self, from: JSONEncoder().encode(prefs))
+        XCTAssertEqual(back.shell, .bash)
+    }
 }
 
 final class KnownEditorsTests: XCTestCase {

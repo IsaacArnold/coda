@@ -12,6 +12,7 @@ final class TerminalSurface: NSViewController {
     private let hookWorktreeID: String
     private let hookSurfaceID: String
     private let hookSocketPath: String
+    private let shell: ResolvedShell
     private var terminal: ClickableTerminalView!
     private var pendingTheme: TerminalTheme?
     private var pendingFont: NSFont?
@@ -26,13 +27,15 @@ final class TerminalSurface: NSViewController {
     var onFocused: (() -> Void)?
 
     init(workingDirectory: String, command: String, setupScript: String = "",
-         hookWorktreeID: String = "", hookSurfaceID: String = "", hookSocketPath: String = "") {
+         hookWorktreeID: String = "", hookSurfaceID: String = "", hookSocketPath: String = "",
+         shell: ResolvedShell = ResolvedShell(executablePath: "/bin/zsh")) {
         self.workingDirectory = workingDirectory
         self.command = command
         self.setupScript = setupScript
         self.hookWorktreeID = hookWorktreeID
         self.hookSurfaceID = hookSurfaceID
         self.hookSocketPath = hookSocketPath
+        self.shell = shell
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -85,6 +88,11 @@ final class TerminalSurface: NSViewController {
         terminal?.containsClick(event) ?? false
     }
 
+    /// Whether a ⌘+click here would open a link/file — drives the ⌘-hover pointer cursor.
+    func linkExists(at event: NSEvent) -> Bool {
+        terminal?.linkExists(at: event) ?? false
+    }
+
     /// Last classified agent state, reused by `currentAgentState()` while the terminal is
     /// idle. `nil` until the first classification.
     private var cachedAgentState: AgentState?
@@ -125,7 +133,7 @@ final class TerminalSurface: NSViewController {
         processStarted = true
         let args = terminalShellArgs(workingDirectory: workingDirectory,
                                      setupScript: setupScript,
-                                     command: command)
+                                     command: command, shell: shell.name)
         // Seed the CODA_* hook-correlation vars only when we actually have a socket +
         // ids (a fully wired-up surface); otherwise pass nil so the shell inherits the
         // app's own environment unmodified, same as before this surface existed.
@@ -136,10 +144,10 @@ final class TerminalSurface: NSViewController {
                                        worktreeID: hookWorktreeID, surfaceID: hookSurfaceID)
             envArray = dict.map { "\($0.key)=\($0.value)" }
         }
-        terminal.startProcess(executable: "/bin/zsh",
+        terminal.startProcess(executable: shell.executablePath,
                               args: args,
                               environment: envArray,
-                              execName: "-zsh",
+                              execName: shell.loginArgv0,
                               currentDirectory: workingDirectory)
         if let pendingFont { applyFont(pendingFont) }
         if let pendingTheme { applyTheme(pendingTheme) }
