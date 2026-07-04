@@ -200,12 +200,19 @@ final class ClickableTerminalView: LocalProcessTerminalView {
         let cellHeight = bounds.height / CGFloat(rows)
         let yFromTop = isFlipped ? point.y : (bounds.height - point.y)
         let screenRow = max(0, min(rows - 1, Int(yFromTop / cellHeight)))
+        // `getText` addresses the absolute buffer (scrollback + on-screen rows), but the
+        // click gives a screen-relative row. Add the scroll offset — `getTopVisibleRow()`
+        // is `buffer.yDisp`, the top visible buffer row — to land on the line actually under
+        // the cursor, mirroring SwiftTerm's own `bufferRow = screenRow + yDisp`. Without this,
+        // any scrollback (i.e. almost always in a busy session) read a stale line from the top
+        // of history, so URLs fell through to the file route or matched nothing.
+        let bufferRow = screenRow + term.getTopVisibleRow()
 
-        // Scan the clicked row plus neighbors: row math is approximate and a path can
-        // wrap. Assumes no scrollback offset (screen row == buffer row).
+        // Scan the clicked row plus neighbors: row math is approximate and a path/URL can
+        // wrap. `getText` clamps the upper bound itself, so only guard against negatives.
         for dr in [0, -1, 1] {
-            let rr = screenRow + dr
-            guard rr >= 0, rr < rows else { continue }
+            let rr = bufferRow + dr
+            guard rr >= 0 else { continue }
             let line = term.getText(start: Position(col: 0, row: rr),
                                     end: Position(col: cols - 1, row: rr))
             if let url = firstWebURL(in: line) {
@@ -238,7 +245,10 @@ final class ClickableTerminalView: LocalProcessTerminalView {
     private func resolvePath(in line: String) -> (path: String, line: Int?)? {
         let tokens = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
         for raw in tokens {
-            var token = raw.trimmingCharacters(in: CharacterSet(charactersIn: "\"'(),[]{}<>"))
+            // Backticks included: this terminal shows Claude's markdown output, where file
+            // paths routinely appear as `inline code`. A leading backtick would make the path
+            // fail to resolve, sending the click to a neighbouring URL/editor route instead.
+            var token = raw.trimmingCharacters(in: CharacterSet(charactersIn: "\"'`(),[]{}<>"))
             if let r = token.range(of: "\\") { token = String(token[..<r.lowerBound]) }
             if token.isEmpty { continue }
 
