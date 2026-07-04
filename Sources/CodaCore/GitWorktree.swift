@@ -79,4 +79,13 @@ public struct GitWorktree {
         flush()
         return result
     }
+
+    /// Local branch names, one per line, via `git branch --format=%(refname:short)`.
+    /// No `refs/heads/` prefix, no `*` current-branch marker — just names.
+    public func localBranches(repo: String) throws -> [String] {
+        try git(repo, ["branch", "--format=%(refname:short)"])
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
 }

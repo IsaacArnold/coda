@@ -51,4 +51,12 @@ final class GitWorktreeTests: XCTestCase {
         XCTAssertLessThanOrEqual(sha.count, 40)
         XCTAssertTrue(sha.allSatisfy { $0.isHexDigit })
     }
+
+    func testLocalBranchesListsEveryLocalBranch() throws {
+        let repo = try makeTempRepo()   // starts with branch "main"
+        _ = try ProcessRunner.run("/usr/bin/git", ["-C", repo, "branch", "feature-a"], cwd: nil)
+        _ = try ProcessRunner.run("/usr/bin/git", ["-C", repo, "branch", "feature-b"], cwd: nil)
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        XCTAssertEqual(Set(try git.localBranches(repo: repo)), ["main", "feature-a", "feature-b"])
+    }
 }
