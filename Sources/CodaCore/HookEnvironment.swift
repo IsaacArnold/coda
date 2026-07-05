@@ -10,7 +10,13 @@ public enum HookEnv {
 }
 
 /// The full environment for a surface's PTY: the inherited environment plus the three
-/// CODA_* keys. Pure; performs no I/O.
+/// CODA_* keys, plus terminal defaults. Pure; performs no I/O.
+///
+/// Passing an explicit environment to SwiftTerm's `startProcess` bypasses the defaults it
+/// would otherwise inject (`Terminal.getEnvironmentVariables`). A GUI app launched from
+/// Finder/Homebrew inherits no `TERM`/`COLORTERM`, so without these Claude Code's color
+/// detection sees a dumb terminal and emits colorless output. We supply the same defaults
+/// SwiftTerm does, but only where the inherited environment hasn't already set them.
 public func hookEnvironment(base: [String: String],
                             socketPath: String,
                             worktreeID: String,
@@ -19,5 +25,11 @@ public func hookEnvironment(base: [String: String],
     env[HookEnv.socketPath] = socketPath
     env[HookEnv.worktreeID] = worktreeID
     env[HookEnv.surfaceID]  = surfaceID
+    // Mirror SwiftTerm's default PTY environment (see Terminal.getEnvironmentVariables).
+    for (key, value) in ["TERM": "xterm-256color",
+                         "COLORTERM": "truecolor",
+                         "LANG": "en_US.UTF-8"] where env[key] == nil {
+        env[key] = value
+    }
     return env
 }
