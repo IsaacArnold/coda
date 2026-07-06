@@ -99,4 +99,20 @@ final class GitWorktreeTests: XCTestCase {
         let ns = try git.numstat(dir: repo, against: "HEAD")
         XCTAssertTrue(ns.contains("README.md"))
     }
+
+    func testDiffPatchLeavesNonASCIIFilenamesUnquoted() throws {
+        // git's default core.quotePath=true octal-escapes non-ASCII paths in `diff --git` headers
+        // (e.g. "a/caf\303\251.txt"), which the pane's parser cannot split on " b/" to find. Confirm
+        // diffPatch passes `-c core.quotePath=false` so the header comes through unquoted.
+        let repo = try makeTempRepo()
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        try "café".write(toFile: repo + "/café.txt", atomically: true, encoding: .utf8)
+        _ = try ProcessRunner.run("/usr/bin/git", ["-C", repo, "add", "café.txt"], cwd: nil)
+        _ = try ProcessRunner.run("/usr/bin/git", ["-C", repo, "commit", "-m", "add café.txt"], cwd: nil)
+        try "café\nmodified".write(toFile: repo + "/café.txt", atomically: true, encoding: .utf8)
+
+        let patch = try git.diffPatch(dir: repo, against: "HEAD")
+        XCTAssertTrue(patch.contains("café.txt"), "expected unquoted café.txt in patch, got:\n\(patch)")
+        XCTAssertFalse(patch.contains("caf\\303\\251"), "path should not be octal-quoted:\n\(patch)")
+    }
 }

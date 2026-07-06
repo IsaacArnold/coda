@@ -128,6 +128,28 @@ final class DiffModelTests: XCTestCase {
         ])
     }
 
+    func testParsesUnquotedNonASCIIPath() {
+        // git's default core.quotePath=true would octal-escape this path (e.g. "a/caf\303\251.txt"),
+        // which the `" b/"` split in parseUnifiedDiff cannot handle. With core.quotePath=false
+        // (which GitWorktree now passes), the header comes through unquoted, like this:
+        let patch = """
+        diff --git a/café.txt b/café.txt
+        index e69de29..b6fc4c6 100644
+        --- a/café.txt
+        +++ b/café.txt
+        @@ -1,1 +1,1 @@
+        -old
+        +new
+        """
+        let files = parseUnifiedDiff(patch)
+        XCTAssertEqual(files.count, 1)
+        let f = files[0]
+        XCTAssertEqual(f.path, "café.txt")
+        XCTAssertEqual(f.kind, .modified)
+        XCTAssertEqual(f.insertions, 1)
+        XCTAssertEqual(f.deletions, 1)
+    }
+
     func testEmptyAndMalformedAreSafe() {
         XCTAssertTrue(parseUnifiedDiff("").isEmpty)
         XCTAssertTrue(parseUnifiedDiff("not a diff at all\njust text").isEmpty)

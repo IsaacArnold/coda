@@ -105,12 +105,12 @@ public struct GitWorktree {
 
     /// Unified patch of `ref` vs the working tree (committed + uncommitted changes), renames on.
     public func diffPatch(dir: String, against ref: String) throws -> String {
-        try git(dir, ["diff", "--find-renames", ref])
+        try git(dir, ["-c", "core.quotePath=false", "diff", "--find-renames", ref])
     }
 
     /// `--numstat` of `ref` vs the working tree (rows "<ins>\t<del>\t<path>").
     public func numstat(dir: String, against ref: String) throws -> String {
-        try git(dir, ["diff", "--numstat", "--find-renames", ref])
+        try git(dir, ["-c", "core.quotePath=false", "diff", "--numstat", "--find-renames", ref])
     }
 
     /// Untracked, non-ignored files (paths relative to `dir`).
@@ -122,7 +122,7 @@ public struct GitWorktree {
     /// All-additions patch for one untracked file via `--no-index` (exit 1 = has differences,
     /// which is the normal case here — do not treat it as an error).
     public func untrackedPatch(dir: String, path: String) throws -> String {
-        let (out, _) = try gitAllowingFailure(dir, ["diff", "--no-index", "--find-renames", "/dev/null", path])
+        let (out, _) = try gitAllowingFailure(dir, ["-c", "core.quotePath=false", "diff", "--no-index", "--find-renames", "/dev/null", path])
         return out
     }
 }
