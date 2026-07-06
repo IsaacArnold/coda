@@ -264,7 +264,9 @@ final class DiffPaneViewController: NSViewController {
         let path = cell.pathLabel
         path.translatesAutoresizingMaskIntoConstraints = false
         path.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
-        path.lineBreakMode = .byTruncatingMiddle
+        // Truncate the FRONT of the path so the filename (at the end) always stays visible;
+        // the full path is available via the row's tooltip (set in viewFor).
+        path.lineBreakMode = .byTruncatingHead
 
         let counts = cell.countsLabel
         counts.translatesAutoresizingMaskIntoConstraints = false
@@ -379,6 +381,8 @@ extension DiffPaneViewController: NSOutlineViewDataSource, NSOutlineViewDelegate
             cell.glyphLabel.stringValue = glyph(for: file.kind)
             cell.glyphLabel.textColor = color(for: file.kind)
             cell.pathLabel.stringValue = file.oldPath.map { "\($0) → \(file.path)" } ?? file.path
+            // Full path on hover — the only way to read a deeply-nested path on a narrow pane.
+            cell.toolTip = cell.pathLabel.stringValue
 
             let counts = NSMutableAttributedString(
                 string: "+\(file.insertions)",

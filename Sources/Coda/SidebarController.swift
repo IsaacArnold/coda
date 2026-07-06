@@ -13,7 +13,12 @@ private final class RepoNode: NSObject {
 
 private final class WorktreeNode: NSObject {
     let worktree: Worktree
-    init(_ worktree: Worktree) { self.worktree = worktree }
+    /// The parent repo's identity color hex, so an uncolored worktree can fall back to it.
+    let repoColorHex: String?
+    init(_ worktree: Worktree, repoColorHex: String?) {
+        self.worktree = worktree
+        self.repoColorHex = repoColorHex
+    }
 }
 
 /// Supacode's sidebar branch glyph — the GitHub-Octicons `git-branch` mark
@@ -67,8 +72,8 @@ private final class WorktreeCellView: NSTableCellView {
 
     /// Tint the branch glyph with the worktree's identity color (chrome-only signal),
     /// falling back to the chrome glyph tint when the worktree has no color.
-    func applyIdentityColor(_ identity: NSColor?, glyphTint: NSColor?) {
-        imageView?.contentTintColor = identity ?? glyphTint ?? .secondaryLabelColor
+    func applyIdentityColor(_ identity: NSColor?, repoColor: NSColor?, glyphTint: NSColor?) {
+        imageView?.contentTintColor = identity ?? repoColor ?? glyphTint ?? .secondaryLabelColor
     }
 }
 
@@ -214,7 +219,9 @@ final class SidebarController: NSViewController {
                 selectedRepoID: String? = nil) {
         repoNodes = sections.map { section in
             RepoNode(repository: section.repository,
-                     children: section.worktrees.map(WorktreeNode.init))
+                     children: section.worktrees.map {
+                         WorktreeNode($0, repoColorHex: section.repository.color)
+                     })
         }
         outline.reloadData()
         for node in repoNodes { outline.expandItem(node) }
@@ -355,7 +362,9 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
             cell.applyBadge(agentStates[wt.worktree.id] ?? .idle)
             let identity = identityOverrides[wt.worktree.id]
                 ?? wt.worktree.color.flatMap { NSColor(hex: $0) }
-            cell.applyIdentityColor(identity, glyphTint: chrome?.color(.glyphTint).nsColor)
+            cell.applyIdentityColor(identity,
+                                    repoColor: wt.repoColorHex.flatMap { NSColor(hex: $0) },
+                                    glyphTint: chrome?.color(.glyphTint).nsColor)
             if let s = diffStats[wt.worktree.id], !s.isEmpty {
                 // +N green / −M red, matching the diff pane's file-row counts.
                 let figure = NSMutableAttributedString(
@@ -428,6 +437,12 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         stats.textColor = .secondaryLabelColor
         stats.alignment = .right
         stats.isHidden = true
+        // The +/- figure must never compress; when the sidebar narrows, the title and
+        // subtitle truncate (they already use .byTruncatingTail) instead of the figure clipping.
+        stats.setContentCompressionResistancePriority(.required, for: .horizontal)
+        stats.setContentHuggingPriority(.required, for: .horizontal)
+        tf.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        sub.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         cell.addSubview(icon); cell.addSubview(tf); cell.addSubview(sub)
         cell.addSubview(stats); cell.addSubview(badge)
         cell.imageView = icon; cell.textField = tf
