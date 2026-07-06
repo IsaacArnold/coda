@@ -15,6 +15,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var selectedWorktree: Worktree?
     private var diffPane: DiffPaneViewController!
     private var diffPaneItem: NSSplitViewItem!
+    /// Coalesces bursts of "files changed" signals (hook events, HEAD moves) into one
+    /// `refreshDiffPane()` ~0.4s after the last signal, instead of recomputing per event.
+    private var diffRefreshWork: DispatchWorkItem?
     /// repoID → current branch of its main checkout, kept fresh by `headWatcher`.
     private var currentBranches: [String: String] = [:]
     private let headWatcher = HeadWatcher()
@@ -420,6 +423,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             guard let self else { return }
             self.currentBranches[repoID] = try? self.store.currentBranch(repoID: repoID)
             self.refreshSidebar(select: self.shownWorktreeID)
+            if self.selectedWorktree?.repoID == repoID { self.scheduleDiffRefresh() }
         }
         for repo in store.state.repositories {
             currentBranches[repo.id] = try? store.currentBranch(repoID: repo.id)
@@ -632,6 +636,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         guard shownWorktreeID != s?.id else { return }   // idempotent
         shownWorktreeID = s?.id
         selectedWorktree = s
+        refreshDiffPane()
         updateNotch()
 
         // Hide (don't destroy) the leaving worktree's active surface — its PTY keeps running.
@@ -1257,9 +1262,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return tinted
     }
 
-    // TODO(Task 9): populate the diff pane from DiffService. Stub keeps this task's
-    // build green without implementing the real refresh logic.
-    private func refreshDiffPane() {}
+    /// Recompute the diff pane's contents from `DiffService` and repaint it — but only while
+    /// the pane is open (collapsed = nothing to show, so skip the git work entirely). Runs the
+    /// actual `git diff` off the main thread; the result is applied back on main, re-guarded
+    /// against the selection/visibility having changed while the background work was in flight
+    /// (e.g. the user switched worktrees or closed the pane mid-compute).
+    private func refreshDiffPane() {
+        guard !diffPaneItem.isCollapsed else { return }          // closed → compute nothing
+        guard let wt = selectedWorktree else { diffPane.showEmpty(message: "No worktree selected"); return }
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        let mainBranch = wt.isMain ? nil : mainCheckoutBranch(forRepo: wt.repoID)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = DiffService.compute(worktree: wt, mainBranch: mainBranch, git: git)
+            DispatchQueue.main.async {
+                guard let self, self.selectedWorktree?.id == wt.id, !self.diffPaneItem.isCollapsed else { return }
+                self.diffPane.show(files: result.files)
+            }
+        }
+    }
+
+    /// The branch checked out in the repo's main working directory (the fork-base fallback).
+    private func mainCheckoutBranch(forRepo repoID: String) -> String? {
+        guard let repo = store.state.repositories.first(where: { $0.id == repoID }) else { return nil }
+        return try? GitWorktree(gitPath: "/usr/bin/git").currentBranch(repo: repo.path)
+    }
+
+    /// Debounced trigger for `refreshDiffPane()` — Claude fires `PostToolUse` in bursts and
+    /// `HeadWatcher` can fire on rapid successive commits, so coalesce to one recompute.
+    private func scheduleDiffRefresh() {
+        diffRefreshWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.refreshDiffPane() }
+        diffRefreshWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+    }
 
     @objc private func enableAgentStatusHookAction() {
         do {
@@ -1431,6 +1466,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
         maybeNotify(worktreeID: event.worktreeID, state: newState, body: body)
         recomputeRollupsAndRefreshUI()
+        if event.worktreeID == selectedWorktree?.id { scheduleDiffRefresh() }
     }
 
     /// Bounded read of a transcript JSONL's tail → last assistant text (Security §4). Reads
