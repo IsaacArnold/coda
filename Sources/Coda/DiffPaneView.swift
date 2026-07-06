@@ -100,9 +100,6 @@ final class DiffPaneViewController: NSViewController {
     private lazy var rowHeight: CGFloat =
         ceil(monoFont.ascender - monoFont.descender + monoFont.leading) + 4
     private lazy var fileRowHeight: CGFloat = rowHeight + 6
-    /// Advance (in points) of a single monospace character — measured once, used to
-    /// turn a cheap character count into a column width without laying out every line.
-    private lazy var monoAdvance: CGFloat = ("0" as NSString).size(withAttributes: [.font: monoFont]).width
 
     // Vivid, GitHub-style tints — stronger than the old washed-out 0.18 alpha, and
     // built from the dynamic `systemGreen`/`systemRed`/`labelColor` semantic colors
@@ -117,7 +114,7 @@ final class DiffPaneViewController: NSViewController {
         refresh.bezelStyle = .texturedRounded
         refresh.translatesAutoresizingMaskIntoConstraints = false
 
-        column.resizingMask = []
+        column.resizingMask = .autoresizingMask
         outline.addTableColumn(column)
         outline.outlineTableColumn = column
         outline.headerView = nil
@@ -127,14 +124,15 @@ final class DiffPaneViewController: NSViewController {
         outline.selectionHighlightStyle = .none
         outline.usesAlternatingRowBackgroundColors = false
         outline.autoresizesOutlineColumn = false
-        outline.columnAutoresizingStyle = .noColumnAutoresizing
+        outline.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        outline.usesAutomaticRowHeights = true
         outline.dataSource = self
         outline.delegate = self
         outline.translatesAutoresizingMaskIntoConstraints = false
 
         scroll.documentView = outline
         scroll.hasVerticalScroller = true
-        scroll.hasHorizontalScroller = true
+        scroll.hasHorizontalScroller = false
         scroll.drawsBackground = false
         scroll.translatesAutoresizingMaskIntoConstraints = false
 
@@ -159,11 +157,6 @@ final class DiffPaneViewController: NSViewController {
         view = root
     }
 
-    override func viewDidLayout() {
-        super.viewDidLayout()
-        clampColumnWidthToViewport()
-    }
-
     @objc private func refreshTapped() { onRefresh?() }
 
     func showEmpty(message: String) {
@@ -180,38 +173,6 @@ final class DiffPaneViewController: NSViewController {
         emptyLabel.isHidden = true
         scroll.isHidden = false
         outline.reloadData()
-        recomputeColumnWidth(for: files)
-    }
-
-    /// Widens the single column to fit the widest line (gutter + text), so the
-    /// scroll view's horizontal scroller appears instead of wrapping/truncating.
-    /// Walks the raw `DiffFile` model directly (cheap integer `.count` math, no
-    /// view creation) rather than forcing every `FileItem`'s lazy rows to build —
-    /// that keeps this fast even for a huge, still-collapsed file.
-    private func recomputeColumnWidth(for files: [DiffFile]) {
-        var maxChars = 20
-        for file in files {
-            for hunk in file.hunks {
-                maxChars = max(maxChars, hunk.header.count)
-                for line in hunk.lines {
-                    maxChars = max(maxChars, line.text.count + 1) // +1 for the gutter char
-                }
-            }
-        }
-        let indentAndPadding: CGFloat = outline.indentationPerLevel + 24
-        let contentWidth = ceil(CGFloat(maxChars) * monoAdvance) + indentAndPadding
-        column.minWidth = contentWidth
-        column.width = contentWidth
-        clampColumnWidthToViewport()
-    }
-
-    /// Never let the column collapse narrower than the visible viewport (so short
-    /// diffs still fill the pane instead of leaving a sliver of blank space).
-    private func clampColumnWidthToViewport() {
-        let viewportWidth = scroll.contentView.bounds.width
-        if viewportWidth > column.width {
-            column.width = viewportWidth
-        }
     }
 
     @objc private func expandLargeFile(_ sender: NSButton) {
@@ -296,6 +257,9 @@ final class DiffPaneViewController: NSViewController {
             path.trailingAnchor.constraint(lessThanOrEqualTo: counts.leadingAnchor, constant: -8),
             counts.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
             counts.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            // File rows stay single-line; a fixed height gives automatic-row-height
+            // layout an unambiguous answer without needing top/bottom content pins.
+            cell.heightAnchor.constraint(equalToConstant: fileRowHeight),
         ])
         cell.identifier = id
         return cell
@@ -310,15 +274,26 @@ final class DiffPaneViewController: NSViewController {
         let label = cell.label
         label.translatesAutoresizingMaskIntoConstraints = false
         label.font = monoFont
-        label.lineBreakMode = .byClipping
-        label.maximumNumberOfLines = 1
+        // Wrap long diff lines to the pane width instead of clipping/scrolling —
+        // char wrapping reads better than word wrapping for code (long identifiers,
+        // no spaces to break on). The cell self-sizes from these constraints because
+        // `outline.usesAutomaticRowHeights = true` (see loadView).
+        label.lineBreakMode = .byCharWrapping
+        label.maximumNumberOfLines = 0
+        label.usesSingleLineMode = false
+        label.cell?.wraps = true
+        label.cell?.isScrollable = false
         cell.addSubview(label)
         cell.textField = label
 
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
-            label.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -4),
-            label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            // A real (non-`lessThanOrEqualTo`) trailing constraint gives the label a
+            // defined width so it knows where to wrap, and pinning top+bottom (rather
+            // than centerY) lets the cell's height grow with the wrapped text.
+            label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
+            label.topAnchor.constraint(equalTo: cell.topAnchor, constant: 2),
+            label.bottomAnchor.constraint(equalTo: cell.bottomAnchor, constant: -2),
         ])
         cell.identifier = id
         return cell
@@ -337,6 +312,9 @@ final class DiffPaneViewController: NSViewController {
         NSLayoutConstraint.activate([
             button.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
             button.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            // Same rationale as the file cell: single-line content, fixed height so
+            // automatic row heights don't need to guess.
+            cell.heightAnchor.constraint(equalToConstant: fileRowHeight),
         ])
         cell.identifier = id
         return cell
@@ -359,12 +337,6 @@ extension DiffPaneViewController: NSOutlineViewDataSource, NSOutlineViewDelegate
 
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
         item is FileItem
-    }
-
-    func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
-        if item is FileItem { return fileRowHeight }
-        if let row = item as? RowItem, case .showLarge = row.kind { return fileRowHeight }
-        return rowHeight
     }
 
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool { false }

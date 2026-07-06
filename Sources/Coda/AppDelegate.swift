@@ -324,7 +324,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let detailItem = NSSplitViewItem(viewController: detail)
         diffPane = DiffPaneViewController()
         diffPane.onRefresh = { [weak self] in self?.refreshDiffPane() }
-        let diffItem = NSSplitViewItem(viewController: diffPane)
+        let diffItem = NSSplitViewItem(sidebarWithViewController: diffPane)
         diffItem.canCollapse = true
         diffItem.isCollapsed = true                       // default closed (Q8)
         diffItem.minimumThickness = 280
