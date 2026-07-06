@@ -59,14 +59,20 @@ public struct Worktree: Codable, Equatable, Identifiable {
     /// True only for the synthesized repo main-checkout worktree (working dir == repo dir).
     /// In-memory only — absent from `CodingKeys`, so it never persists and always decodes false.
     public var isMain: Bool = false
+    /// The branch this worktree was forked from (the New Worktree picker's choice). Used at
+    /// review time as the diff base: `git merge-base <base> HEAD`. nil → fall back to the
+    /// repo's main-checkout branch. Stored as a name (not a SHA) so it self-corrects as the
+    /// base advances.
+    public var base: String?
 
     public init(id: String, repoID: String, title: String, branch: String,
-                worktreePath: String, color: String? = nil) {
+                worktreePath: String, color: String? = nil, base: String? = nil) {
         self.id = id; self.repoID = repoID; self.title = title
         self.branch = branch; self.worktreePath = worktreePath; self.color = color
+        self.base = base
     }
 
-    private enum CodingKeys: String, CodingKey { case id, repoID, title, branch, worktreePath, color }
+    private enum CodingKeys: String, CodingKey { case id, repoID, title, branch, worktreePath, color, base }
 
     // Custom decode so worktrees written before identity colors still load (color → nil).
     public init(from decoder: Decoder) throws {
@@ -77,6 +83,7 @@ public struct Worktree: Codable, Equatable, Identifiable {
         branch = try c.decode(String.self, forKey: .branch)
         worktreePath = try c.decode(String.self, forKey: .worktreePath)
         color = try c.decodeIfPresent(String.self, forKey: .color)
+        base = try c.decodeIfPresent(String.self, forKey: .base)
     }
 }
 

@@ -101,7 +101,8 @@ public final class WorktreeStore {
 
             let worktree = Worktree(id: UUID().uuidString, repoID: repoID,
                                     title: title, branch: branch, worktreePath: worktreePath,
-                                    color: IdentityPalette.color(at: state.worktrees.count))
+                                    color: IdentityPalette.color(at: state.worktrees.count),
+                                    base: resolvedBase)
             state.worktrees.append(worktree)
             try config.save(state)
             return worktree

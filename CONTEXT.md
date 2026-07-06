@@ -13,7 +13,7 @@ The primary unit of work: a branch + its on-disk git worktree + the persisted su
 _Avoid_: Session (the old name — it wrongly implied a Claude run is the thing)
 
 **Surface**:
-A single pane inside a worktree — for now a terminal; later a read-only diff view, etc. A worktree's surfaces persist (stay live) when you switch away and back.
+A single pane inside a worktree — a terminal. (The read-only diff view is separate window chrome, a toggleable right-hand pane, not a Surface.) A worktree's surfaces persist (stay live) when you switch away and back.
 _Avoid_: Pane (use for split geometry only), view
 
 **Scratch terminal**:
