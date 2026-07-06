@@ -39,8 +39,14 @@ final class ShortcutCommandTests: XCTestCase {
         XCTAssertEqual(ShortcutCommand.toggleSidebar.defaultChord, KeyChord("s", command: true, control: true))
     }
 
-    func testThereAreTwentySevenBindableCommands() {
-        XCTAssertEqual(ShortcutCommand.allCases.count, 27)
+    func testThereAreTwentyEightBindableCommands() {
+        XCTAssertEqual(ShortcutCommand.allCases.count, 28)
+    }
+
+    func testToggleDiffDefault() {
+        XCTAssertEqual(ShortcutCommand.toggleDiff.defaultChord,
+                       KeyChord("d", command: true, control: true))
+        XCTAssertEqual(ShortcutCommand.toggleDiff.category, .view)
     }
 }
 

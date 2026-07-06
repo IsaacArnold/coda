@@ -88,7 +88,7 @@ public enum ShortcutCategory: String, CaseIterable, Sendable {
 
 public enum ShortcutCommand: String, Codable, CaseIterable, Sendable {
     case newWorktree, launchClaude, openInEditor, revealInFinder, archiveWorktree
-    case addRepository, toggleSidebar, openSettings
+    case addRepository, toggleSidebar, toggleDiff, openSettings
     case newSurface, closeSurface, nextSurface, prevSurface, splitSurface
     case splitDown, focusPaneLeft, focusPaneRight, focusPaneUp, focusPaneDown
     case goToSurface1, goToSurface2, goToSurface3, goToSurface4, goToSurface5
@@ -103,6 +103,7 @@ public enum ShortcutCommand: String, Codable, CaseIterable, Sendable {
         case .archiveWorktree: return "Archive Worktree"
         case .addRepository: return "Add Repository"
         case .toggleSidebar: return "Toggle Sidebar"
+        case .toggleDiff: return "Toggle Diff"
         case .openSettings: return "Settings"
         case .newSurface: return "New Tab"
         case .closeSurface: return "Close Tab"
@@ -136,7 +137,7 @@ public enum ShortcutCommand: String, Codable, CaseIterable, Sendable {
              .goToSurface6, .goToSurface7, .goToSurface8, .goToSurface9:
             return .surface
         case .addRepository: return .repository
-        case .toggleSidebar: return .view
+        case .toggleSidebar, .toggleDiff: return .view
         case .openSettings: return .app
         }
     }
@@ -150,6 +151,7 @@ public enum ShortcutCommand: String, Codable, CaseIterable, Sendable {
         case .archiveWorktree: return KeyChord("\u{8}", command: true)
         case .addRepository:   return KeyChord("n", command: true, shift: true)
         case .toggleSidebar:   return KeyChord("s", command: true, control: true)
+        case .toggleDiff:      return KeyChord("d", command: true, control: true)
         case .openSettings:    return KeyChord(",", command: true)
         case .newSurface:      return KeyChord("t", command: true)
         case .closeSurface:    return KeyChord("w", command: true)

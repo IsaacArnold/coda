@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var store: WorktreeStore!
     private var currentSurface: SplitSurface?
     private var selectedWorktree: Worktree?
+    private var diffPane: DiffPaneViewController!
+    private var diffPaneItem: NSSplitViewItem!
     /// repoID → current branch of its main checkout, kept fresh by `headWatcher`.
     private var currentBranches: [String: String] = [:]
     private let headWatcher = HeadWatcher()
@@ -299,9 +301,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         sidebarItem.canCollapse = true
         sidebarItem.minimumThickness = 180
         let detailItem = NSSplitViewItem(viewController: detail)
+        diffPane = DiffPaneViewController()
+        diffPane.onRefresh = { [weak self] in self?.refreshDiffPane() }
+        let diffItem = NSSplitViewItem(viewController: diffPane)
+        diffItem.canCollapse = true
+        diffItem.isCollapsed = true                       // default closed (Q8)
+        diffItem.minimumThickness = 280
+        diffPaneItem = diffItem
         splitVC = NSSplitViewController()
         splitVC.addSplitViewItem(sidebarItem)
         splitVC.addSplitViewItem(detailItem)
+        splitVC.addSplitViewItem(diffItem)
         // Persist the user's dragged sidebar width across launches; a first-launch
         // default is applied below once the split view is laid out.
         splitVC.splitView.autosaveName = "MainSidebarSplit"
@@ -1143,6 +1153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let sidebarItem = addItem(to: viewMenu, "Toggle Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)),
                                   command: .toggleSidebar)
         sidebarItem.target = nil
+        addItem(to: viewMenu, "Toggle Diff", #selector(toggleDiffAction), command: .toggleDiff)
         viewItem.submenu = viewMenu
 
         // Worktree menu — the primary actions, mirroring the toolbar
@@ -1214,6 +1225,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     @objc private func newWorktreeAction() { newWorktree() }
     @objc private func addRepoAction() { addRepo() }
     @objc private func openSettingsAction() { openSettings() }
+
+    @objc private func toggleDiffAction() {
+        diffPaneItem.animator().isCollapsed.toggle()
+        if !diffPaneItem.isCollapsed { refreshDiffPane() }   // populate on open
+    }
+
+    // TODO(Task 9): populate the diff pane from DiffService. Stub keeps this task's
+    // build green without implementing the real refresh logic.
+    private func refreshDiffPane() {}
 
     @objc private func enableAgentStatusHookAction() {
         do {
@@ -1517,6 +1537,7 @@ private extension NSToolbarItem.Identifier {
     static let addRepository = NSToolbarItem.Identifier("addRepository")
     static let launchClaude = NSToolbarItem.Identifier("launchClaude")
     static let notch = NSToolbarItem.Identifier("notch")
+    static let toggleDiff = NSToolbarItem.Identifier("toggleDiff")
     static let openIn = NSToolbarItem.Identifier("openIn")
 }
 
@@ -1527,7 +1548,7 @@ extension AppDelegate: NSToolbarDelegate {
         // (toggle+add) and right (launch+open) groups keeps it put in window coordinates.
         [.toggleSidebar, .addRepository,
          .flexibleSpace, .notch, .flexibleSpace,
-         .launchClaude, .openIn]
+         .launchClaude, .toggleDiff, .openIn]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -1554,6 +1575,16 @@ extension AppDelegate: NSToolbarDelegate {
             item.image = claudeMarkImage()
             item.target = self
             item.action = #selector(launchClaudeAction)
+            item.isBordered = true
+            return item
+
+        case .toggleDiff:
+            let item = NSToolbarItem(itemIdentifier: id)
+            item.label = "Diff"
+            item.toolTip = "Toggle Diff (⌃⌘D)"
+            item.image = NSImage(systemSymbolName: "sidebar.right", accessibilityDescription: "Toggle Diff")
+            item.target = self
+            item.action = #selector(toggleDiffAction)
             item.isBordered = true
             return item
 
