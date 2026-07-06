@@ -428,6 +428,12 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         stats.textColor = .secondaryLabelColor
         stats.alignment = .right
         stats.isHidden = true
+        // The +/- figure must never compress; when the sidebar narrows, the title and
+        // subtitle truncate (they already use .byTruncatingTail) instead of the figure clipping.
+        stats.setContentCompressionResistancePriority(.required, for: .horizontal)
+        stats.setContentHuggingPriority(.required, for: .horizontal)
+        tf.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        sub.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         cell.addSubview(icon); cell.addSubview(tf); cell.addSubview(sub)
         cell.addSubview(stats); cell.addSubview(badge)
         cell.imageView = icon; cell.textField = tf
