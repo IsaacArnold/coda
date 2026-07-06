@@ -409,6 +409,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         do {
             _ = try store.setRepositoryColor(id: repoID, color: hex)
             refreshSidebar(select: selectedWorktree?.id)
+            // Repo color now feeds the identity chain, so repaint the active worktree's
+            // bar/tabs/pane border when it belongs to this repo (mirrors setWorktreeColor).
+            if selectedWorktree?.repoID == repoID { refreshChromeForActiveSurface() }
         } catch { presentError(error) }
     }
 
