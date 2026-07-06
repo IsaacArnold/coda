@@ -115,7 +115,7 @@ public struct GitWorktree {
 
     /// Untracked, non-ignored files (paths relative to `dir`).
     public func untrackedFiles(dir: String) throws -> [String] {
-        try git(dir, ["ls-files", "--others", "--exclude-standard"])
+        try git(dir, ["-c", "core.quotePath=false", "ls-files", "--others", "--exclude-standard"])
             .split(separator: "\n").map(String.init).filter { !$0.isEmpty }
     }
 
