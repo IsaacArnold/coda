@@ -59,4 +59,76 @@ final class GitWorktreeTests: XCTestCase {
         let git = GitWorktree(gitPath: "/usr/bin/git")
         XCTAssertEqual(Set(try git.localBranches(repo: repo)), ["main", "feature-a", "feature-b"])
     }
+
+    func testDiffSinceForkShowsCommittedAndUncommitted() throws {
+        let repo = try makeTempRepo()                       // one commit on main, README.md="hello"
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        // Branch off, commit a change, then leave an uncommitted change.
+        _ = try ProcessRunner.run("/usr/bin/git", ["-C", repo, "checkout", "-b", "feat"], cwd: nil)
+        try "hello\ncommitted".write(toFile: repo + "/README.md", atomically: true, encoding: .utf8)
+        _ = try ProcessRunner.run("/usr/bin/git", ["-C", repo, "commit", "-am", "c"], cwd: nil)
+        try "hello\ncommitted\nuncommitted".write(toFile: repo + "/README.md", atomically: true, encoding: .utf8)
+
+        let mb = try git.mergeBase(dir: repo, "main", "HEAD")
+        XCTAssertNotNil(mb)
+        let patch = try git.diffPatch(dir: repo, against: mb!)
+        XCTAssertTrue(patch.contains("+committed"))
+        XCTAssertTrue(patch.contains("+uncommitted"))
+    }
+
+    func testMergeBaseNilForUnrelatedRef() throws {
+        let repo = try makeTempRepo()
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        XCTAssertNil(try git.mergeBase(dir: repo, "HEAD", "does-not-exist"))
+    }
+
+    func testUntrackedEnumerationAndPatch() throws {
+        let repo = try makeTempRepo()
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        try "brand new".write(toFile: repo + "/fresh.txt", atomically: true, encoding: .utf8)
+        XCTAssertEqual(try git.untrackedFiles(dir: repo), ["fresh.txt"])
+        let patch = try git.untrackedPatch(dir: repo, path: "fresh.txt")
+        XCTAssertTrue(patch.contains("+brand new"))
+        XCTAssertTrue(patch.contains("fresh.txt"))
+    }
+
+    func testUntrackedFilesUnquotesNonASCIIFilenames() throws {
+        // git's default core.quotePath=true octal-escapes non-ASCII filenames in `ls-files`
+        // output (e.g. "caf\303\251.txt"), which breaks both untrackedPatch's --no-index lookup
+        // and DiffService's file read. Confirm untrackedFiles passes -c core.quotePath=false so
+        // the raw UTF-8 filename comes through, and that untrackedPatch then finds the real file.
+        let repo = try makeTempRepo()
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        try "café".write(toFile: repo + "/café.txt", atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(try git.untrackedFiles(dir: repo), ["café.txt"])
+        let patch = try git.untrackedPatch(dir: repo, path: "café.txt")
+        XCTAssertTrue(patch.contains("+café"), "expected added content in patch, got:\n\(patch)")
+        XCTAssertTrue(patch.contains("café.txt"), "expected unquoted café.txt in patch, got:\n\(patch)")
+        XCTAssertFalse(patch.contains("caf\\303\\251"), "path should not be octal-quoted:\n\(patch)")
+    }
+
+    func testNumstatCounts() throws {
+        let repo = try makeTempRepo()
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        try "hello\nmore".write(toFile: repo + "/README.md", atomically: true, encoding: .utf8)
+        let ns = try git.numstat(dir: repo, against: "HEAD")
+        XCTAssertTrue(ns.contains("README.md"))
+    }
+
+    func testDiffPatchLeavesNonASCIIFilenamesUnquoted() throws {
+        // git's default core.quotePath=true octal-escapes non-ASCII paths in `diff --git` headers
+        // (e.g. "a/caf\303\251.txt"), which the pane's parser cannot split on " b/" to find. Confirm
+        // diffPatch passes `-c core.quotePath=false` so the header comes through unquoted.
+        let repo = try makeTempRepo()
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        try "café".write(toFile: repo + "/café.txt", atomically: true, encoding: .utf8)
+        _ = try ProcessRunner.run("/usr/bin/git", ["-C", repo, "add", "café.txt"], cwd: nil)
+        _ = try ProcessRunner.run("/usr/bin/git", ["-C", repo, "commit", "-m", "add café.txt"], cwd: nil)
+        try "café\nmodified".write(toFile: repo + "/café.txt", atomically: true, encoding: .utf8)
+
+        let patch = try git.diffPatch(dir: repo, against: "HEAD")
+        XCTAssertTrue(patch.contains("café.txt"), "expected unquoted café.txt in patch, got:\n\(patch)")
+        XCTAssertFalse(patch.contains("caf\\303\\251"), "path should not be octal-quoted:\n\(patch)")
+    }
 }

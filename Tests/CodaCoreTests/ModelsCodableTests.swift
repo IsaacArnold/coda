@@ -100,4 +100,20 @@ final class ModelsCodableTests: XCTestCase {
                           worktreePath: "/tmp/wt/feat")
         XCTAssertFalse(wt.isMain)
     }
+
+    func testWorktreeBaseRoundTrips() throws {
+        var wt = Worktree(id: "w1", repoID: "r1", title: "t", branch: "b",
+                          worktreePath: "/p", color: nil)
+        wt.base = "main"
+        let data = try JSONEncoder().encode(wt)
+        let back = try JSONDecoder().decode(Worktree.self, from: data)
+        XCTAssertEqual(back.base, "main")
+    }
+
+    func testWorktreeDecodesWithoutBaseField() throws {
+        // Older configs written before `base` existed must still load (base → nil).
+        let json = #"{"id":"w1","repoID":"r1","title":"t","branch":"b","worktreePath":"/p"}"#
+        let wt = try JSONDecoder().decode(Worktree.self, from: Data(json.utf8))
+        XCTAssertNil(wt.base)
+    }
 }

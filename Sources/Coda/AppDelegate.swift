@@ -13,8 +13,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var store: WorktreeStore!
     private var currentSurface: SplitSurface?
     private var selectedWorktree: Worktree?
+    private var diffPane: DiffPaneViewController!
+    private var diffPaneItem: NSSplitViewItem!
+    /// Coalesces bursts of "files changed" signals (hook events, HEAD moves) into one
+    /// `refreshDiffPane()` ~0.4s after the last signal, instead of recomputing per event.
+    private var diffRefreshWork: DispatchWorkItem?
+    /// Per-worktree debounce for `recomputeDiffStats(for:)` from the hook-event path. Claude
+    /// fires `PostToolUse` in bursts, so without this a burst spawns N redundant git
+    /// subprocesses per worktree, and `.utility`-queue scheduling jitter can let an
+    /// earlier-dispatched compute finish after a later one and clobber
+    /// `diffStatsByWorktree[wt.id]` with a stale value. Keyed by worktree id; main-thread-only
+    /// (scheduled from `handleHookEvent`, which always runs on main — see
+    /// `AgentHookSocketServer`'s `DispatchQueue.main.async` around its event callback).
+    private var statsRecomputeWork: [String: DispatchWorkItem] = [:]
     /// repoID → current branch of its main checkout, kept fresh by `headWatcher`.
     private var currentBranches: [String: String] = [:]
+    /// worktree id → cheap +/- line counts, shown in the sidebar and mirrored in the
+    /// WorktreeBar for the active worktree — both views read this SAME cache so they
+    /// always agree. Populated by the launch sweep and kept live by the diff pane's
+    /// triggers (hook events, HEAD changes, activation).
+    private var diffStatsByWorktree: [String: DiffStats] = [:]
     private let headWatcher = HeadWatcher()
     // Keeps each worktree's terminal alive across sidebar switches; the handle is
     // a SplitSurface (single-pane in PR A; splits added in PR B).
@@ -48,6 +66,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var settingsWC: NSWindowController?
     // Open-in toolbar item ref, so its icon/tooltip/menu track the chosen default editor.
     private weak var openInItem: NSMenuToolbarItem?
+    // Toggle-diff toolbar item ref, so its appearance tracks the diff pane's open/closed
+    // state on every toggle path (toolbar click, View menu, ⌃⌘D) — mirrors the openInItem
+    // pattern above (store the ref, mutate its appearance from the single state-changing spot).
+    private weak var toggleDiffButton: NSButton?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         applyDockIcon()
@@ -80,6 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         refreshSidebar(select: allDisplayWorktrees().first?.id)
         applyChromeTheme()
         applyUIMetrics()
+        startDiffStatsSweep()
         // Keep the notch clock current.
         notchTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.updateNotch()
@@ -299,9 +322,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         sidebarItem.canCollapse = true
         sidebarItem.minimumThickness = 180
         let detailItem = NSSplitViewItem(viewController: detail)
+        diffPane = DiffPaneViewController()
+        diffPane.onRefresh = { [weak self] in self?.refreshDiffPane() }
+        let diffItem = NSSplitViewItem(sidebarWithViewController: diffPane)
+        diffItem.canCollapse = true
+        diffItem.isCollapsed = true                       // default closed (Q8)
+        diffItem.minimumThickness = 280
+        diffPaneItem = diffItem
         splitVC = NSSplitViewController()
         splitVC.addSplitViewItem(sidebarItem)
         splitVC.addSplitViewItem(detailItem)
+        splitVC.addSplitViewItem(diffItem)
         // Persist the user's dragged sidebar width across launches; a first-launch
         // default is applied below once the split view is laid out.
         splitVC.splitView.autosaveName = "MainSidebarSplit"
@@ -330,6 +361,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         if UserDefaults.standard.object(forKey: "NSSplitView Subview Frames MainSidebarSplit") == nil {
             splitVC.splitView.setPosition(255, ofDividerAt: 0)
         }
+        // The diff pane is in-memory / default-closed (spec): the split autosave restores the
+        // whole split's state — including this item's collapse — so force it shut on every
+        // launch, after that restore has run. (The left sidebar's restored width is untouched.)
+        diffPaneItem.isCollapsed = true
+        updateToggleDiffAppearance()
     }
 
     private func wireSidebar() {
@@ -406,6 +442,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             guard let self else { return }
             self.currentBranches[repoID] = try? self.store.currentBranch(repoID: repoID)
             self.refreshSidebar(select: self.shownWorktreeID)
+            if self.selectedWorktree?.repoID == repoID { self.scheduleDiffRefresh() }
         }
         for repo in store.state.repositories {
             currentBranches[repo.id] = try? store.currentBranch(repoID: repo.id)
@@ -618,6 +655,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         guard shownWorktreeID != s?.id else { return }   // idempotent
         shownWorktreeID = s?.id
         selectedWorktree = s
+        refreshDiffPane()
+        if let s { recomputeDiffStats(for: s) }
         updateNotch()
 
         // Hide (don't destroy) the leaving worktree's active surface — its PTY keeps running.
@@ -853,7 +892,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let effective = active?.effectiveColor(worktreeColor: worktreeColor) ?? worktreeColor
         worktreeBar.update(title: wt.title, branch: wt.branch,
                            colorHex: effective?.hexString,
-                           agentState: agentStates[wt.id] ?? .idle)
+                           agentState: agentStates[wt.id] ?? .idle,
+                           diffStats: diffStatsByWorktree[wt.id])
         sidebar.setIdentityOverride(effective?.nsColor, forWorktree: wt.id)
         currentSurface?.identityColor = effective?.nsColor
     }
@@ -1143,6 +1183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let sidebarItem = addItem(to: viewMenu, "Toggle Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)),
                                   command: .toggleSidebar)
         sidebarItem.target = nil
+        addItem(to: viewMenu, "Toggle Diff", #selector(toggleDiffAction), command: .toggleDiff)
         viewItem.submenu = viewMenu
 
         // Worktree menu — the primary actions, mirroring the toolbar
@@ -1214,6 +1255,136 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     @objc private func newWorktreeAction() { newWorktree() }
     @objc private func addRepoAction() { addRepo() }
     @objc private func openSettingsAction() { openSettings() }
+
+    @objc private func toggleDiffAction() {
+        diffPaneItem.animator().isCollapsed.toggle()
+        updateToggleDiffAppearance()
+        if !diffPaneItem.isCollapsed { refreshDiffPane() }   // populate on open
+    }
+
+    /// Reflect the diff pane's open/closed state on the toolbar toggle button (spec: "Shows a
+    /// selected state when open"): the glyph is full-strength when the pane is open and dimmed
+    /// when closed. No-op if the toolbar hasn't been built yet (`toggleDiffButton` nil).
+    private func updateToggleDiffAppearance() {
+        toggleDiffButton?.image = toggleDiffImage(active: !diffPaneItem.isCollapsed)
+    }
+
+    /// The Toggle Diff glyph: the plain template symbol when closed, or the same symbol
+    /// tinted with the accent color when open. `isTemplate = false` is required on the tinted
+    /// variant — template images are recolored by the system for their control state, which
+    /// would otherwise erase the accent tint we just applied.
+    private func toggleDiffImage(active: Bool) -> NSImage? {
+        guard let base = NSImage(systemSymbolName: "chevron.left.forwardslash.chevron.right", accessibilityDescription: "Toggle Diff")
+        else { return nil }
+        // Neutral open-state indicator: full-strength label color when open, dimmed when
+        // closed — a brightness cue rather than an accent-blue tint.
+        let tint: NSColor = active ? .labelColor : .secondaryLabelColor
+        let config = NSImage.SymbolConfiguration(pointSize: 17, weight: .regular)
+            .applying(.init(paletteColors: [tint]))
+        let image = base.withSymbolConfiguration(config) ?? base
+        image.isTemplate = false
+        return image
+    }
+
+    /// Recompute the diff pane's contents from `DiffService` and repaint it — but only while
+    /// the pane is open (collapsed = nothing to show, so skip the git work entirely). Runs the
+    /// actual `git diff` off the main thread; the result is applied back on main, re-guarded
+    /// against the selection/visibility having changed while the background work was in flight
+    /// (e.g. the user switched worktrees or closed the pane mid-compute).
+    private func refreshDiffPane() {
+        guard !diffPaneItem.isCollapsed else { return }          // closed → compute nothing
+        guard let wt = selectedWorktree else { diffPane.showEmpty(message: "No worktree selected"); return }
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        let mainBranch = wt.isMain ? nil : mainCheckoutBranch(forRepo: wt.repoID)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = DiffService.compute(worktree: wt, mainBranch: mainBranch, git: git)
+            DispatchQueue.main.async {
+                guard let self, self.selectedWorktree?.id == wt.id, !self.diffPaneItem.isCollapsed else { return }
+                self.diffPane.show(files: result.files)
+            }
+        }
+    }
+
+    /// The branch checked out in the repo's main working directory (the fork-base fallback).
+    /// Reads the `currentBranches` cache (kept fresh by `headWatcher`) rather than shelling out
+    /// to git — this runs on the main thread on every worktree activation and debounced refresh,
+    /// so a synchronous `Process` here would defeat the point of backgrounding the diff compute.
+    /// A cache miss (repo not yet seeded) returns nil, which degrades to working-tree-only via
+    /// `resolveDiffBase`'s fallback and self-corrects on the next HEAD event/activation.
+    private func mainCheckoutBranch(forRepo repoID: String) -> String? {
+        currentBranches[repoID]
+    }
+
+    /// Debounced trigger for `refreshDiffPane()` — Claude fires `PostToolUse` in bursts and
+    /// `HeadWatcher` can fire on rapid successive commits, so coalesce to one recompute.
+    /// Also recomputes the active worktree's cheap +/- figure on the same cadence, so the
+    /// sidebar/bar and the pane never drift apart.
+    private func scheduleDiffRefresh() {
+        diffRefreshWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.refreshDiffPane()
+            if let wt = self.selectedWorktree { self.recomputeDiffStats(for: wt) }
+        }
+        diffRefreshWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+    }
+
+    /// Populate `diffStatsByWorktree` for every worktree on launch, so cold-started worktrees
+    /// that never see a hook event or HEAD change still get an initial figure. Runs on a single
+    /// serial `.utility` queue and computes worktrees ONE AT A TIME (not fanned out) so a repo
+    /// with many worktrees doesn't thrash git subprocesses or starve the interactive queues;
+    /// each result is posted back to the sidebar as it lands rather than waiting for the sweep
+    /// to finish, so figures appear incrementally.
+    private func startDiffStatsSweep() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
+            let worktrees = DispatchQueue.main.sync { self.store.state.worktrees }
+            let git = GitWorktree(gitPath: "/usr/bin/git")
+            for wt in worktrees {
+                let mainBranch = wt.isMain ? nil : DispatchQueue.main.sync { self.mainCheckoutBranch(forRepo: wt.repoID) }
+                let stats = DiffService.stats(worktree: wt, mainBranch: mainBranch, git: git)
+                DispatchQueue.main.async {
+                    self.diffStatsByWorktree[wt.id] = stats
+                    self.sidebar.updateDiffStats(self.diffStatsByWorktree)
+                    if self.selectedWorktree?.id == wt.id { self.refreshChromeForActiveSurface() }
+                }
+            }
+        }
+    }
+
+    /// Recompute one worktree's cheap +/- figure off the main thread, then write it into
+    /// `diffStatsByWorktree` and repaint the sidebar (always) and the WorktreeBar (only when
+    /// `wt` is the active worktree). `mainCheckoutBranch` is an O(1) cache read, so it's safe
+    /// to call before hopping to the background queue.
+    private func recomputeDiffStats(for wt: Worktree) {
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        let mainBranch = wt.isMain ? nil : mainCheckoutBranch(forRepo: wt.repoID)
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let stats = DiffService.stats(worktree: wt, mainBranch: mainBranch, git: git)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.diffStatsByWorktree[wt.id] = stats
+                self.sidebar.updateDiffStats(self.diffStatsByWorktree)
+                if self.selectedWorktree?.id == wt.id { self.refreshChromeForActiveSurface() }
+            }
+        }
+    }
+
+    /// Debounced wrapper around `recomputeDiffStats(for:)` for the hook-event path — coalesces
+    /// a `PostToolUse` burst for one worktree into a single recompute, and guarantees the
+    /// last-scheduled request wins (an earlier in-flight schedule is cancelled before it can
+    /// dispatch, so a stale result can never land after a fresher one). Must only be called
+    /// from the main thread, since `statsRecomputeWork` is main-thread-only state.
+    private func scheduleStatsRecompute(for wt: Worktree) {
+        statsRecomputeWork[wt.id]?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.statsRecomputeWork[wt.id] = nil
+            self?.recomputeDiffStats(for: wt)
+        }
+        statsRecomputeWork[wt.id] = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+    }
 
     @objc private func enableAgentStatusHookAction() {
         do {
@@ -1385,6 +1556,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
         maybeNotify(worktreeID: event.worktreeID, state: newState, body: body)
         recomputeRollupsAndRefreshUI()
+        if let wt = store.state.worktrees.first(where: { $0.id == event.worktreeID }) {
+            scheduleStatsRecompute(for: wt)
+        }
+        if event.worktreeID == selectedWorktree?.id { scheduleDiffRefresh() }
     }
 
     /// Bounded read of a transcript JSONL's tail → last assistant text (Security §4). Reads
@@ -1517,7 +1692,13 @@ private extension NSToolbarItem.Identifier {
     static let addRepository = NSToolbarItem.Identifier("addRepository")
     static let launchClaude = NSToolbarItem.Identifier("launchClaude")
     static let notch = NSToolbarItem.Identifier("notch")
+    static let toggleDiff = NSToolbarItem.Identifier("toggleDiff")
     static let openIn = NSToolbarItem.Identifier("openIn")
+    // Each cluster is ONE toolbar item — a tight [button │ hairline │ button] row sharing the
+    // single rounded background the toolbar draws behind a custom view. This is what lets the
+    // icons hug the divider; separate items get uncontrollable spacing on both sides.
+    static let leftCluster = NSToolbarItem.Identifier("leftCluster")   // sidebar-toggle │ add-repo
+    static let rightCluster = NSToolbarItem.Identifier("rightCluster") // launch-Claude │ toggle-diff
 }
 
 extension AppDelegate: NSToolbarDelegate {
@@ -1525,37 +1706,106 @@ extension AppDelegate: NSToolbarDelegate {
         // No sidebar-tracking separator: it pins the notch's flexible space to the content
         // region, so the notch drifts as the sidebar resizes. Centring it between the left
         // (toggle+add) and right (launch+open) groups keeps it put in window coordinates.
-        [.toggleSidebar, .addRepository,
+        [.leftCluster,
          .flexibleSpace, .notch, .flexibleSpace,
-         .launchClaude, .openIn]
+         .rightCluster, .openIn]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         toolbarDefaultItemIdentifiers(toolbar)
     }
 
+    /// A borderless, image-only cluster button rendering a template SF Symbol in a neutral
+    /// chrome color (explicit `contentTintColor` so it never picks up the control accent blue).
+    /// A uniform 20×20 box every cluster icon is scaled into, so a symbol and the Claude mark
+    /// (different intrinsic sizes) read as the same size.
+    private var clusterIconSize: CGFloat { 20 }
+
+    private func clusterButton(symbolName: String, tooltip: String,
+                               target: AnyObject?, action: Selector) -> NSButton {
+        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: tooltip)?
+            .withSymbolConfiguration(.init(pointSize: 17, weight: .regular))
+        let button = NSButton(image: image ?? NSImage(), target: target, action: action)
+        button.isBordered = false
+        button.imagePosition = .imageOnly
+        button.imageScaling = .scaleProportionallyUpOrDown
+        button.toolTip = tooltip
+        button.contentTintColor = .labelColor
+        button.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: clusterIconSize),
+            button.heightAnchor.constraint(equalToConstant: clusterIconSize),
+        ])
+        return button
+    }
+
+    /// A borderless, image-only cluster button for a pre-rendered image (the Claude mark, or the
+    /// already-colored diff-toggle glyph) — drawn as-is, no tint applied.
+    private func clusterButton(image: NSImage?, tooltip: String,
+                               target: AnyObject?, action: Selector) -> NSButton {
+        let button = NSButton(image: image ?? NSImage(), target: target, action: action)
+        button.isBordered = false
+        button.imagePosition = .imageOnly
+        button.imageScaling = .scaleProportionallyUpOrDown
+        button.toolTip = tooltip
+        button.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: clusterIconSize),
+            button.heightAnchor.constraint(equalToConstant: clusterIconSize),
+        ])
+        return button
+    }
+
+    /// A 1pt vertical hairline (dynamic `separatorColor`) placed between cluster buttons.
+    private func clusterHairline() -> NSView {
+        let line = NSBox()
+        line.boxType = .custom
+        line.borderWidth = 0
+        line.borderColor = .clear
+        line.fillColor = .separatorColor
+        line.cornerRadius = 0
+        line.translatesAutoresizingMaskIntoConstraints = false
+        line.widthAnchor.constraint(equalToConstant: 1).isActive = true
+        line.heightAnchor.constraint(equalToConstant: 16).isActive = true
+        return line
+    }
+
+    /// One toolbar item whose view is a tight [button │ hairline │ button] row. The toolbar
+    /// draws a single rounded background behind it, so the buttons share one capsule and the
+    /// spacing between them is exactly `stack.spacing` — no per-item slop.
+    private func clusterItem(_ id: NSToolbarItem.Identifier, views: [NSView]) -> NSToolbarItem {
+        let item = NSToolbarItem(itemIdentifier: id)
+        item.label = ""
+        let stack = NSStackView(views: views)
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 8
+        stack.edgeInsets = NSEdgeInsets(top: 2, left: 12, bottom: 2, right: 12)
+        item.view = stack
+        return item
+    }
+
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier,
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         switch id {
-        case .addRepository:
-            let item = NSToolbarItem(itemIdentifier: id)
-            item.label = "Add Repository"
-            item.toolTip = "Add Repository… (⇧⌘N)"
-            item.image = NSImage(systemSymbolName: "folder.badge.plus", accessibilityDescription: "Add Repository")
-            item.target = self
-            item.action = #selector(addRepoAction)
-            item.isBordered = true
-            return item
+        case .leftCluster:
+            let sidebar = clusterButton(
+                symbolName: "sidebar.leading", tooltip: "Toggle Sidebar (⌃⌘S)",
+                target: nil, action: #selector(NSSplitViewController.toggleSidebar(_:)))
+            let add = clusterButton(
+                symbolName: "folder.badge.plus", tooltip: "Add Repository… (⇧⌘N)",
+                target: self, action: #selector(addRepoAction))
+            return clusterItem(id, views: [sidebar, clusterHairline(), add])
 
-        case .launchClaude:
-            let item = NSToolbarItem(itemIdentifier: id)
-            item.label = "Launch Claude"
-            item.toolTip = "Launch Claude (⌘R)"
-            item.image = claudeMarkImage()
-            item.target = self
-            item.action = #selector(launchClaudeAction)
-            item.isBordered = true
-            return item
+        case .rightCluster:
+            let claude = clusterButton(
+                image: claudeMarkImage(diameter: 20), tooltip: "Launch Claude (⌘R)",
+                target: self, action: #selector(launchClaudeAction))
+            let diff = clusterButton(
+                image: toggleDiffImage(active: !diffPaneItem.isCollapsed), tooltip: "Toggle Diff (⌃⌘D)",
+                target: self, action: #selector(toggleDiffAction))
+            toggleDiffButton = diff
+            return clusterItem(id, views: [claude, clusterHairline(), diff])
 
         case .notch:
             let item = NSToolbarItem(itemIdentifier: id)

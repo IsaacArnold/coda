@@ -314,4 +314,13 @@ final class WorktreeStoreTests: XCTestCase {
         let r = try store.addRepository(path: repo)
         XCTAssertEqual(Set(try store.localBranches(repoID: r.id)), ["main", "develop"])
     }
+
+    func testCreateWorktreeStoresPickedBase() throws {
+        let repo = try makeTempRepo()
+        let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: repo)
+        let wt = try store.createWorktree(repoID: r.id, title: "Feature X", base: "main")
+        XCTAssertEqual(wt.base, "main")
+        XCTAssertEqual(store.state.worktrees.first { $0.id == wt.id }?.base, "main")
+    }
 }

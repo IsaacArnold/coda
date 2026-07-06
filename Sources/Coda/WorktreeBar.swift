@@ -8,6 +8,9 @@ import CodaCore
 final class WorktreeBar: NSView {
     private let titleLabel = NSTextField(labelWithString: "")
     private let branchLabel = NSTextField(labelWithString: "")
+    /// Trailing "+N −M" diff-stats figure (Task 10) for the active worktree — mirrors
+    /// the sidebar's per-row figure. Hidden when there's no diff.
+    private let statsLabel = NSTextField(labelWithString: "")
     private let badge = NSView()
     static let height: CGFloat = 26
     private var metrics = UIMetrics(scale: .medium)
@@ -26,11 +29,14 @@ final class WorktreeBar: NSView {
         titleLabel.lineBreakMode = .byTruncatingTail
         branchLabel.lineBreakMode = .byTruncatingMiddle
 
+        statsLabel.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        statsLabel.isHidden = true
+
         badge.wantsLayer = true
         badge.layer?.cornerRadius = 4
         badge.translatesAutoresizingMaskIntoConstraints = false
 
-        let stack = NSStackView(views: [titleLabel, branchLabel, NSView(), badge])
+        let stack = NSStackView(views: [titleLabel, branchLabel, NSView(), statsLabel, badge])
         stack.orientation = .horizontal
         stack.spacing = 8
         stack.alignment = .centerY
@@ -48,7 +54,8 @@ final class WorktreeBar: NSView {
     }
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    func update(title: String?, branch: String?, colorHex: String?, agentState: AgentState) {
+    func update(title: String?, branch: String?, colorHex: String?, agentState: AgentState,
+                diffStats: DiffStats? = nil) {
         guard let title else { isHidden = true; return }
         isHidden = false
         let fill = colorHex.flatMap { RGB(hex: $0) } ?? RGB(r: 0.4, g: 0.4, b: 0.4)
@@ -58,6 +65,13 @@ final class WorktreeBar: NSView {
         titleLabel.textColor = textColor
         branchLabel.stringValue = branch.map { "[\($0)]" } ?? ""
         branchLabel.textColor = textColor.withAlphaComponent(0.85)
+        if let s = diffStats, !s.isEmpty {
+            statsLabel.stringValue = "+\(s.insertions) −\(s.deletions)"
+            statsLabel.textColor = textColor.withAlphaComponent(0.9)
+            statsLabel.isHidden = false
+        } else {
+            statsLabel.isHidden = true
+        }
         if let dot = agentBadgeColor(agentState) {
             badge.layer?.backgroundColor = dot.cgColor
             badge.isHidden = false

@@ -51,6 +51,8 @@ private final class WorktreeCellView: NSTableCellView {
     let badge = NSView()
     /// The `.footnote`-sized secondary subtitle (the branch name) under the title.
     let subtitleLabel = NSTextField(labelWithString: "")
+    /// Trailing "+N −M" diff-stats figure (Task 10). Hidden when there's no diff.
+    let statsLabel = NSTextField(labelWithString: "")
 
     func applyBadge(_ state: AgentState) {
         badge.wantsLayer = true
@@ -77,6 +79,9 @@ final class SidebarController: NSViewController {
     private let scroll = NSScrollView()
     private var repoNodes: [RepoNode] = []
     private var agentStates: [String: AgentState] = [:]
+    /// Cheap +/- line counts per worktree id (Task 10), fed by the background sweep
+    /// and the same live triggers that keep the diff pane current.
+    private var diffStats: [String: DiffStats] = [:]
     private var chrome: ChromeTheme?
     private var metrics = UIMetrics(scale: .medium)
 
@@ -351,6 +356,20 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
             let identity = identityOverrides[wt.worktree.id]
                 ?? wt.worktree.color.flatMap { NSColor(hex: $0) }
             cell.applyIdentityColor(identity, glyphTint: chrome?.color(.glyphTint).nsColor)
+            if let s = diffStats[wt.worktree.id], !s.isEmpty {
+                // +N green / −M red, matching the diff pane's file-row counts.
+                let figure = NSMutableAttributedString(
+                    string: "+\(s.insertions)",
+                    attributes: [.foregroundColor: NSColor.systemGreen, .font: cell.statsLabel.font as Any])
+                figure.append(NSAttributedString(string: " "))
+                figure.append(NSAttributedString(
+                    string: "\u{2212}\(s.deletions)",
+                    attributes: [.foregroundColor: NSColor.systemRed, .font: cell.statsLabel.font as Any]))
+                cell.statsLabel.attributedStringValue = figure
+                cell.statsLabel.isHidden = false
+            } else {
+                cell.statsLabel.isHidden = true   // hidden at zero
+            }
             return cell
         }
         return nil
@@ -361,6 +380,13 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
     func updateAgentStates(_ states: [String: AgentState]) {
         guard states != agentStates else { return }
         agentStates = states
+        outline.reloadData()
+    }
+
+    /// Live +/- figures, keyed by worktree id — fed by the launch sweep and kept fresh
+    /// on the same triggers as the diff pane (hook events, HEAD changes, activation).
+    func updateDiffStats(_ stats: [String: DiffStats]) {
+        diffStats = stats
         outline.reloadData()
     }
 
@@ -394,9 +420,18 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         sub.lineBreakMode = .byTruncatingTail
         let badge = cell.badge
         badge.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(icon); cell.addSubview(tf); cell.addSubview(sub); cell.addSubview(badge)
+        // Trailing +/- figure: monospaced so the digits don't jitter the column width as
+        // they change, right-aligned between the title/subtitle and the badge dot.
+        let stats = cell.statsLabel
+        stats.translatesAutoresizingMaskIntoConstraints = false
+        stats.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        stats.textColor = .secondaryLabelColor
+        stats.alignment = .right
+        stats.isHidden = true
+        cell.addSubview(icon); cell.addSubview(tf); cell.addSubview(sub)
+        cell.addSubview(stats); cell.addSubview(badge)
         cell.imageView = icon; cell.textField = tf
-        // Stack title over subtitle; the glyph + badge center across both lines.
+        // Stack title over subtitle; the glyph + stats + badge center across both lines.
         let textTop = tf.topAnchor.constraint(equalTo: cell.topAnchor, constant: 4)
         NSLayoutConstraint.activate([
             icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
@@ -404,11 +439,13 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
             icon.widthAnchor.constraint(equalToConstant: 16),
             textTop,
             tf.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 6),
-            tf.trailingAnchor.constraint(lessThanOrEqualTo: badge.leadingAnchor, constant: -6),
+            tf.trailingAnchor.constraint(lessThanOrEqualTo: stats.leadingAnchor, constant: -6),
             sub.topAnchor.constraint(equalTo: tf.bottomAnchor, constant: 1),
             sub.leadingAnchor.constraint(equalTo: tf.leadingAnchor),
-            sub.trailingAnchor.constraint(lessThanOrEqualTo: badge.leadingAnchor, constant: -6),
+            sub.trailingAnchor.constraint(lessThanOrEqualTo: stats.leadingAnchor, constant: -6),
             sub.bottomAnchor.constraint(equalTo: cell.bottomAnchor, constant: -4),
+            stats.trailingAnchor.constraint(equalTo: badge.leadingAnchor, constant: -6),
+            stats.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             badge.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
             badge.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             badge.widthAnchor.constraint(equalToConstant: 8),

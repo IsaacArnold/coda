@@ -88,4 +88,41 @@ public struct GitWorktree {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
     }
+
+    /// Run git and return (stdout, exitCode) without throwing on nonzero — for commands where a
+    /// nonzero exit is meaningful (merge-base: no ancestor; diff --no-index: differences exist).
+    private func gitAllowingFailure(_ dir: String, _ args: [String]) throws -> (String, Int32) {
+        let r = try ProcessRunner.run(gitPath, ["-C", dir] + args, cwd: nil)
+        return (r.stdout, r.exitCode)
+    }
+
+    /// Common ancestor of two refs, or nil if there is none (exit != 0).
+    public func mergeBase(dir: String, _ a: String, _ b: String) throws -> String? {
+        let (out, code) = try gitAllowingFailure(dir, ["merge-base", a, b])
+        let sha = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        return code == 0 && !sha.isEmpty ? sha : nil
+    }
+
+    /// Unified patch of `ref` vs the working tree (committed + uncommitted changes), renames on.
+    public func diffPatch(dir: String, against ref: String) throws -> String {
+        try git(dir, ["-c", "core.quotePath=false", "diff", "--find-renames", ref])
+    }
+
+    /// `--numstat` of `ref` vs the working tree (rows "<ins>\t<del>\t<path>").
+    public func numstat(dir: String, against ref: String) throws -> String {
+        try git(dir, ["-c", "core.quotePath=false", "diff", "--numstat", "--find-renames", ref])
+    }
+
+    /// Untracked, non-ignored files (paths relative to `dir`).
+    public func untrackedFiles(dir: String) throws -> [String] {
+        try git(dir, ["-c", "core.quotePath=false", "ls-files", "--others", "--exclude-standard"])
+            .split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+    }
+
+    /// All-additions patch for one untracked file via `--no-index` (exit 1 = has differences,
+    /// which is the normal case here — do not treat it as an error).
+    public func untrackedPatch(dir: String, path: String) throws -> String {
+        let (out, _) = try gitAllowingFailure(dir, ["-c", "core.quotePath=false", "diff", "--no-index", "--find-renames", "/dev/null", path])
+        return out
+    }
 }
