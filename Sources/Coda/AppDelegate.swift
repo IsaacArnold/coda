@@ -50,6 +50,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var settingsWC: NSWindowController?
     // Open-in toolbar item ref, so its icon/tooltip/menu track the chosen default editor.
     private weak var openInItem: NSMenuToolbarItem?
+    // Toggle-diff toolbar item ref, so its appearance tracks the diff pane's open/closed
+    // state on every toggle path (toolbar click, View menu, ⌃⌘D) — mirrors the openInItem
+    // pattern above (store the ref, mutate its appearance from the single state-changing spot).
+    private weak var toggleDiffToolbarItem: NSToolbarItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         applyDockIcon()
@@ -1228,7 +1232,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     @objc private func toggleDiffAction() {
         diffPaneItem.animator().isCollapsed.toggle()
+        updateToggleDiffAppearance()
         if !diffPaneItem.isCollapsed { refreshDiffPane() }   // populate on open
+    }
+
+    /// Reflect the diff pane's open/closed state on the toolbar button (spec: "Shows a
+    /// selected state when open"). A plain NSToolbarItem has no built-in selected look, so we
+    /// tint the glyph with the accent color while open and revert to the plain template glyph
+    /// while closed. No-op if the toolbar hasn't been built yet (`toggleDiffToolbarItem` nil).
+    private func updateToggleDiffAppearance() {
+        toggleDiffToolbarItem?.image = toggleDiffImage(active: !diffPaneItem.isCollapsed)
+    }
+
+    /// The Toggle Diff glyph: the plain template symbol when closed, or the same symbol
+    /// tinted with the accent color when open. `isTemplate = false` is required on the tinted
+    /// variant — template images are recolored by the system for their control state, which
+    /// would otherwise erase the accent tint we just applied.
+    private func toggleDiffImage(active: Bool) -> NSImage? {
+        guard let base = NSImage(systemSymbolName: "sidebar.right", accessibilityDescription: "Toggle Diff")
+        else { return nil }
+        guard active else { return base }
+        let tinted = base.withSymbolConfiguration(.init(paletteColors: [.controlAccentColor])) ?? base
+        tinted.isTemplate = false
+        return tinted
     }
 
     // TODO(Task 9): populate the diff pane from DiffService. Stub keeps this task's
@@ -1582,10 +1608,11 @@ extension AppDelegate: NSToolbarDelegate {
             let item = NSToolbarItem(itemIdentifier: id)
             item.label = "Diff"
             item.toolTip = "Toggle Diff (⌃⌘D)"
-            item.image = NSImage(systemSymbolName: "sidebar.right", accessibilityDescription: "Toggle Diff")
             item.target = self
             item.action = #selector(toggleDiffAction)
             item.isBordered = true
+            toggleDiffToolbarItem = item
+            updateToggleDiffAppearance()   // initial state: pane starts collapsed → not-selected
             return item
 
         case .notch:
