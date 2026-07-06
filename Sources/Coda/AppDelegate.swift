@@ -892,8 +892,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let effective = active?.effectiveColor(worktreeColor: worktreeColor) ?? worktreeColor
         worktreeBar.update(title: wt.title, branch: wt.branch,
                            colorHex: effective?.hexString,
-                           agentState: agentStates[wt.id] ?? .idle,
-                           diffStats: diffStatsByWorktree[wt.id])
+                           agentState: agentStates[wt.id] ?? .idle)
         sidebar.setIdentityOverride(effective?.nsColor, forWorktree: wt.id)
         currentSurface?.identityColor = effective?.nsColor
     }
