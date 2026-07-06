@@ -47,7 +47,7 @@ enum DiffService {
         var untrackedAdds = 0
         for path in (try? git.untrackedFiles(dir: dir)) ?? [] {
             if let contents = try? String(contentsOfFile: (dir as NSString).appendingPathComponent(path), encoding: .utf8) {
-                untrackedAdds += contents.isEmpty ? 0 : contents.split(separator: "\n", omittingEmptySubsequences: false).count
+                untrackedAdds += CodaCore.untrackedAdditionLineCount(contents)
             }
         }
         return CodaCore.diffStats(numstat: numstat, untrackedAdditions: untrackedAdds)

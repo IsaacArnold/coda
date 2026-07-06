@@ -22,3 +22,14 @@ public func diffStats(numstat: String, untrackedAdditions: Int) -> DiffStats {
     }
     return DiffStats(insertions: ins, deletions: del)
 }
+
+/// Number of `+` lines `git diff --no-index /dev/null <file>` produces for an untracked
+/// file with these contents — i.e. its line count, matching the diff pane exactly. A file
+/// is N lines: one per `\n`, plus a final partial line if it doesn't end in `\n`. So a
+/// trailing newline must NOT count as an extra empty line (that is the pane/figure
+/// disagreement this guards against).
+public func untrackedAdditionLineCount(_ contents: String) -> Int {
+    if contents.isEmpty { return 0 }
+    let n = contents.split(separator: "\n", omittingEmptySubsequences: false).count
+    return contents.hasSuffix("\n") ? n - 1 : n
+}
