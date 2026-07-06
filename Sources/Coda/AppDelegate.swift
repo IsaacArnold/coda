@@ -388,8 +388,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             if worktreeID == selectedWorktree?.id {
                 selectedWorktree = store.state.worktrees.first { $0.id == worktreeID }
                 refreshChromeForActiveSurface()
-                // Keep the focused-pane border tint in sync with the new color.
-                currentSurface?.identityColor = (store.state.worktrees.first { $0.id == worktreeID }?.color).flatMap { NSColor(hex: $0) }
             }
         } catch { presentError(error) }
     }
@@ -733,7 +731,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             split.view.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor, constant: -8),
         ])
         currentSurface = split
-        split.identityColor = (selectedWorktree?.color).flatMap { NSColor(hex: $0) }
+        split.identityColor = selectedWorktree.flatMap { identityBase(for: $0) }?.nsColor
         view(focus: split)
         refreshChromeForActiveSurface()
         refreshTabBar()
@@ -783,11 +781,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return
         }
         surfaceTabBar.isHidden = false
-        let worktreeColor = selectedWorktree?.color.flatMap { RGB(hex: $0) }
+        let base = store.state.worktrees.first { $0.id == wtID }.flatMap { identityBase(for: $0) }
         let repoName = store.state.worktrees.first { $0.id == wtID }
             .flatMap { wt in store.state.repositories.first { $0.id == wt.repoID } }?.name
         let items: [SurfaceTabItem] = list.entries.enumerated().map { idx, entry in
-            let effective = entry.surface.effectiveColor(worktreeColor: worktreeColor)
+            let effective = entry.surface.effectiveColor(worktreeColor: base)
             return SurfaceTabItem(
                 id: entry.surface.id,
                 label: surfaceLabel(nameOverride: entry.surface.nameOverride,
@@ -881,15 +879,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         refreshTabBar()
     }
 
+    /// The identity-color base for a worktree — its own color, else its repo's — routed
+    /// through Core's `identityBaseColor` so the fallback logic is unit-tested. Per-surface
+    /// (tab) overrides layer on top via `Surface.effectiveColor(worktreeColor:)`.
+    private func identityBase(for wt: Worktree) -> RGB? {
+        let repoHex = store.state.repositories.first { $0.id == wt.repoID }?.color
+        return identityBaseColor(worktreeColorHex: wt.color, repoColorHex: repoHex)
+    }
+
     /// Repaint the identity bar from the shown worktree + active surface's effective color.
     private func refreshChromeForActiveSurface() {
         guard let wt = selectedWorktree else {
             worktreeBar.update(title: nil, branch: nil, colorHex: nil, agentState: .idle)
             return
         }
-        let worktreeColor = wt.color.flatMap { RGB(hex: $0) }
+        let base = identityBase(for: wt)
         let active = surfaces.existingSurfaces(for: wt.id)?.activeSurface
-        let effective = active?.effectiveColor(worktreeColor: worktreeColor) ?? worktreeColor
+        let effective = active?.effectiveColor(worktreeColor: base) ?? base
         worktreeBar.update(title: wt.title, branch: wt.branch,
                            colorHex: effective?.hexString,
                            agentState: agentStates[wt.id] ?? .idle)
