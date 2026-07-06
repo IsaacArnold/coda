@@ -1282,9 +1282,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     /// The branch checked out in the repo's main working directory (the fork-base fallback).
+    /// Reads the `currentBranches` cache (kept fresh by `headWatcher`) rather than shelling out
+    /// to git — this runs on the main thread on every worktree activation and debounced refresh,
+    /// so a synchronous `Process` here would defeat the point of backgrounding the diff compute.
+    /// A cache miss (repo not yet seeded) returns nil, which degrades to working-tree-only via
+    /// `resolveDiffBase`'s fallback and self-corrects on the next HEAD event/activation.
     private func mainCheckoutBranch(forRepo repoID: String) -> String? {
-        guard let repo = store.state.repositories.first(where: { $0.id == repoID }) else { return nil }
-        return try? GitWorktree(gitPath: "/usr/bin/git").currentBranch(repo: repo.path)
+        currentBranches[repoID]
     }
 
     /// Debounced trigger for `refreshDiffPane()` — Claude fires `PostToolUse` in bursts and
