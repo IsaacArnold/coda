@@ -20,6 +20,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var diffRefreshWork: DispatchWorkItem?
     /// repoID → current branch of its main checkout, kept fresh by `headWatcher`.
     private var currentBranches: [String: String] = [:]
+    /// worktree id → cheap +/- line counts, shown in the sidebar and mirrored in the
+    /// WorktreeBar for the active worktree — both views read this SAME cache so they
+    /// always agree. Populated by the launch sweep and kept live by the diff pane's
+    /// triggers (hook events, HEAD changes, activation).
+    private var diffStatsByWorktree: [String: DiffStats] = [:]
     private let headWatcher = HeadWatcher()
     // Keeps each worktree's terminal alive across sidebar switches; the handle is
     // a SplitSurface (single-pane in PR A; splits added in PR B).
@@ -89,6 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         refreshSidebar(select: allDisplayWorktrees().first?.id)
         applyChromeTheme()
         applyUIMetrics()
+        startDiffStatsSweep()
         // Keep the notch clock current.
         notchTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.updateNotch()
@@ -637,6 +643,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         shownWorktreeID = s?.id
         selectedWorktree = s
         refreshDiffPane()
+        if let s { recomputeDiffStats(for: s) }
         updateNotch()
 
         // Hide (don't destroy) the leaving worktree's active surface — its PTY keeps running.
@@ -872,7 +879,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let effective = active?.effectiveColor(worktreeColor: worktreeColor) ?? worktreeColor
         worktreeBar.update(title: wt.title, branch: wt.branch,
                            colorHex: effective?.hexString,
-                           agentState: agentStates[wt.id] ?? .idle)
+                           agentState: agentStates[wt.id] ?? .idle,
+                           diffStats: diffStatsByWorktree[wt.id])
         sidebar.setIdentityOverride(effective?.nsColor, forWorktree: wt.id)
         currentSurface?.identityColor = effective?.nsColor
     }
@@ -1293,11 +1301,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     /// Debounced trigger for `refreshDiffPane()` — Claude fires `PostToolUse` in bursts and
     /// `HeadWatcher` can fire on rapid successive commits, so coalesce to one recompute.
+    /// Also recomputes the active worktree's cheap +/- figure on the same cadence, so the
+    /// sidebar/bar and the pane never drift apart.
     private func scheduleDiffRefresh() {
         diffRefreshWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.refreshDiffPane() }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.refreshDiffPane()
+            if let wt = self.selectedWorktree { self.recomputeDiffStats(for: wt) }
+        }
         diffRefreshWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+    }
+
+    /// Populate `diffStatsByWorktree` for every worktree on launch, so cold-started worktrees
+    /// that never see a hook event or HEAD change still get an initial figure. Runs on a single
+    /// serial `.utility` queue and computes worktrees ONE AT A TIME (not fanned out) so a repo
+    /// with many worktrees doesn't thrash git subprocesses or starve the interactive queues;
+    /// each result is posted back to the sidebar as it lands rather than waiting for the sweep
+    /// to finish, so figures appear incrementally.
+    private func startDiffStatsSweep() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
+            let worktrees = DispatchQueue.main.sync { self.store.state.worktrees }
+            let git = GitWorktree(gitPath: "/usr/bin/git")
+            for wt in worktrees {
+                let mainBranch = wt.isMain ? nil : DispatchQueue.main.sync { self.mainCheckoutBranch(forRepo: wt.repoID) }
+                let stats = DiffService.stats(worktree: wt, mainBranch: mainBranch, git: git)
+                DispatchQueue.main.async {
+                    self.diffStatsByWorktree[wt.id] = stats
+                    self.sidebar.updateDiffStats(self.diffStatsByWorktree)
+                    if self.selectedWorktree?.id == wt.id { self.refreshChromeForActiveSurface() }
+                }
+            }
+        }
+    }
+
+    /// Recompute one worktree's cheap +/- figure off the main thread, then write it into
+    /// `diffStatsByWorktree` and repaint the sidebar (always) and the WorktreeBar (only when
+    /// `wt` is the active worktree). `mainCheckoutBranch` is an O(1) cache read, so it's safe
+    /// to call before hopping to the background queue.
+    private func recomputeDiffStats(for wt: Worktree) {
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        let mainBranch = wt.isMain ? nil : mainCheckoutBranch(forRepo: wt.repoID)
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let stats = DiffService.stats(worktree: wt, mainBranch: mainBranch, git: git)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.diffStatsByWorktree[wt.id] = stats
+                self.sidebar.updateDiffStats(self.diffStatsByWorktree)
+                if self.selectedWorktree?.id == wt.id { self.refreshChromeForActiveSurface() }
+            }
+        }
     }
 
     @objc private func enableAgentStatusHookAction() {
@@ -1470,6 +1525,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
         maybeNotify(worktreeID: event.worktreeID, state: newState, body: body)
         recomputeRollupsAndRefreshUI()
+        if let wt = store.state.worktrees.first(where: { $0.id == event.worktreeID }) {
+            recomputeDiffStats(for: wt)
+        }
         if event.worktreeID == selectedWorktree?.id { scheduleDiffRefresh() }
     }
 
