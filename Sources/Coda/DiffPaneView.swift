@@ -80,6 +80,14 @@ private final class FileRowCell: NSTableCellView {
 
 private final class LineRowCell: NSTableCellView {
     let label = NSTextField(labelWithString: "")
+
+    /// Once the cell has its real width, tell the wrapping label how wide it may lay out —
+    /// this is what lets `usesAutomaticRowHeights` measure the correct (possibly multi-line)
+    /// height for a wrapped diff line.
+    override func layout() {
+        super.layout()
+        label.preferredMaxLayoutWidth = label.bounds.width
+    }
 }
 
 private final class ShowLargeCell: NSTableCellView {
@@ -110,8 +118,18 @@ final class DiffPaneViewController: NSViewController {
     override func loadView() {
         let root = NSView()
 
-        let refresh = NSButton(title: "Refresh", target: self, action: #selector(refreshTapped))
-        refresh.bezelStyle = .texturedRounded
+        // Bake a neutral chrome color into a NON-template image. A textured/bordered
+        // NSButton renders a template symbol in the control accent (blue) and ignores
+        // `contentTintColor`; a pre-colored non-template image draws exactly as given.
+        let refreshBase = NSImage(systemSymbolName: "arrow.triangle.2.circlepath",
+                                  accessibilityDescription: "Refresh diff")
+        let refreshImage = refreshBase?.withSymbolConfiguration(.init(paletteColors: [.secondaryLabelColor]))
+        refreshImage?.isTemplate = false
+        let refresh = NSButton(image: refreshImage ?? refreshBase ?? NSImage(),
+                               target: self, action: #selector(refreshTapped))
+        refresh.isBordered = false                 // plain icon, like the toolbar glyphs
+        refresh.imagePosition = .imageOnly
+        refresh.toolTip = "Refresh diff"
         refresh.translatesAutoresizingMaskIntoConstraints = false
 
         column.resizingMask = .autoresizingMask
@@ -145,14 +163,23 @@ final class DiffPaneViewController: NSViewController {
         root.addSubview(scroll)
         root.addSubview(emptyLabel)
         NSLayoutConstraint.activate([
-            refresh.topAnchor.constraint(equalTo: root.topAnchor, constant: 6),
-            refresh.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -8),
-            scroll.topAnchor.constraint(equalTo: refresh.bottomAnchor, constant: 6),
+            // The pane is a full-height sidebar item, so its content runs up under the
+            // titlebar — anchor Refresh to the safe area so it clears the traffic/title band.
+            refresh.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: 18),
+            refresh.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -18),
+            scroll.topAnchor.constraint(equalTo: refresh.bottomAnchor, constant: 8),
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             emptyLabel.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             emptyLabel.centerYAnchor.constraint(equalTo: root.centerYAnchor),
+            // Pin the outline to the clip view's width (leading/trailing/top, NOT bottom —
+            // it scrolls vertically) so the table can never grow wider than the visible pane.
+            // Without this the diff-line labels push the table wider than the viewport and,
+            // with the horizontal scroller off, the text just clips instead of wrapping.
+            outline.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            outline.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
+            outline.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
         ])
         view = root
     }
@@ -283,6 +310,10 @@ final class DiffPaneViewController: NSViewController {
         label.usesSingleLineMode = false
         label.cell?.wraps = true
         label.cell?.isScrollable = false
+        // Let the label yield horizontally rather than force the cell (and thus the whole
+        // table) wider than the pane — this is what makes it actually wrap.
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
         cell.addSubview(label)
         cell.textField = label
 

@@ -69,7 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     // Toggle-diff toolbar item ref, so its appearance tracks the diff pane's open/closed
     // state on every toggle path (toolbar click, View menu, ⌃⌘D) — mirrors the openInItem
     // pattern above (store the ref, mutate its appearance from the single state-changing spot).
-    private weak var toggleDiffToolbarItem: NSToolbarItem?
+    private weak var toggleDiffButton: NSButton?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         applyDockIcon()
@@ -361,6 +361,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         if UserDefaults.standard.object(forKey: "NSSplitView Subview Frames MainSidebarSplit") == nil {
             splitVC.splitView.setPosition(255, ofDividerAt: 0)
         }
+        // The diff pane is in-memory / default-closed (spec): the split autosave restores the
+        // whole split's state — including this item's collapse — so force it shut on every
+        // launch, after that restore has run. (The left sidebar's restored width is untouched.)
+        diffPaneItem.isCollapsed = true
+        updateToggleDiffAppearance()
     }
 
     private func wireSidebar() {
@@ -1257,12 +1262,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         if !diffPaneItem.isCollapsed { refreshDiffPane() }   // populate on open
     }
 
-    /// Reflect the diff pane's open/closed state on the toolbar button (spec: "Shows a
-    /// selected state when open"). A plain NSToolbarItem has no built-in selected look, so we
-    /// tint the glyph with the accent color while open and revert to the plain template glyph
-    /// while closed. No-op if the toolbar hasn't been built yet (`toggleDiffToolbarItem` nil).
+    /// Reflect the diff pane's open/closed state on the toolbar toggle button (spec: "Shows a
+    /// selected state when open"): the glyph is full-strength when the pane is open and dimmed
+    /// when closed. No-op if the toolbar hasn't been built yet (`toggleDiffButton` nil).
     private func updateToggleDiffAppearance() {
-        toggleDiffToolbarItem?.image = toggleDiffImage(active: !diffPaneItem.isCollapsed)
+        toggleDiffButton?.image = toggleDiffImage(active: !diffPaneItem.isCollapsed)
     }
 
     /// The Toggle Diff glyph: the plain template symbol when closed, or the same symbol
@@ -1270,12 +1274,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// variant — template images are recolored by the system for their control state, which
     /// would otherwise erase the accent tint we just applied.
     private func toggleDiffImage(active: Bool) -> NSImage? {
-        guard let base = NSImage(systemSymbolName: "sidebar.right", accessibilityDescription: "Toggle Diff")
+        guard let base = NSImage(systemSymbolName: "chevron.left.forwardslash.chevron.right", accessibilityDescription: "Toggle Diff")
         else { return nil }
-        guard active else { return base }
-        let tinted = base.withSymbolConfiguration(.init(paletteColors: [.controlAccentColor])) ?? base
-        tinted.isTemplate = false
-        return tinted
+        // Neutral open-state indicator: full-strength label color when open, dimmed when
+        // closed — a brightness cue rather than an accent-blue tint.
+        let tint: NSColor = active ? .labelColor : .secondaryLabelColor
+        let config = NSImage.SymbolConfiguration(pointSize: 17, weight: .regular)
+            .applying(.init(paletteColors: [tint]))
+        let image = base.withSymbolConfiguration(config) ?? base
+        image.isTemplate = false
+        return image
     }
 
     /// Recompute the diff pane's contents from `DiffService` and repaint it — but only while
@@ -1686,6 +1694,11 @@ private extension NSToolbarItem.Identifier {
     static let notch = NSToolbarItem.Identifier("notch")
     static let toggleDiff = NSToolbarItem.Identifier("toggleDiff")
     static let openIn = NSToolbarItem.Identifier("openIn")
+    // Each cluster is ONE toolbar item — a tight [button │ hairline │ button] row sharing the
+    // single rounded background the toolbar draws behind a custom view. This is what lets the
+    // icons hug the divider; separate items get uncontrollable spacing on both sides.
+    static let leftCluster = NSToolbarItem.Identifier("leftCluster")   // sidebar-toggle │ add-repo
+    static let rightCluster = NSToolbarItem.Identifier("rightCluster") // launch-Claude │ toggle-diff
 }
 
 extension AppDelegate: NSToolbarDelegate {
@@ -1693,48 +1706,106 @@ extension AppDelegate: NSToolbarDelegate {
         // No sidebar-tracking separator: it pins the notch's flexible space to the content
         // region, so the notch drifts as the sidebar resizes. Centring it between the left
         // (toggle+add) and right (launch+open) groups keeps it put in window coordinates.
-        [.toggleSidebar, .addRepository,
+        [.leftCluster,
          .flexibleSpace, .notch, .flexibleSpace,
-         .launchClaude, .toggleDiff, .openIn]
+         .rightCluster, .openIn]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         toolbarDefaultItemIdentifiers(toolbar)
     }
 
+    /// A borderless, image-only cluster button rendering a template SF Symbol in a neutral
+    /// chrome color (explicit `contentTintColor` so it never picks up the control accent blue).
+    /// A uniform 20×20 box every cluster icon is scaled into, so a symbol and the Claude mark
+    /// (different intrinsic sizes) read as the same size.
+    private var clusterIconSize: CGFloat { 20 }
+
+    private func clusterButton(symbolName: String, tooltip: String,
+                               target: AnyObject?, action: Selector) -> NSButton {
+        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: tooltip)?
+            .withSymbolConfiguration(.init(pointSize: 17, weight: .regular))
+        let button = NSButton(image: image ?? NSImage(), target: target, action: action)
+        button.isBordered = false
+        button.imagePosition = .imageOnly
+        button.imageScaling = .scaleProportionallyUpOrDown
+        button.toolTip = tooltip
+        button.contentTintColor = .labelColor
+        button.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: clusterIconSize),
+            button.heightAnchor.constraint(equalToConstant: clusterIconSize),
+        ])
+        return button
+    }
+
+    /// A borderless, image-only cluster button for a pre-rendered image (the Claude mark, or the
+    /// already-colored diff-toggle glyph) — drawn as-is, no tint applied.
+    private func clusterButton(image: NSImage?, tooltip: String,
+                               target: AnyObject?, action: Selector) -> NSButton {
+        let button = NSButton(image: image ?? NSImage(), target: target, action: action)
+        button.isBordered = false
+        button.imagePosition = .imageOnly
+        button.imageScaling = .scaleProportionallyUpOrDown
+        button.toolTip = tooltip
+        button.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: clusterIconSize),
+            button.heightAnchor.constraint(equalToConstant: clusterIconSize),
+        ])
+        return button
+    }
+
+    /// A 1pt vertical hairline (dynamic `separatorColor`) placed between cluster buttons.
+    private func clusterHairline() -> NSView {
+        let line = NSBox()
+        line.boxType = .custom
+        line.borderWidth = 0
+        line.borderColor = .clear
+        line.fillColor = .separatorColor
+        line.cornerRadius = 0
+        line.translatesAutoresizingMaskIntoConstraints = false
+        line.widthAnchor.constraint(equalToConstant: 1).isActive = true
+        line.heightAnchor.constraint(equalToConstant: 16).isActive = true
+        return line
+    }
+
+    /// One toolbar item whose view is a tight [button │ hairline │ button] row. The toolbar
+    /// draws a single rounded background behind it, so the buttons share one capsule and the
+    /// spacing between them is exactly `stack.spacing` — no per-item slop.
+    private func clusterItem(_ id: NSToolbarItem.Identifier, views: [NSView]) -> NSToolbarItem {
+        let item = NSToolbarItem(itemIdentifier: id)
+        item.label = ""
+        let stack = NSStackView(views: views)
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 8
+        stack.edgeInsets = NSEdgeInsets(top: 2, left: 12, bottom: 2, right: 12)
+        item.view = stack
+        return item
+    }
+
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier,
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         switch id {
-        case .addRepository:
-            let item = NSToolbarItem(itemIdentifier: id)
-            item.label = "Add Repository"
-            item.toolTip = "Add Repository… (⇧⌘N)"
-            item.image = NSImage(systemSymbolName: "folder.badge.plus", accessibilityDescription: "Add Repository")
-            item.target = self
-            item.action = #selector(addRepoAction)
-            item.isBordered = true
-            return item
+        case .leftCluster:
+            let sidebar = clusterButton(
+                symbolName: "sidebar.leading", tooltip: "Toggle Sidebar (⌃⌘S)",
+                target: nil, action: #selector(NSSplitViewController.toggleSidebar(_:)))
+            let add = clusterButton(
+                symbolName: "folder.badge.plus", tooltip: "Add Repository… (⇧⌘N)",
+                target: self, action: #selector(addRepoAction))
+            return clusterItem(id, views: [sidebar, clusterHairline(), add])
 
-        case .launchClaude:
-            let item = NSToolbarItem(itemIdentifier: id)
-            item.label = "Launch Claude"
-            item.toolTip = "Launch Claude (⌘R)"
-            item.image = claudeMarkImage()
-            item.target = self
-            item.action = #selector(launchClaudeAction)
-            item.isBordered = true
-            return item
-
-        case .toggleDiff:
-            let item = NSToolbarItem(itemIdentifier: id)
-            item.label = "Diff"
-            item.toolTip = "Toggle Diff (⌃⌘D)"
-            item.target = self
-            item.action = #selector(toggleDiffAction)
-            item.isBordered = true
-            toggleDiffToolbarItem = item
-            updateToggleDiffAppearance()   // initial state: pane starts collapsed → not-selected
-            return item
+        case .rightCluster:
+            let claude = clusterButton(
+                image: claudeMarkImage(diameter: 20), tooltip: "Launch Claude (⌘R)",
+                target: self, action: #selector(launchClaudeAction))
+            let diff = clusterButton(
+                image: toggleDiffImage(active: !diffPaneItem.isCollapsed), tooltip: "Toggle Diff (⌃⌘D)",
+                target: self, action: #selector(toggleDiffAction))
+            toggleDiffButton = diff
+            return clusterItem(id, views: [claude, clusterHairline(), diff])
 
         case .notch:
             let item = NSToolbarItem(itemIdentifier: id)

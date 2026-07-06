@@ -357,7 +357,15 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
                 ?? wt.worktree.color.flatMap { NSColor(hex: $0) }
             cell.applyIdentityColor(identity, glyphTint: chrome?.color(.glyphTint).nsColor)
             if let s = diffStats[wt.worktree.id], !s.isEmpty {
-                cell.statsLabel.stringValue = "+\(s.insertions) −\(s.deletions)"
+                // +N green / −M red, matching the diff pane's file-row counts.
+                let figure = NSMutableAttributedString(
+                    string: "+\(s.insertions)",
+                    attributes: [.foregroundColor: NSColor.systemGreen, .font: cell.statsLabel.font as Any])
+                figure.append(NSAttributedString(string: " "))
+                figure.append(NSAttributedString(
+                    string: "\u{2212}\(s.deletions)",
+                    attributes: [.foregroundColor: NSColor.systemRed, .font: cell.statsLabel.font as Any]))
+                cell.statsLabel.attributedStringValue = figure
                 cell.statsLabel.isHidden = false
             } else {
                 cell.statsLabel.isHidden = true   // hidden at zero
