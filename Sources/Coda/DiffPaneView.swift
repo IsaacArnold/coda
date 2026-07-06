@@ -68,14 +68,18 @@ final class DiffPaneViewController: NSViewController {
 
 /// One collapsible file section: header (glyph + path + +/-), body of unified lines.
 private final class FileSectionView: NSView {
-    private var expanded = true
+    private var expanded = false
     private let file: DiffFile
     private let body = NSStackView()
+    private let disclosure = NSTextField(labelWithString: "▸")
 
     init(file: DiffFile) {
         self.file = file
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
+
+        disclosure.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        disclosure.textColor = .secondaryLabelColor
 
         let glyph = NSTextField(labelWithString: Self.glyph(file.kind))
         let path = NSTextField(labelWithString: file.oldPath.map { "\($0) → \(file.path)" } ?? file.path)
@@ -85,7 +89,7 @@ private final class FileSectionView: NSView {
         counts.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
         counts.textColor = .secondaryLabelColor
 
-        let header = NSStackView(views: [glyph, path, NSView(), counts])
+        let header = NSStackView(views: [disclosure, glyph, path, NSView(), counts])
         header.orientation = .horizontal
         header.spacing = 6
         header.translatesAutoresizingMaskIntoConstraints = false
@@ -123,6 +127,7 @@ private final class FileSectionView: NSView {
     private func toggle() { expanded.toggle(); renderBody() }
 
     private func renderBody() {
+        disclosure.stringValue = expanded ? "▾" : "▸"
         body.arrangedSubviews.forEach { $0.removeFromSuperview() }
         guard expanded else { return }
         if file.isBinary { body.addArrangedSubview(Self.note("Binary file changed")); return }
