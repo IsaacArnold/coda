@@ -18,6 +18,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// Coalesces bursts of "files changed" signals (hook events, HEAD moves) into one
     /// `refreshDiffPane()` ~0.4s after the last signal, instead of recomputing per event.
     private var diffRefreshWork: DispatchWorkItem?
+    /// Per-worktree debounce for `recomputeDiffStats(for:)` from the hook-event path. Claude
+    /// fires `PostToolUse` in bursts, so without this a burst spawns N redundant git
+    /// subprocesses per worktree, and `.utility`-queue scheduling jitter can let an
+    /// earlier-dispatched compute finish after a later one and clobber
+    /// `diffStatsByWorktree[wt.id]` with a stale value. Keyed by worktree id; main-thread-only
+    /// (scheduled from `handleHookEvent`, which always runs on main — see
+    /// `AgentHookSocketServer`'s `DispatchQueue.main.async` around its event callback).
+    private var statsRecomputeWork: [String: DispatchWorkItem] = [:]
     /// repoID → current branch of its main checkout, kept fresh by `headWatcher`.
     private var currentBranches: [String: String] = [:]
     /// worktree id → cheap +/- line counts, shown in the sidebar and mirrored in the
@@ -1355,6 +1363,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
+    /// Debounced wrapper around `recomputeDiffStats(for:)` for the hook-event path — coalesces
+    /// a `PostToolUse` burst for one worktree into a single recompute, and guarantees the
+    /// last-scheduled request wins (an earlier in-flight schedule is cancelled before it can
+    /// dispatch, so a stale result can never land after a fresher one). Must only be called
+    /// from the main thread, since `statsRecomputeWork` is main-thread-only state.
+    private func scheduleStatsRecompute(for wt: Worktree) {
+        statsRecomputeWork[wt.id]?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.statsRecomputeWork[wt.id] = nil
+            self?.recomputeDiffStats(for: wt)
+        }
+        statsRecomputeWork[wt.id] = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+    }
+
     @objc private func enableAgentStatusHookAction() {
         do {
             try HookInstaller.install()
@@ -1526,7 +1549,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         maybeNotify(worktreeID: event.worktreeID, state: newState, body: body)
         recomputeRollupsAndRefreshUI()
         if let wt = store.state.worktrees.first(where: { $0.id == event.worktreeID }) {
-            recomputeDiffStats(for: wt)
+            scheduleStatsRecompute(for: wt)
         }
         if event.worktreeID == selectedWorktree?.id { scheduleDiffRefresh() }
     }
