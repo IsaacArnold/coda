@@ -59,4 +59,44 @@ final class GitWorktreeTests: XCTestCase {
         let git = GitWorktree(gitPath: "/usr/bin/git")
         XCTAssertEqual(Set(try git.localBranches(repo: repo)), ["main", "feature-a", "feature-b"])
     }
+
+    func testDiffSinceForkShowsCommittedAndUncommitted() throws {
+        let repo = try makeTempRepo()                       // one commit on main, README.md="hello"
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        // Branch off, commit a change, then leave an uncommitted change.
+        _ = try ProcessRunner.run("/usr/bin/git", ["-C", repo, "checkout", "-b", "feat"], cwd: nil)
+        try "hello\ncommitted".write(toFile: repo + "/README.md", atomically: true, encoding: .utf8)
+        _ = try ProcessRunner.run("/usr/bin/git", ["-C", repo, "commit", "-am", "c"], cwd: nil)
+        try "hello\ncommitted\nuncommitted".write(toFile: repo + "/README.md", atomically: true, encoding: .utf8)
+
+        let mb = try git.mergeBase(dir: repo, "main", "HEAD")
+        XCTAssertNotNil(mb)
+        let patch = try git.diffPatch(dir: repo, against: mb!)
+        XCTAssertTrue(patch.contains("+committed"))
+        XCTAssertTrue(patch.contains("+uncommitted"))
+    }
+
+    func testMergeBaseNilForUnrelatedRef() throws {
+        let repo = try makeTempRepo()
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        XCTAssertNil(try git.mergeBase(dir: repo, "HEAD", "does-not-exist"))
+    }
+
+    func testUntrackedEnumerationAndPatch() throws {
+        let repo = try makeTempRepo()
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        try "brand new".write(toFile: repo + "/fresh.txt", atomically: true, encoding: .utf8)
+        XCTAssertEqual(try git.untrackedFiles(dir: repo), ["fresh.txt"])
+        let patch = try git.untrackedPatch(dir: repo, path: "fresh.txt")
+        XCTAssertTrue(patch.contains("+brand new"))
+        XCTAssertTrue(patch.contains("fresh.txt"))
+    }
+
+    func testNumstatCounts() throws {
+        let repo = try makeTempRepo()
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        try "hello\nmore".write(toFile: repo + "/README.md", atomically: true, encoding: .utf8)
+        let ns = try git.numstat(dir: repo, against: "HEAD")
+        XCTAssertTrue(ns.contains("README.md"))
+    }
 }
