@@ -23,3 +23,17 @@ _Avoid_: Throwaway tab, plain tab
 **Claude run**:
 An actual invocation of `claude` inside a worktree's terminal surface, started on demand. A worktree may have zero or one running.
 _Avoid_: Session, agent (when referring to the process)
+
+## Completions
+
+**Completion popup**:
+The dropdown that appears anchored at the terminal cursor as the user types a command, listing candidate subcommands, options, and arguments — each with a short description — navigable by keyboard. Modelled on Kiro/Fig CLI autocomplete.
+_Avoid_: Autocomplete menu, intellisense, suggestion box
+
+**Completion spec**:
+A declarative description of one CLI's grammar (its subcommands, options, and argument kinds) that drives what the Completion popup offers for that command.
+_Avoid_: Schema, definition, grammar file
+
+**Shell integration**:
+The consent-injected shell snippet that emits OSC 133 prompt markers (and OSC 7 cwd), letting Coda locate the editable command on the screen and know when a command is running versus being typed.
+_Avoid_: Shell hook (reserve "hook" for the Claude Code agent-state hook), prompt hook
