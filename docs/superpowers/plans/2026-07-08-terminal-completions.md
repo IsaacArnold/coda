@@ -137,9 +137,9 @@ Gate injection behind consent; expose an independent global toggle.
 - Consumes: Task 5's `shellIntegrationEnv(enabled:…)` — the flag feeds `enabled`.
 - **Applies to newly-opened terminals only** (the `ZDOTDIR` wrapper is fixed at spawn); add a note in the toggle's help text.
 
-- [ ] **Step 1:** Add first-run consent prompt (reuse the hook-installer pattern), persist the flag, default on after consent.
-- [ ] **Step 2:** Add the global Settings toggle; when off, `shellIntegrationEnv` returns empty ⇒ zero OSC 133 overhead on new terminals.
-- [ ] **Step 3:** Build. **Manual verify:** decline consent → no `ZDOTDIR` set; accept → set; toggle off → new terminal has no markers. Commit.
+- [x] **Step 1:** Add first-run consent prompt (reuse the hook-installer pattern), persist the flag, default on after consent.
+- [x] **Step 2:** Add the global Settings toggle; when off, `shellIntegrationEnv` returns empty ⇒ zero OSC 133 overhead on new terminals.
+- [x] **Step 3:** Build. **Manual verify:** decline consent → no `ZDOTDIR` set; accept → set; toggle off → new terminal has no markers. Commit. _(Build + full suite green; gate logic verified via code trace. GUI decline/accept/toggle-off confirmation deferred to Task 12's end-to-end pass.)_
 
 ---
 
