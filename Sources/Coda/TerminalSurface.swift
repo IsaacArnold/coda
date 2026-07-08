@@ -141,7 +141,8 @@ final class TerminalSurface: NSViewController {
         if !hookSocketPath.isEmpty, !hookWorktreeID.isEmpty, !hookSurfaceID.isEmpty {
             let dict = hookEnvironment(base: ProcessInfo.processInfo.environment,
                                        socketPath: hookSocketPath,
-                                       worktreeID: hookWorktreeID, surfaceID: hookSurfaceID)
+                                       worktreeID: hookWorktreeID, surfaceID: hookSurfaceID,
+                                       shellIntegration: resolvedShellIntegrationEnv())
             envArray = dict.map { "\($0.key)=\($0.value)" }
         }
         terminal.startProcess(executable: shell.executablePath,
@@ -151,6 +152,27 @@ final class TerminalSurface: NSViewController {
                               currentDirectory: workingDirectory)
         if let pendingFont { applyFont(pendingFont) }
         if let pendingTheme { applyTheme(pendingTheme) }
+    }
+
+    /// Resolves the env additions that route this surface's shell through Coda's bundled
+    /// OSC 133 wrapper (see `Sources/Coda/Resources/shell-integration/zsh` and
+    /// `ShellIntegration.swift`). Silent-off (returns `[:]`) if the bundled wrapper can't be
+    /// located — a spawn must never fail because of this.
+    private func resolvedShellIntegrationEnv() -> [String: String] {
+        // TODO(Task 6): gate on the persisted completionsEnabled consent flag.
+        let enabled = true
+        guard let bundleZdotdir = Bundle.codaAssets.resourceURL?
+                .appendingPathComponent("Resources/shell-integration/zsh"),
+              FileManager.default.fileExists(atPath: bundleZdotdir.appendingPathComponent(".zshrc").path)
+        else { return [:] }
+        let userZdotdir: URL
+        if let existing = ProcessInfo.processInfo.environment["ZDOTDIR"], !existing.isEmpty {
+            userZdotdir = URL(fileURLWithPath: existing)
+        } else {
+            userZdotdir = FileManager.default.homeDirectoryForCurrentUser
+        }
+        return shellIntegrationEnv(enabled: enabled, shell: shell,
+                                   bundleZdotdir: bundleZdotdir, userZdotdir: userZdotdir)
     }
 }
 

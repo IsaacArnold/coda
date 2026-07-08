@@ -20,7 +20,8 @@ public enum HookEnv {
 public func hookEnvironment(base: [String: String],
                             socketPath: String,
                             worktreeID: String,
-                            surfaceID: String) -> [String: String] {
+                            surfaceID: String,
+                            shellIntegration: [String: String] = [:]) -> [String: String] {
     var env = base
     env[HookEnv.socketPath] = socketPath
     env[HookEnv.worktreeID] = worktreeID
@@ -29,6 +30,13 @@ public func hookEnvironment(base: [String: String],
     for (key, value) in ["TERM": "xterm-256color",
                          "COLORTERM": "truecolor",
                          "LANG": "en_US.UTF-8"] where env[key] == nil {
+        env[key] = value
+    }
+    // Bundled zsh ZDOTDIR wrapper env (ZDOTDIR/CODA_USER_ZDOTDIR), or empty when
+    // unsupported/disabled — see ShellIntegration.swift. Applied last so it can override an
+    // inherited ZDOTDIR (the whole point is to redirect zsh's dotfile lookup through Coda's
+    // bundled wrapper, which then chains the user's real dotfiles itself).
+    for (key, value) in shellIntegration {
         env[key] = value
     }
     return env
