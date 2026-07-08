@@ -20,6 +20,11 @@ final class CompletionEngineTests: XCTestCase {
             options: [
                 SpecOption(name: ["--version"], description: "Print the version"),
                 SpecOption(name: ["--help", "-h"], description: "Show help"),
+                SpecOption(
+                    name: ["--work-tree"],
+                    description: "Set the working tree",
+                    args: [SpecArg(name: "path", template: .folders)]
+                ),
             ]
         )
         let cd = CompletionSpec(
@@ -118,6 +123,51 @@ final class CompletionEngineTests: XCTestCase {
         XCTAssertEqual(context.replacementRange, 11..<14)
         XCTAssertTrue(context.staticCandidates.isEmpty)
         XCTAssertTrue(context.dynamicSources.contains(.filepaths))
+    }
+
+    // MARK: - resolveCompletion: quote-aware replacementRange
+
+    func testQuotedPathTokenReplacementRangeIsQuoteRelative() {
+        // Raw line on screen: cd "my dir  — cursor at the end (offset 10), inside the still-open
+        // quote. The tokenizer makes the cursor token's range quote-relative: it starts just AFTER
+        // the opening `"` (offset 4), NOT at the quote (offset 3), so replacing that span with a
+        // plain candidate preserves the opening quote and stays well-formed.
+        let context = resolveCompletion(line: "cd \"my dir", cursorOffset: 10, specs: makeSpecs())
+        XCTAssertEqual(context.query, "my dir")
+        XCTAssertEqual(context.replacementRange, 4..<10)
+        XCTAssertTrue(context.dynamicSources.contains(.folders))
+    }
+
+    // MARK: - resolveCompletion: insertion (trailing-space convention)
+
+    func testStaticCandidatesInsertPrimaryNamePlusTrailingSpace() {
+        let afterGit = resolveCompletion(line: "git ", cursorOffset: 4, specs: makeSpecs())
+        let checkout = afterGit.staticCandidates.first { $0.kind == .subcommand && $0.name == "checkout" }
+        XCTAssertEqual(checkout?.insertion, "checkout ")
+        let version = afterGit.staticCandidates.first { $0.kind == .option && $0.name == "--version" }
+        XCTAssertEqual(version?.insertion, "--version ")
+
+        let atCommand = resolveCompletion(line: "gi", cursorOffset: 2, specs: makeSpecs())
+        let git = atCommand.staticCandidates.first { $0.name == "git" }
+        XCTAssertEqual(git?.insertion, "git ")
+    }
+
+    // MARK: - resolveCompletion: alias resolution + option-argument classification
+
+    func testSubcommandAliasResolvesSameSpec() {
+        // `co` is an alias of `checkout`; resolving `git co ` must descend into the same spec and
+        // offer its git-branches generator arg.
+        let context = resolveCompletion(line: "git co ", cursorOffset: 7, specs: makeSpecs())
+        XCTAssertTrue(context.dynamicSources.contains(.generator(.gitBranches)))
+    }
+
+    func testOptionWithArgumentOffersItsDynamicSource() {
+        // `--work-tree` takes a folders-templated path arg; after `git --work-tree ` the cursor is
+        // that option's value slot, so its dynamic source is offered and no static candidates are.
+        let context = resolveCompletion(line: "git --work-tree ", cursorOffset: 16, specs: makeSpecs())
+        XCTAssertEqual(context.query, "")
+        XCTAssertTrue(context.staticCandidates.isEmpty)
+        XCTAssertEqual(context.dynamicSources, [.folders])
     }
 
     // MARK: - rankCandidates
