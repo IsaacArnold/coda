@@ -13,6 +13,7 @@ final class TerminalSurface: NSViewController {
     private let hookSurfaceID: String
     private let hookSocketPath: String
     private let shell: ResolvedShell
+    private let completionsEnabled: Bool
     private var terminal: ClickableTerminalView!
     private var pendingTheme: TerminalTheme?
     private var pendingFont: NSFont?
@@ -28,7 +29,8 @@ final class TerminalSurface: NSViewController {
 
     init(workingDirectory: String, command: String, setupScript: String = "",
          hookWorktreeID: String = "", hookSurfaceID: String = "", hookSocketPath: String = "",
-         shell: ResolvedShell = ResolvedShell(executablePath: "/bin/zsh")) {
+         shell: ResolvedShell = ResolvedShell(executablePath: "/bin/zsh"),
+         completionsEnabled: Bool = false) {
         self.workingDirectory = workingDirectory
         self.command = command
         self.setupScript = setupScript
@@ -36,6 +38,7 @@ final class TerminalSurface: NSViewController {
         self.hookSurfaceID = hookSurfaceID
         self.hookSocketPath = hookSocketPath
         self.shell = shell
+        self.completionsEnabled = completionsEnabled
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -159,8 +162,7 @@ final class TerminalSurface: NSViewController {
     /// `ShellIntegration.swift`). Silent-off (returns `[:]`) if the bundled wrapper can't be
     /// located — a spawn must never fail because of this.
     private func resolvedShellIntegrationEnv() -> [String: String] {
-        // TODO(Task 6): gate on the persisted completionsEnabled consent flag.
-        let enabled = true
+        let enabled = completionsEnabled
         guard let bundleZdotdir = Bundle.codaAssets.resourceURL?
                 .appendingPathComponent("Resources/shell-integration/zsh"),
               FileManager.default.fileExists(atPath: bundleZdotdir.appendingPathComponent(".zshrc").path)

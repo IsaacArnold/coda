@@ -27,23 +27,30 @@ final class GeneralSettingsViewController: NSViewController {
     private let notifyDoneCheckbox = NSButton(checkboxWithTitle: "Notify when an agent finishes",
                                               target: nil, action: nil)
 
+    private var completionsEnabled: Bool
+    private let completionsCheckbox = NSButton(checkboxWithTitle: "Show command completions in the terminal",
+                                               target: nil, action: nil)
+
     var onChangeEditor: ((Editor) -> Void)?
     var onChangeFont: ((TerminalFontPref) -> Void)?
     var onChangeUIScale: ((UIScale) -> Void)?
     var onChangeNotifyOnNeedsYou: ((Bool) -> Void)?
     var onChangeNotifyOnDone: ((Bool) -> Void)?
     var onChangeShell: ((ShellChoice) -> Void)?
+    var onChangeCompletionsEnabled: ((Bool) -> Void)?
 
     private static let otherTitle = "Other…"
 
     init(editor: Editor, terminalFont: NSFont, uiScale: UIScale,
-         notifyOnNeedsYou: Bool, notifyOnDone: Bool, shell: ShellChoice) {
+         notifyOnNeedsYou: Bool, notifyOnDone: Bool, shell: ShellChoice,
+         completionsEnabled: Bool) {
         self.editor = editor
         self.terminalFont = terminalFont
         self.uiScale = uiScale
         self.notifyOnNeedsYou = notifyOnNeedsYou
         self.notifyOnDone = notifyOnDone
         self.shell = shell
+        self.completionsEnabled = completionsEnabled
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -136,12 +143,24 @@ final class GeneralSettingsViewController: NSViewController {
         shellHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         shellHint.textColor = .secondaryLabelColor
 
+        // Command completions — opt-in zsh shell integration (Task 5/6). Applies to new
+        // terminals only; the ZDOTDIR wrapper is fixed at spawn.
+        let completionsTitle = NSTextField(labelWithString: "Command Completions")
+        completionsTitle.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        completionsCheckbox.state = completionsEnabled ? .on : .off
+        completionsCheckbox.target = self
+        completionsCheckbox.action = #selector(completionsEnabledChanged)
+        let completionsHint = NSTextField(labelWithString: "Adds an opt-in zsh integration to Coda terminals. Applies to newly-opened terminals.")
+        completionsHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        completionsHint.textColor = .secondaryLabelColor
+
         let stack = NSStackView(views: [
             title, row, hint,
             fontTitle, fontRow, fontHint,
             scaleTitle, scaleRow, scaleHint,
             notifyTitle, notifyStack,
             shellTitle, shellRow, shellHint,
+            completionsTitle, completionsCheckbox, completionsHint,
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -275,6 +294,11 @@ final class GeneralSettingsViewController: NSViewController {
     @objc private func notifyDoneChanged() {
         notifyOnDone = notifyDoneCheckbox.state == .on
         onChangeNotifyOnDone?(notifyOnDone)
+    }
+
+    @objc private func completionsEnabledChanged() {
+        completionsEnabled = completionsCheckbox.state == .on
+        onChangeCompletionsEnabled?(completionsEnabled)
     }
 
     private func pickOtherApp() {

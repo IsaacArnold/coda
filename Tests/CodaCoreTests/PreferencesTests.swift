@@ -113,6 +113,23 @@ final class PreferencesTests: XCTestCase {
         let back = try JSONDecoder().decode(Preferences.self, from: JSONEncoder().encode(prefs))
         XCTAssertEqual(back.shell, .bash)
     }
+
+    func testCompletionsDefaultFalseForOldPrefs() throws {
+        // Prefs written before the completions consent prompt carried neither key.
+        let json = #"{"defaultEditor":{"name":"Visual Studio Code","bundleID":"com.microsoft.VSCode","urlScheme":"vscode"}}"#
+        let prefs = try JSONDecoder().decode(Preferences.self, from: Data(json.utf8))
+        XCTAssertFalse(prefs.completionsEnabled)
+        XCTAssertFalse(prefs.askedCompletionsConsent)
+    }
+
+    func testCompletionsRoundTrip() throws {
+        var prefs = Preferences()
+        prefs.completionsEnabled = true
+        prefs.askedCompletionsConsent = true
+        let back = try JSONDecoder().decode(Preferences.self, from: JSONEncoder().encode(prefs))
+        XCTAssertTrue(back.completionsEnabled)
+        XCTAssertTrue(back.askedCompletionsConsent)
+    }
 }
 
 final class KnownEditorsTests: XCTestCase {

@@ -21,19 +21,22 @@ final class SettingsTabController: NSTabViewController {
          notifyOnDone: Bool,
          onChangeNotifyOnDone: @escaping (Bool) -> Void,
          shell: ShellChoice,
-         onChangeShell: @escaping (ShellChoice) -> Void) {
+         onChangeShell: @escaping (ShellChoice) -> Void,
+         completionsEnabled: Bool,
+         onChangeCompletionsEnabled: @escaping (Bool) -> Void) {
         super.init(nibName: nil, bundle: nil)
         tabStyle = .toolbar
 
         let general = GeneralSettingsViewController(editor: editor, terminalFont: terminalFont, uiScale: uiScale,
                                                     notifyOnNeedsYou: notifyOnNeedsYou, notifyOnDone: notifyOnDone,
-                                                    shell: shell)
+                                                    shell: shell, completionsEnabled: completionsEnabled)
         general.onChangeEditor = onChangeEditor
         general.onChangeFont = onChangeFont
         general.onChangeUIScale = onChangeUIScale
         general.onChangeNotifyOnNeedsYou = onChangeNotifyOnNeedsYou
         general.onChangeNotifyOnDone = onChangeNotifyOnDone
         general.onChangeShell = onChangeShell
+        general.onChangeCompletionsEnabled = onChangeCompletionsEnabled
         let generalItem = NSTabViewItem(viewController: general)
         generalItem.label = "General"
         generalItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "General")
