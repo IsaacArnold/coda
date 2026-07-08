@@ -369,7 +369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     private func wireSidebar() {
-        sidebar.onSelect = { [weak self] s in self?.select(s) }
+        sidebar.onSelect = { [weak self] s, userInitiated in self?.select(s, focusTerminal: userInitiated) }
         sidebar.onRepoSettings = { [weak self] repoID in self?.openRepoSettings(repoID: repoID) }
         sidebar.onNewWorktree = { [weak self] repoID in self?.newWorktree(repoID: repoID) }
         sidebar.onSetWorktreeColor = { [weak self] worktreeID, hex in self?.setWorktreeColor(worktreeID, hex) }
@@ -652,8 +652,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     private var shownWorktreeID: String?
 
-    private func select(_ s: Worktree?) {
-        guard shownWorktreeID != s?.id else { return }   // idempotent
+    private func select(_ s: Worktree?, focusTerminal: Bool = true) {
+        guard shownWorktreeID != s?.id else {
+            // Already shown — honor an explicit click by returning focus to its terminal.
+            if focusTerminal, let cur = currentSurface { view(focus: cur) }
+            return
+        }
         shownWorktreeID = s?.id
         selectedWorktree = s
         refreshDiffPane()
@@ -682,6 +686,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             active.view.isHidden = false
             currentSurface = active
         }
+        // Move keyboard focus into the switched-to worktree's terminal so the user can type
+        // immediately. (createSurface already focuses on first open; this covers the common
+        // case of unhiding an existing surface, and is a harmless no-op re-focus otherwise.)
+        if focusTerminal, let cur = currentSurface { view(focus: cur) }
+
         // Force an immediate repaint from current agent state so the switched-to worktree's
         // badges (sidebar + notch + tabs) are correct instantly, rather than waiting for the
         // next hook event or the fallback poll. (Superset of refreshChrome+refreshTabBar.)
