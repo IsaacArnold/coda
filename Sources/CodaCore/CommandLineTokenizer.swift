@@ -76,13 +76,17 @@ public struct TokenizedLine: Equatable {
 /// `line.replacingCharacters(in: <range as String.Index>, with: candidate)` must produce a
 /// well-formed line with the surrounding quoting intact. Concretely:
 ///
-/// - **Cursor token opened by a still-open quote** (the cursor is inside `"…`/`'…`, the quote
-///   began at the token's first character): `range` starts *after* that opening quote, so the
-///   quote is preserved by the replacement and stays balanced against any closing quote sitting
-///   after the cursor. E.g. for `cd "my dir"` with the cursor before the closing `"` (offset
-///   10), the quoted token's `range` is `4..<10` (`my dir`, not `"my dir`); replacing it with
-///   `my directory` yields the well-formed `cd "my directory"`, never the orphaned-quote
-///   `cd my directory"`.
+/// - **Cursor inside an open quote** (`"…`/`'…` still open at the cursor, *wherever* in the
+///   token that quote opened): `range` and `cursorPrefix` are quote-relative — `range` starts
+///   just *after* the opening quote, so the quote is preserved by the replacement and stays
+///   balanced against any closing quote sitting after the cursor. This covers both a quote that
+///   opens the token and one that opens mid-token:
+///     - `cd "my dir"` with the cursor before the closing `"` (offset 10): the quoted token's
+///       `range` is `4..<10` (`my dir`, not `"my dir`); replacing it with `my directory` yields
+///       `cd "my directory"`, never the orphaned-quote `cd my directory"`.
+///     - `cd my"dir"` (a concatenation) with the cursor before the closing `"`: the token's
+///       `range` is `6..<9` (`dir`) and `cursorPrefix` is `dir`; replacing that span with
+///       `directory` yields `cd my"directory"`, again well-formed and orphan-free.
 /// - **Any other token** (unquoted, escaped, or a quote that already closed): `range` is the
 ///   token's full raw span, including any interior backslashes or already-balanced quotes.
 ///   Replacing it wholesale with a plain candidate drops those raw markers cleanly — e.g.
@@ -103,9 +107,12 @@ public func tokenizeCommandLine(_ line: String, cursorOffset: Int) -> TokenizedL
     var tokenStart: Int?
     var quoteState: QuoteState = .none
     var lastCharWasUnquotedWhitespace = false
-    // Offset at which the currently-open quote began, or nil when not inside a quote. Used only
-    // to decide whether the cursor token's `range` should skip a leading opening quote.
+    // Character offset at which the currently-open quote began (nil when not inside a quote), and
+    // the length of `buffer` at that moment. Together they make the cursor token's `range` and
+    // `cursorPrefix` quote-relative when the cursor is inside an open quote (see the "Accept
+    // contract" doc-comment), whether the quote opened at the token's first char or after it.
     var openQuoteStart: Int?
+    var openQuoteBufferLength = 0
 
     func closeToken(at end: Int) {
         guard let start = tokenStart else { return }
@@ -156,12 +163,14 @@ public func tokenizeCommandLine(_ line: String, cursorOffset: Int) -> TokenizedL
                 if tokenStart == nil { tokenStart = i }
                 quoteState = .single
                 openQuoteStart = i
+                openQuoteBufferLength = buffer.count
                 lastCharWasUnquotedWhitespace = false
                 i += 1
             } else if char == "\"" {
                 if tokenStart == nil { tokenStart = i }
                 quoteState = .double
                 openQuoteStart = i
+                openQuoteBufferLength = buffer.count
                 lastCharWasUnquotedWhitespace = false
                 i += 1
             } else if char == "\\" {
@@ -188,12 +197,19 @@ public func tokenizeCommandLine(_ line: String, cursorOffset: Int) -> TokenizedL
     let cursorTokenIndex: Int?
     let cursorPrefix: String
     if let start = tokenStart {
-        cursorPrefix = buffer
-        // If the cursor sits inside a quote that opened at this token's first character, exclude
-        // that dangling opening quote from `range` so a plain-candidate replacement preserves it
-        // (see the "Accept contract" in this function's doc-comment).
-        let rangeStart = (openQuoteStart == start) ? start + 1 : start
-        tokens.append(CommandToken(text: buffer, range: rangeStart..<cursor))
+        if let quoteStart = openQuoteStart {
+            // The cursor sits inside an open quote. Make `range` and `cursorPrefix` quote-relative:
+            // start `range` just after the opening quote so a plain-candidate replacement preserves
+            // that quote (balancing any closing quote after the cursor), and take `cursorPrefix` as
+            // the content typed since the quote. This holds regardless of where in the token the
+            // quote opened — at its first char (`cd "my dir`) or after other content (`cd my"dir`).
+            let quoteRelative = String(buffer.dropFirst(openQuoteBufferLength))
+            cursorPrefix = quoteRelative
+            tokens.append(CommandToken(text: quoteRelative, range: (quoteStart + 1)..<cursor))
+        } else {
+            cursorPrefix = buffer
+            tokens.append(CommandToken(text: buffer, range: start..<cursor))
+        }
         buffer = ""
         tokenStart = nil
         cursorTokenIndex = tokens.count - 1

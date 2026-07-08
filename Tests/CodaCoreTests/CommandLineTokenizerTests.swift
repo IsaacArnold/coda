@@ -174,6 +174,26 @@ final class CommandLineTokenizerTests: XCTestCase {
         XCTAssertEqual(accepted, "cd my dir")
     }
 
+    func testAcceptingInsideMidTokenOpenedQuoteKeepsQuotingWellFormed() {
+        // Concatenation: cd my"dir"  — the quote opens AFTER `my`, and the cursor sits before the
+        // closing quote (offset 9). The replacement span is quote-relative (`dir`), so accepting
+        // preserves both the `my` prefix and the quote pair.
+        let accepted = acceptCandidate("directory", into: "cd my\"dir\"", cursorOffset: 9)
+        XCTAssertEqual(accepted, "cd my\"directory\"")
+    }
+
+    func testMidTokenOpenedQuoteHasQuoteRelativePrefixAndRange() {
+        // Raw text: cd my"dir  (quote opened mid-token, no closing quote yet, cursor at end).
+        let result = tokenizeCommandLine("cd my\"dir", cursorOffset: 9)
+        XCTAssertEqual(result.tokens, [
+            CommandToken(text: "cd", range: 0..<2),
+            CommandToken(text: "dir", range: 6..<9),
+        ])
+        XCTAssertEqual(result.cursorTokenIndex, 1)
+        XCTAssertEqual(result.cursorPrefix, "dir")
+        XCTAssertFalse(result.endsWithSeparator)
+    }
+
     // MARK: - Lone trailing backslash is kept literal
 
     func testLoneTrailingBackslashIsKeptLiteral() {
