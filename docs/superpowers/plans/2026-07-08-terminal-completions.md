@@ -120,9 +120,9 @@ Inject OSC 133 (+ confirm OSC 7) into Coda-spawned zsh without touching the user
 **Interfaces:**
 - `func shellIntegrationEnv(enabled: Bool, shell: ResolvedShell, bundleZdotdir: URL, userZdotdir: URL) -> [String: String]` — returns `["ZDOTDIR": <bundle>, "CODA_USER_ZDOTDIR": <user>]` when enabled *and* shell is zsh; empty otherwise (bash/fish/etc ⇒ silent-off).
 
-- [ ] **Step 1 (RED):** `ShellIntegrationTests`: zsh + enabled → sets `ZDOTDIR` to bundle + preserves user dir; bash + enabled → empty (unsupported); disabled → empty.
-- [ ] **Step 2 (GREEN):** Implement pure helper; add the bundled `.zshrc`; bundle it via `Package.swift` resources; merge its env in `HookEnvironment`/`TerminalSurface` spawn. Set via **env, not argv**, so it composes with both the bare `-i` and the `-i -c '…'` paths.
-- [ ] **Step 3:** Build + test. **Manual verify:** launch Coda, open a terminal, confirm the user's aliases/prompt still load AND `printf '\e]133;B\a'` markers arrive (log them in a temp OSC-133 handler). Commit.
+- [x] **Step 1 (RED):** `ShellIntegrationTests`: zsh + enabled → sets `ZDOTDIR` to bundle + preserves user dir; bash + enabled → empty (unsupported); disabled → empty.
+- [x] **Step 2 (GREEN):** Implement pure helper; add the bundled `.zshrc`; bundle it via `Package.swift` resources; merge its env in `HookEnvironment`/`TerminalSurface` spawn. Set via **env, not argv**, so it composes with both the bare `-i` and the `-i -c '…'` paths.
+- [x] **Step 3:** Build + test. **Manual verify:** launch Coda, open a terminal, confirm the user's aliases/prompt still load AND `printf '\e]133;B\a'` markers arrive (log them in a temp OSC-133 handler). Commit. _(Done headlessly: `expect`-driven zsh against the real built bundle showed the full A/B/C/D lifecycle + oh-my-zsh aliases loading. GUI-launch confirmation deferred to Task 12's end-to-end pass.)_
 
 ### Task 6: Consent prompt + global settings toggle
 
