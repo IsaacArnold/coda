@@ -90,9 +90,14 @@ final class SidebarController: NSViewController {
     private var chrome: ChromeTheme?
     private var metrics = UIMetrics(scale: .medium)
 
+    /// True only while `reload(...)` programmatically re-selects a row. Lets
+    /// `outlineViewSelectionDidChange` tell a real user click from a reload so the
+    /// app doesn't steal terminal focus on a background branch/HEAD refresh.
+    private var isReloading = false
+
     /// Selection drives the detail surface; the primary actions (add, new, launch,
     /// archive, settings) now live in the native menu bar and toolbar.
-    var onSelect: ((Worktree?) -> Void)?
+    var onSelect: ((Worktree?, _ userInitiated: Bool) -> Void)?
 
     /// Right-clicking a repo (or one of its worktrees) offers per-repo actions, keyed by
     /// the repo's id: open its settings sheet, or add a worktree to it.
@@ -233,7 +238,9 @@ final class SidebarController: NSViewController {
         if let selectedItem {
             let row = outline.row(forItem: selectedItem)
             if row >= 0 {
+                isReloading = true
                 outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+                isReloading = false
                 outline.scrollRowToVisible(row)
             }
         }
@@ -400,9 +407,10 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
+        let userInitiated = !isReloading
         switch outline.item(atRow: outline.selectedRow) {
-        case let wt as WorktreeNode: onSelect?(wt.worktree)
-        default: onSelect?(nil)   // a repo row (or nothing) clears the detail surface
+        case let wt as WorktreeNode: onSelect?(wt.worktree, userInitiated)
+        default: onSelect?(nil, userInitiated)   // a repo row (or nothing) clears the detail surface
         }
     }
 
