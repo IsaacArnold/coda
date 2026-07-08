@@ -26,6 +26,11 @@ final class TerminalSurface: NSViewController {
     var onTitleChange: ((String) -> Void)?
     /// Fired when this surface's terminal gains focus (forwarded from the terminal view).
     var onFocused: (() -> Void)?
+    /// Fired when the terminal's OSC 133-driven prompt phase changes (forwarded from the
+    /// terminal view). Set before or after the view loads — wired in `loadView()` below via
+    /// `[weak self]`, same idiom as `onOpenFile`/`onFocused`. Consumed by the completion
+    /// controller (a later task).
+    var onPromptPhaseChange: ((PromptPhase) -> Void)?
 
     init(workingDirectory: String, command: String, setupScript: String = "",
          hookWorktreeID: String = "", hookSurfaceID: String = "", hookSocketPath: String = "",
@@ -49,8 +54,26 @@ final class TerminalSurface: NSViewController {
         terminal.fallbackDirectory = workingDirectory
         terminal.onOpenFile = { [weak self] path, line in self?.onOpenFile?(path, line) }
         terminal.onBecomeFirstResponder = { [weak self] in self?.onFocused?() }
+        terminal.onPromptPhaseChange = { [weak self] phase in self?.onPromptPhaseChange?(phase) }
         terminal.processDelegate = self
         view = terminal
+    }
+
+    /// Current shell prompt phase (OSC 133-driven), for the completion controller (a later
+    /// task) to decide whether/when a completion popup makes sense.
+    var promptPhase: PromptPhase { terminal?.promptPhase ?? .unknown }
+
+    /// Exit code of the most recently finished command, if any.
+    var lastCommandExitCode: Int? { terminal?.lastCommandExitCode }
+
+    /// The terminal's live cursor cell and whether the viewport is scrolled to the live
+    /// bottom — both needed by the completion controller to decide/position a popup.
+    var cursorCell: (col: Int, row: Int) { terminal?.cursorCell ?? (0, 0) }
+    var isScrolledToBottom: Bool { terminal?.isScrolledToBottom ?? true }
+
+    /// Maps a cursor cell to the view point just below it, for anchoring the completion popup.
+    func cursorCellToViewPoint(_ cell: (col: Int, row: Int)) -> CGPoint {
+        terminal?.cursorCellToViewPoint(cell) ?? .zero
     }
 
     private var processStarted = false

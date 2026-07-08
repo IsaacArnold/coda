@@ -45,6 +45,81 @@ final class ClickableTerminalView: LocalProcessTerminalView {
 
     // MARK: - Drag & drop (iTerm-style file/text/URL drop)
 
+    // MARK: - Prompt phase (OSC 133)
+
+    /// Pure reduction of OSC 133 markers to a prompt phase. Fed exclusively from the OSC 133
+    /// handler registered in `viewDidMoveToWindow`, which runs on the main thread (SwiftTerm's
+    /// `LocalProcess` posts `dataReceived` on `DispatchQueue.main`, same reasoning as
+    /// `outputSinceLastPoll` above) — so this is race-free as a plain stored property.
+    private var phaseMachine = PromptPhaseMachine()
+    /// Current shell phase, kept in sync with `phaseMachine.phase` after every marker.
+    private(set) var promptPhase: PromptPhase = .unknown
+    /// Exit code of the most recently finished command (from the `D;<code>` marker), if any.
+    var lastCommandExitCode: Int? { phaseMachine.lastCommandExitCode }
+    /// Fired when `promptPhase` changes (i.e. on a real transition, not every marker). The
+    /// completion controller (a later task) wires this up; unset here it's a no-op.
+    var onPromptPhaseChange: ((PromptPhase) -> Void)?
+    /// Guards one-time OSC 133 registration in `viewDidMoveToWindow` (mirrors the drag-type
+    /// registration below, which is safe to redo but doesn't need to be).
+    private var didRegisterOsc133 = false
+
+    /// Registers the OSC 133 handler once the terminal exists. The parser splits the OSC
+    /// string on the first `;`, so for `ESC ] 133 ; A BEL` the handler receives `"A"`, and for
+    /// `ESC ] 133 ; D ; 0 BEL` it receives `"D;0"` — exactly the payload `PromptPhaseMachine`
+    /// expects, so it's passed straight through with no re-splitting.
+    private func registerOsc133Handler() {
+        getTerminal().registerOscHandler(code: 133) { [weak self] data in
+            guard let self else { return }
+            let payload = String(decoding: data, as: UTF8.self)
+            let old = self.promptPhase
+            self.phaseMachine.consume(payload)
+            let new = self.phaseMachine.phase
+            self.promptPhase = new
+            guard new != old else { return }
+            if ProcessInfo.processInfo.environment["CODA_DEBUG_OSC133"] != nil {
+                print("[osc133] \(old) → \(new) payload=\(payload) exit=\(String(describing: self.phaseMachine.lastCommandExitCode))")
+            }
+            self.onPromptPhaseChange?(new)
+        }
+    }
+
+    // MARK: - Cursor cell / scroll accessors (for the completion popup, a later task)
+
+    /// The live cursor position: 0-based column and screen-relative row (0..<rows), i.e. NOT
+    /// adjusted for scrollback — matches what `cursorCellToViewPoint` expects.
+    var cursorCell: (col: Int, row: Int) {
+        let b = getTerminal().buffer
+        return (b.x, b.y)
+    }
+
+    /// True when the viewport is showing the live bottom of the buffer (no scrollback, or
+    /// scrolled all the way down) — i.e. `cursorCell` is trustworthy against the visible grid.
+    var isScrolledToBottom: Bool {
+        !canScroll || scrollPosition >= 1.0
+    }
+
+    /// Maps a screen-relative cell (as produced by `cursorCell`) to a view point at the
+    /// BOTTOM edge of that cell — i.e. where a completion popup should anchor to sit just
+    /// below the current line. This is the exact inverse of `clickTarget(at:)`'s forward
+    /// mapping (~lines 233–235):
+    ///   forward:  yFromTop = isFlipped ? point.y : (bounds.height - point.y)
+    ///             screenRow = Int(yFromTop / cellHeight)
+    /// So a point at the BOTTOM of `screenRow` has `yFromTop = (screenRow + 1) * cellHeight`;
+    /// inverting the `isFlipped` branch gives `point.y` back. Column maps the same way but
+    /// left-to-right in both coordinate systems, so no flip is needed there.
+    func cursorCellToViewPoint(_ cell: (col: Int, row: Int)) -> CGPoint {
+        let term = getTerminal()
+        let cols = term.cols, rows = term.rows
+        guard rows > 0, cols > 0, bounds.width > 0, bounds.height > 0 else { return .zero }
+
+        let cellWidth = bounds.width / CGFloat(cols)
+        let cellHeight = bounds.height / CGFloat(rows)
+        let x = CGFloat(cell.col) * cellWidth
+        let yFromTop = CGFloat(cell.row + 1) * cellHeight
+        let y = isFlipped ? yFromTop : (bounds.height - yFromTop)
+        return CGPoint(x: x, y: y)
+    }
+
     /// True while a valid drag hovers this pane; toggles the drop-highlight overlay.
     private var isDragHighlighted = false {
         didSet {
@@ -73,6 +148,10 @@ final class ClickableTerminalView: LocalProcessTerminalView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         registerForDraggedTypes([.fileURL, .URL, .string])
+        if window != nil, !didRegisterOsc133 {
+            didRegisterOsc133 = true
+            registerOsc133Handler()
+        }
     }
 
     /// Pull the insertable string out of a drag's pasteboard, or nil if there's nothing
