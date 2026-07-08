@@ -1,0 +1,12 @@
+{
+  "name": ["git"],
+  "description": "The stupid content tracker",
+  "subcommands": [
+    { "name": ["checkout"], "description": "Switch branches or restore files" },
+    { "name": ["cherry-pick"], "description": "Apply commits from another branch" },
+    { "name": ["commit"], "description": "Record changes to the repository" },
+    { "name": ["clone"], "description": "Clone a repository" },
+    { "name": ["branch"], "description": "List or manage branches" },
+    { "name": ["status"], "description": "Show the working tree status" }
+  ]
+}

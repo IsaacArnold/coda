@@ -17,6 +17,10 @@ final class TerminalSurface: NSViewController {
     private var terminal: ClickableTerminalView!
     private var pendingTheme: TerminalTheme?
     private var pendingFont: NSFont?
+    /// The per-surface completion conductor. Created in `loadView` ONLY when `completionsEnabled`
+    /// is true, so the feature costs nothing when off. `nil` otherwise — every `refresh()` call
+    /// site optional-chains through it.
+    private var completionController: CompletionController?
 
     /// Opens a ⌘-clicked `path:line` in the default editor (wired by AppDelegate).
     var onOpenFile: ((String, Int?) -> Void)?
@@ -53,10 +57,26 @@ final class TerminalSurface: NSViewController {
         terminal.autoresizingMask = [.width, .height]
         terminal.fallbackDirectory = workingDirectory
         terminal.onOpenFile = { [weak self] path, line in self?.onOpenFile?(path, line) }
-        terminal.onBecomeFirstResponder = { [weak self] in self?.onFocused?() }
-        terminal.onPromptPhaseChange = { [weak self] phase in self?.onPromptPhaseChange?(phase) }
+        terminal.onBecomeFirstResponder = { [weak self] in
+            self?.onFocused?()
+            self?.completionController?.refresh()
+        }
+        terminal.onPromptPhaseChange = { [weak self] phase in
+            self?.onPromptPhaseChange?(phase)
+            self?.completionController?.refresh()
+        }
         terminal.processDelegate = self
         view = terminal
+
+        // Own one completion controller, but only when the feature is on — a session with
+        // completions disabled never allocates it, so it adds zero overhead (no specs load, no
+        // debounce timers, no output hook). Wire it to refresh on prompt-phase changes (above),
+        // terminal output (below), and focus changes (above). Keystroke-driven refresh + accept/
+        // navigation is Task 10.
+        if completionsEnabled {
+            completionController = CompletionController(surface: self)
+            terminal.onOutput = { [weak self] in self?.completionController?.refresh() }
+        }
     }
 
     /// Current shell prompt phase (OSC 133-driven), for the completion controller (a later
@@ -71,9 +91,24 @@ final class TerminalSurface: NSViewController {
     var cursorCell: (col: Int, row: Int) { terminal?.cursorCell ?? (0, 0) }
     var isScrolledToBottom: Bool { terminal?.isScrolledToBottom ?? true }
 
+    /// Whether this surface's terminal holds keyboard focus (for the completion gate).
+    var isTerminalFocused: Bool { terminal?.isTerminalFocused ?? false }
+
+    /// The shell's cwd as a file URL (for resolving filesystem completion sources). Falls back to
+    /// `workingDirectory` before the view exists.
+    var currentDirectoryURL: URL {
+        terminal?.currentDirectoryURL ?? URL(fileURLWithPath: workingDirectory)
+    }
+
     /// Maps a cursor cell to the view point just below it, for anchoring the completion popup.
     func cursorCellToViewPoint(_ cell: (col: Int, row: Int)) -> CGPoint {
         terminal?.cursorCellToViewPoint(cell) ?? .zero
+    }
+
+    /// The editable command line from command-start to cursor, or `nil` if unreadable. Forwarded
+    /// from the terminal view (which stays private) for the completion controller.
+    func commandLineToCursor() -> (line: String, cursorOffset: Int)? {
+        terminal?.commandLineToCursor()
     }
 
     private var processStarted = false
@@ -215,3 +250,8 @@ extension TerminalSurface: LocalProcessTerminalViewDelegate {
 
     func processTerminated(source: TerminalView, exitCode: Int32?) {}
 }
+
+/// Conformance is satisfied entirely by accessors declared above (`promptPhase`,
+/// `isTerminalFocused`, `isScrolledToBottom`, `currentDirectoryURL`, `commandLineToCursor()`) —
+/// this only declares the relationship the controller depends on.
+extension TerminalSurface: CompletionSurface {}

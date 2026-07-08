@@ -30,11 +30,19 @@ final class ClickableTerminalView: LocalProcessTerminalView {
     /// Bool is race-free against the poll.
     private var outputSinceLastPoll = true
 
+    /// Fired (main thread) after the terminal absorbs a chunk of PTY output, so the completion
+    /// controller can re-read the command line — output can change what's on the prompt line
+    /// (e.g. shell autosuggestions, a redraw) without a keystroke passing through Coda. Unset
+    /// it's a no-op; wired by `TerminalSurface` only when completions are enabled.
+    var onOutput: (() -> Void)?
+
     /// Records that the shell produced output, then feeds it to the terminal as usual. The
     /// agent-state poll uses this to skip re-snapshotting panes whose grid hasn't changed.
     override func dataReceived(slice: ArraySlice<UInt8>) {
         outputSinceLastPoll = true
         super.dataReceived(slice: slice)
+        // After `super` so the buffer reflects this chunk before the controller reads it.
+        onOutput?()
     }
 
     /// Whether new output has arrived since the previous call; resets the flag.
@@ -63,6 +71,15 @@ final class ClickableTerminalView: LocalProcessTerminalView {
     /// registration below, which is safe to redo but doesn't need to be).
     private var didRegisterOsc133 = false
 
+    /// Where the editable command line begins, captured at the OSC 133 `B` marker (command
+    /// start — the shell is ready for input). `col` is 0-based; `absRow` is an ABSOLUTE buffer
+    /// row (scrollback + screen), so it stays valid as the screen scrolls. The `B` sequence is
+    /// emitted at the very END of the zsh PS1 (a zero-width `%{…%}` wrap), so at consume-time the
+    /// cursor sits exactly where typed input begins. Cleared to `nil` on `C`/`D` (a command
+    /// started running / finished) so a stale anchor from a previous prompt is never read.
+    /// Main-thread-only, same reasoning as `phaseMachine`.
+    private(set) var commandStart: (col: Int, absRow: Int)?
+
     /// Registers the OSC 133 handler once the terminal exists. The parser splits the OSC
     /// string on the first `;`, so for `ESC ] 133 ; A BEL` the handler receives `"A"`, and for
     /// `ESC ] 133 ; D ; 0 BEL` it receives `"D;0"` — exactly the payload `PromptPhaseMachine`
@@ -75,6 +92,19 @@ final class ClickableTerminalView: LocalProcessTerminalView {
             self.phaseMachine.consume(payload)
             let new = self.phaseMachine.phase
             self.promptPhase = new
+            // Capture/clear the command-start anchor from the raw marker letter — this must
+            // happen even when the phase doesn't transition (a `B` after an `A` both read
+            // `.atPrompt`, yet `B` is the marker that pins where input begins), so it's done
+            // before the transition-only early-return below.
+            switch payload.first {
+            case "B":
+                let b = self.getTerminal().buffer
+                self.commandStart = (col: b.x, absRow: self.getTerminal().getTopVisibleRow() + b.y)
+            case "C", "D":
+                self.commandStart = nil
+            default:
+                break
+            }
             guard new != old else { return }
             if ProcessInfo.processInfo.environment["CODA_DEBUG_OSC133"] != nil {
                 print("[osc133] \(old) → \(new) payload=\(payload) exit=\(String(describing: self.phaseMachine.lastCommandExitCode))")
@@ -96,6 +126,52 @@ final class ClickableTerminalView: LocalProcessTerminalView {
     /// scrolled all the way down) — i.e. `cursorCell` is trustworthy against the visible grid.
     var isScrolledToBottom: Bool {
         !canScroll || scrollPosition >= 1.0
+    }
+
+    /// Reads the editable command line from the command-start anchor up to the cursor, for the
+    /// completion controller to classify. Returns `nil` (silent-off — never a popup, never a
+    /// crash) whenever the buffer math can't be trusted:
+    /// - not `.atPrompt`, no anchor, or scrolled off the live bottom (the anchor's absolute-row
+    ///   arithmetic only holds at the bottom, same constraint as `cursorCell`);
+    /// - **v1 single-row limitation:** the cursor has moved off the anchor's row (a wrapped or
+    ///   multi-line command). Reading a spanning region would need per-row reconstruction; until
+    ///   then, wrapped commands simply get no completions rather than a wrong one.
+    ///
+    /// On success returns `(line, cursorOffset)` where `line` is the text strictly before the
+    /// cursor (so `cursorOffset == line.count`) — `resolveCompletion` classifies up to the cursor.
+    func commandLineToCursor() -> (line: String, cursorOffset: Int)? {
+        guard promptPhase == .atPrompt, let anchor = commandStart, isScrolledToBottom else {
+            return nil
+        }
+        let term = getTerminal()
+        let b = term.buffer
+        let cursorAbsRow = term.getTopVisibleRow() + b.y
+        let cursorCol = b.x
+        // Single-row only for v1: a wrapped/multi-line command reads as no completions.
+        guard cursorAbsRow == anchor.absRow else { return nil }
+        // Cursor at or before the anchor column ⇒ the command is empty.
+        guard cursorCol > anchor.col else { return ("", 0) }
+        // `getText`'s end column is EXCLUSIVE (its inner loop is `startCol..<endCol`), so passing
+        // `cursorCol` yields exactly the text in `[commandStart.col, cursorCol)` — the characters
+        // strictly before the cursor. (A `-1` here would drop the last typed char and, on a
+        // single-char token, make start == end ⇒ empty, so tokens never completed.)
+        let line = term.getText(start: Position(col: anchor.col, row: anchor.absRow),
+                                end: Position(col: cursorCol, row: cursorAbsRow))
+        return (line, line.count)
+    }
+
+    /// True only for the visible terminal that currently holds keyboard focus — the completion
+    /// gate uses this so a background pane never pops up. Exposes the existing
+    /// `isFocusedSurface` computed property under a clearer name for the controller.
+    var isTerminalFocused: Bool { isFocusedSurface }
+
+    /// The shell's current working directory as a file URL, for resolving filesystem completion
+    /// sources (Task 11). Reuses the same `currentDirectory`-then-`fallbackDirectory` resolution
+    /// as ⌘+click's `baseDirs` (OSC 7 `file://` URL or a bare path, percent-decoded), so both
+    /// features agree on "where are we". `baseDirs` always ends with `fallbackDirectory`, so
+    /// `.first` is non-nil.
+    var currentDirectoryURL: URL {
+        URL(fileURLWithPath: baseDirs.first ?? fallbackDirectory)
     }
 
     /// Maps a screen-relative cell (as produced by `cursorCell`) to a view point at the
