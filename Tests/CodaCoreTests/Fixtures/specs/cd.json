@@ -1,0 +1,11 @@
+{
+  "name": ["cd"],
+  "description": "change the working directory",
+  "args": [
+    {
+      "name": "directory",
+      "template": "folders",
+      "isVariadic": false
+    }
+  ]
+}
