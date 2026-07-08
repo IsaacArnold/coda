@@ -99,6 +99,32 @@ final class CompletionSpecTests: XCTestCase {
         XCTAssertNil(specs["co"])
     }
 
+    // MARK: - Decoding a minimal spec (only `name`; all optionals absent)
+
+    func testMinimalSpecDecodesWithAllOptionalsNil() throws {
+        // The real-world Fig shape: most specs omit most fields. Absent keys must decode to nil,
+        // not fail — Task 4 walks these and relies on that.
+        let spec = try decodeSpec(named: "minimal", in: "specs-minimal")
+        XCTAssertEqual(spec.name, ["minimal"])
+        XCTAssertNil(spec.description)
+        XCTAssertNil(spec.subcommands)
+        XCTAssertNil(spec.options)
+        XCTAssertNil(spec.args)
+    }
+
+    // MARK: - Loader: a spec with an empty `name` array has no primary key and is skipped
+
+    func testLoaderSkipsSpecWithEmptyName() throws {
+        let directory = try fixturesURL("specs-with-empty-name")
+        let specs = try loadCompletionSpecs(from: directory)
+
+        // The empty-name spec has no primary name to index by, so it must not appear at all;
+        // its valid sibling must still load unaffected.
+        XCTAssertEqual(specs.count, 1)
+        XCTAssertEqual(specs["valid"]?.name, ["valid"])
+        XCTAssertNil(specs[""])
+    }
+
     // MARK: - Loader: missing directory is handled gracefully (no throw, empty result)
 
     func testLoaderReturnsEmptyForMissingDirectory() throws {
