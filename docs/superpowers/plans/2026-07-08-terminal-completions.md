@@ -158,9 +158,9 @@ Feed the pure phase machine from the live terminal, and expose what the controll
 - Produces: `ClickableTerminalView.promptPhase: PromptPhase`, `.cursorCell: (col: Int, row: Int)` (from SwiftTerm's buffer cursor), `.isScrolledToBottom: Bool`, and a `cursorCellToViewPoint(_:)` helper (inverse of the `clickTarget(at:)` cell math ~lines 225–263).
 - Consumes: `currentDirectory`/`fallbackDirectory` (`baseDirs`, ~lines 265–276) for cwd.
 
-- [ ] **Step 1:** Register the OSC 133 handler; drive the phase machine; log phase transitions behind a debug flag to confirm.
-- [ ] **Step 2:** Add the cursor-cell + scrolled-to-bottom accessors and the cell→point helper. **Resolve implementation risk:** confirm the public SwiftTerm accessor for the live cursor cell (`buffer.x`/`buffer.y` or equivalent).
-- [ ] **Step 3:** Build. **Manual verify:** debug-log shows `atPrompt`↔`executing` tracking real typing vs a running `sleep 3`. Commit.
+- [x] **Step 1:** Register the OSC 133 handler; drive the phase machine; log phase transitions behind a debug flag to confirm.
+- [x] **Step 2:** Add the cursor-cell + scrolled-to-bottom accessors and the cell→point helper. **Resolve implementation risk:** confirm the public SwiftTerm accessor for the live cursor cell (`buffer.x`/`buffer.y` or equivalent). _(Confirmed public: `terminal.buffer.x`/`.y`; scroll via `canScroll`/`scrollPosition`; OSC payload arrives pre-split after `133;`.)_
+- [x] **Step 3:** Build. **Manual verify:** debug-log shows `atPrompt`↔`executing` tracking real typing vs a running `sleep 3`. Commit. _(Build + full suite green; phase-trace correctness proven on paper. Live GUI debug-log confirmation (`CODA_DEBUG_OSC133`) deferred to Task 12's end-to-end pass.)_
 
 ### Task 8: `CompletionController` per surface (orchestration + gating + async I/O)
 
