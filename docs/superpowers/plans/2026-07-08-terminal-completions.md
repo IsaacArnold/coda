@@ -176,8 +176,8 @@ The conductor: debounce, call the pure engine, resolve dynamic sources, apply th
 - **Debounce ~30–50 ms, cancellable;** the keystroke reaches the shell immediately regardless.
 - State: `isSuppressedUntilNextEdit` (set by Esc, cleared by the next character/backspace).
 
-- [ ] **Step 1:** Implement the controller with the gate + debounce; wire it to fire on terminal output/keystroke. Read the current command line from the buffer between command-start and cursor.
-- [ ] **Step 2:** Build. **Manual verify:** debug-log the ranked candidates as you type `git ch` (no UI yet). Commit.
+- [x] **Step 1:** Implement the controller with the gate + debounce; wire it to fire on terminal output/keystroke. Read the current command line from the buffer between command-start and cursor. _(Gate extracted to `CodaCore/CompletionGate.swift`, TDD-tested. Keystroke-driven refresh is Task 10; output/phase/focus wired here.)_
+- [x] **Step 2:** Build. **Manual verify:** debug-log the ranked candidates as you type `git ch` (no UI yet). Commit. _(Build + 405 tests green; `git ch`→query `ch`→ranked `[checkout, cherry-pick]` proven via static trace + a minimal seed `git.json`. `CODA_DEBUG_COMPLETIONS` live-log verification deferred to Task 12's end-to-end pass.)_
 
 ### Task 9: The completion popup overlay (`NSVisualEffectView`)
 
