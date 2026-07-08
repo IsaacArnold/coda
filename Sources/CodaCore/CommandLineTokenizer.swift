@@ -1,14 +1,13 @@
 import Foundation
 
-/// A single shell-style token parsed from a command line, plus its raw span in the original
-/// line.
+/// A single shell-style token parsed from a command line, plus its span in the original line.
 ///
 /// `text` is the token's *logical* value — quotes stripped and backslash-escapes resolved
-/// (e.g. `my dir` for the raw `"my dir"` or `my\ dir`). `range` is the *raw* span instead: the
-/// exact characters on screen, including any quote or backslash characters. The two can have
-/// different lengths whenever the token is quoted or escaped. `range` is what Task 4 uses as the
-/// replacement span when a completion is accepted, so it must match what's actually in the
-/// terminal line, not the unescaped `text`.
+/// (e.g. `my dir` for the raw `"my dir"` or `my\ dir`). `range` is a character-offset span into
+/// the original line, defined as **the replacement span for accepting a completion**: replacing
+/// `line[range]` with a plain (unquoted) candidate must yield a well-formed line with the
+/// surrounding quoting preserved. See `tokenizeCommandLine`'s "Accept contract" for the exact
+/// rules and why `range` and `text` can differ in length.
 public struct CommandToken: Equatable {
     public let text: String
     public let range: Range<Int>
@@ -71,6 +70,24 @@ public struct TokenizedLine: Equatable {
 /// quote — which, being after the cursor, was never inspected), `cursorPrefix` is its unescaped
 /// text so far, and `endsWithSeparator` is false, since whitespace *inside* an open quote is
 /// content, not a separator.
+///
+/// ### Accept contract (how `range` is defined)
+/// `range` is the span a caller replaces with a plain (unquoted) completion candidate on accept:
+/// `line.replacingCharacters(in: <range as String.Index>, with: candidate)` must produce a
+/// well-formed line with the surrounding quoting intact. Concretely:
+///
+/// - **Cursor token opened by a still-open quote** (the cursor is inside `"…`/`'…`, the quote
+///   began at the token's first character): `range` starts *after* that opening quote, so the
+///   quote is preserved by the replacement and stays balanced against any closing quote sitting
+///   after the cursor. E.g. for `cd "my dir"` with the cursor before the closing `"` (offset
+///   10), the quoted token's `range` is `4..<10` (`my dir`, not `"my dir`); replacing it with
+///   `my directory` yields the well-formed `cd "my directory"`, never the orphaned-quote
+///   `cd my directory"`.
+/// - **Any other token** (unquoted, escaped, or a quote that already closed): `range` is the
+///   token's full raw span, including any interior backslashes or already-balanced quotes.
+///   Replacing it wholesale with a plain candidate drops those raw markers cleanly — e.g.
+///   accepting on the escaped `cd my\ di` (`range` `3..<9`, the raw `my\ di`) with `my dir`
+///   yields `cd my dir`; the backslash-escape is not re-added, and the result is well-formed.
 public func tokenizeCommandLine(_ line: String, cursorOffset: Int) -> TokenizedLine {
     let characters = Array(line)
     let cursor = max(0, min(cursorOffset, characters.count))
@@ -86,6 +103,9 @@ public func tokenizeCommandLine(_ line: String, cursorOffset: Int) -> TokenizedL
     var tokenStart: Int?
     var quoteState: QuoteState = .none
     var lastCharWasUnquotedWhitespace = false
+    // Offset at which the currently-open quote began, or nil when not inside a quote. Used only
+    // to decide whether the cursor token's `range` should skip a leading opening quote.
+    var openQuoteStart: Int?
 
     func closeToken(at end: Int) {
         guard let start = tokenStart else { return }
@@ -103,6 +123,7 @@ public func tokenizeCommandLine(_ line: String, cursorOffset: Int) -> TokenizedL
             // Single quotes are fully literal in POSIX shells: no escaping happens inside them.
             if char == "'" {
                 quoteState = .none
+                openQuoteStart = nil
             } else {
                 buffer.append(char)
             }
@@ -112,6 +133,7 @@ public func tokenizeCommandLine(_ line: String, cursorOffset: Int) -> TokenizedL
         case .double:
             if char == "\"" {
                 quoteState = .none
+                openQuoteStart = nil
                 i += 1
             } else if char == "\\", i + 1 < cursor {
                 // Simplified double-quote escaping: backslash escapes whatever follows it. (A
@@ -133,11 +155,13 @@ public func tokenizeCommandLine(_ line: String, cursorOffset: Int) -> TokenizedL
             } else if char == "'" {
                 if tokenStart == nil { tokenStart = i }
                 quoteState = .single
+                openQuoteStart = i
                 lastCharWasUnquotedWhitespace = false
                 i += 1
             } else if char == "\"" {
                 if tokenStart == nil { tokenStart = i }
                 quoteState = .double
+                openQuoteStart = i
                 lastCharWasUnquotedWhitespace = false
                 i += 1
             } else if char == "\\" {
@@ -163,9 +187,15 @@ public func tokenizeCommandLine(_ line: String, cursorOffset: Int) -> TokenizedL
     // Whatever's left open at the cursor (mid-token, or mid-quote) is the current token.
     let cursorTokenIndex: Int?
     let cursorPrefix: String
-    if tokenStart != nil {
+    if let start = tokenStart {
         cursorPrefix = buffer
-        closeToken(at: cursor)
+        // If the cursor sits inside a quote that opened at this token's first character, exclude
+        // that dangling opening quote from `range` so a plain-candidate replacement preserves it
+        // (see the "Accept contract" in this function's doc-comment).
+        let rangeStart = (openQuoteStart == start) ? start + 1 : start
+        tokens.append(CommandToken(text: buffer, range: rangeStart..<cursor))
+        buffer = ""
+        tokenStart = nil
         cursorTokenIndex = tokens.count - 1
     } else {
         cursorPrefix = ""
