@@ -196,6 +196,126 @@ final class ClickableTerminalView: LocalProcessTerminalView {
         return CGPoint(x: x, y: y)
     }
 
+    // MARK: - Completion popup (Task 9)
+
+    /// Lazily created on first use, like `dropHighlight` below — a session with completions
+    /// disabled (or one where the gate never fires) never allocates it.
+    private lazy var completionPopup: CompletionPopupView = {
+        let v = CompletionPopupView(frame: .zero)
+        // No autoresizing: every `showCompletionPopup` call sets an explicit frame, there's
+        // nothing to track between calls.
+        return v
+    }()
+
+    /// Shows (or repositions) the completion popup for `candidates`, anchored just below the
+    /// in-progress token. `anchorLineOffset` is the column offset — from the command-start
+    /// anchor — where the token being completed begins (`CompletionContext.replacementRange
+    /// .lowerBound`, forwarded by `CompletionController.onShow`).
+    ///
+    /// **v1 single-row ASCII assumption**, same one `commandLineToCursor` documents: 1 character
+    /// = 1 column, so the token's start column is simply `commandStart.col + anchorLineOffset`.
+    /// A completion whose line contains wide/combining characters before the token would anchor
+    /// a column or two off — an accepted v1 limitation, not a crash risk.
+    ///
+    /// Idempotent: safe to call again on every cursor move / candidate refresh — always
+    /// repositions (recomputing the below/above flip) and resets to a freshly-built row set with
+    /// `selectedIndex` 0. Silent-off (hides instead) on any degenerate geometry: empty
+    /// candidates, a zero-sized grid, or zero view bounds.
+    func showCompletionPopup(_ candidates: [Candidate], anchorLineOffset: Int) {
+        guard !candidates.isEmpty else {
+            hideCompletionPopup()
+            return
+        }
+        let term = getTerminal()
+        let cols = term.cols, rows = term.rows
+        guard cols > 0, rows > 0, bounds.width > 0, bounds.height > 0 else {
+            hideCompletionPopup()
+            return
+        }
+
+        let anchorCol = (commandStart?.col ?? cursorCell.col) + anchorLineOffset
+        let anchorRow = cursorCell.row
+
+        let size = CompletionPopupView.preferredSize(for: candidates)
+        guard size.width > 0, size.height > 0 else {
+            hideCompletionPopup()
+            return
+        }
+
+        if completionPopup.superview == nil {
+            addSubview(completionPopup)
+        }
+
+        // `below` is the point at the BOTTOM edge of the anchor cell (see
+        // `cursorCellToViewPoint`'s doc comment) — where the popup naturally hangs, left-aligned
+        // to the token's start column, growing downward.
+        let below = cursorCellToViewPoint((col: anchorCol, row: anchorRow))
+
+        // Extending "downward on screen" from `below`: in a flipped view (y grows downward) the
+        // popup's top-left origin IS `below`, and it grows toward larger y. In a non-flipped
+        // view (y grows upward; frame origin is the BOTTOM-left corner) `below` is instead the
+        // popup's TOP edge, so the origin sits `size.height` below it.
+        var origin = isFlipped ? below : CGPoint(x: below.x, y: below.y - size.height)
+
+        // Flip-above trigger: the popup's far edge would fall outside the terminal's own
+        // bounds — flipped: its bottom (origin.y + height) past bounds.height; non-flipped:
+        // its bottom (origin.y itself) below zero.
+        let overflowsBottom = isFlipped
+            ? (origin.y + size.height > bounds.height)
+            : (origin.y < 0)
+
+        if overflowsBottom, anchorRow > 0 {
+            // Hang the popup off the TOP of the cursor's row instead, extending upward. `top`
+            // is the bottom edge of the row above `anchorRow`, which is exactly the top edge of
+            // `anchorRow` — the same `cursorCellToViewPoint` primitive, one row up. (If
+            // `anchorRow` is already the topmost screen row there's nowhere to flip to, so this
+            // branch is skipped; and if the popup is too tall to fit above a low `anchorRow`,
+            // the vertical clamp below keeps it inside the pane regardless.)
+            let top = cursorCellToViewPoint((col: anchorCol, row: anchorRow - 1))
+            origin = isFlipped
+                ? CGPoint(x: top.x, y: top.y - size.height)
+                : CGPoint(x: top.x, y: top.y)
+        }
+
+        // Clamp WIDTH first: in a pane narrower than the popup's min width (160pt) the frame
+        // would otherwise overflow the right edge even with origin.x pinned to 0. Capping the
+        // width to the pane keeps it fully inside; over-long rows already tail-truncate.
+        let width = min(size.width, bounds.width)
+
+        // Clamp HORIZONTALLY so the popup never runs off the right (or, after the width cap,
+        // the left) edge of the terminal.
+        origin.x = max(0, min(origin.x, bounds.width - width))
+
+        // Clamp VERTICALLY so the popup frame is never partly outside the pane, in EITHER the
+        // below or flipped-above placement — the flip-above branch above only guarantees the
+        // popup sits above the cursor row, not that it fits above it, so a tall list with the
+        // cursor near the top of the screen would otherwise extend past the pane's edge.
+        //
+        // The frame occupies `[origin.y, origin.y + size.height]` in the superview's coordinate
+        // system regardless of `isFlipped`; the *visual top* (where row 0 renders) depends on
+        // orientation — non-flipped: top edge = `origin.y + height`; flipped: top edge =
+        // `origin.y`. When the popup fits, clamp the whole frame inside the pane. When it's
+        // taller than the entire pane (very rare — needs a pane shorter than the ~8-row visible
+        // cap), degrade to keeping the top rows visible (the scroll view spills its lower rows
+        // off the far edge), which means pinning whichever edge is the visual top.
+        if size.height <= bounds.height {
+            origin.y = min(max(origin.y, 0), bounds.height - size.height)
+        } else {
+            origin.y = isFlipped ? 0 : bounds.height - size.height
+        }
+
+        completionPopup.frame = NSRect(origin: origin,
+                                       size: CGSize(width: width, height: size.height))
+        completionPopup.show(candidates: candidates,
+                             anchorCell: (col: anchorCol, row: anchorRow),
+                             selectedIndex: 0)
+    }
+
+    /// Hides the completion popup. Safe to call redundantly or before it's ever been shown.
+    func hideCompletionPopup() {
+        completionPopup.hide()
+    }
+
     /// True while a valid drag hovers this pane; toggles the drop-highlight overlay.
     private var isDragHighlighted = false {
         didSet {

@@ -76,6 +76,13 @@ final class TerminalSurface: NSViewController {
         if completionsEnabled {
             completionController = CompletionController(surface: self)
             terminal.onOutput = { [weak self] in self?.completionController?.refresh() }
+            // Task 9: wire the controller's show/hide seams to the popup overlay. The controller
+            // has already run the pure engine + visibility gate by the time either fires — this
+            // is pure "display what it decided," no further gating here.
+            completionController?.onShow = { [weak self] candidates, range in
+                self?.terminal.showCompletionPopup(candidates, anchorLineOffset: range.lowerBound)
+            }
+            completionController?.onHide = { [weak self] in self?.terminal.hideCompletionPopup() }
         }
     }
 
