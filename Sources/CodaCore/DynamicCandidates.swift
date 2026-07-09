@@ -65,23 +65,54 @@ public func filesystemCandidates(
         return a.name.lowercased() < b.name.lowercased()
     }
     return sorted.prefix(cap).map { entry in
-        Candidate(
+        // `name` stays unescaped (query-matchable + displayed). `insertion` is sent to the PTY, so
+        // escape the path fragment — `shellEscapeForInsertion` leaves `/` literal, keeping the
+        // separators — then append the unescaped trailing `/` for directories.
+        let insertion = shellEscapeForInsertion(dirPart + entry.name)
+            + (entry.isDirectory ? "/" : "")
+        return Candidate(
             name: dirPart + entry.name,
             description: nil,
             kind: entry.isDirectory ? .directory : .file,
-            insertion: dirPart + entry.name + (entry.isDirectory ? "/" : "")
+            insertion: insertion
         )
     }
 }
 
+/// The shell-special characters that must be backslash-escaped so the shell treats a completion
+/// `insertion` as a single literal token. Deliberately EXCLUDES `/` (must stay a path separator),
+/// `.` `-` `_` `+` `,` `@` `:`, alphanumerics, and non-ASCII — none of those are shell-special in
+/// zsh filenames, and backslashing them would corrupt the path.
+private let shellSpecialCharacters: Set<Character> = [
+    " ", "\t", "\\", "\"", "'", "`", "$", "&", ";", "|",
+    "<", ">", "(", ")", "*", "?", "[", "]", "{", "}", "#", "!", "~", "=",
+]
+
+/// Backslash-escape every shell-special character in `s` (see `shellSpecialCharacters`) so the
+/// shell treats it as one literal token. Pure. Applied to the `insertion` sent to the PTY — NEVER
+/// to `name` (which must stay unescaped to prefix-match the query in `rankCandidates` and to
+/// display). `/` is intentionally left literal so path separators survive.
+public func shellEscapeForInsertion(_ s: String) -> String {
+    var out = ""
+    out.reserveCapacity(s.count)
+    for ch in s {
+        if shellSpecialCharacters.contains(ch) { out.append("\\") }
+        out.append(ch)
+    }
+    return out
+}
+
 /// Parse the stdout of a git command that prints one name per line (`git branch
 /// --format=%(refname:short)` or `git remote`) into `.argument` candidates. Each non-empty,
-/// whitespace-trimmed line becomes a candidate whose `insertion` is the name plus a single trailing
-/// space (the user goes on to type or run). Mirrors `GitWorktree.localBranches`' parsing.
+/// whitespace-trimmed line becomes a candidate whose `insertion` is the shell-escaped name plus a
+/// single (unescaped) trailing space (the user goes on to type or run). `name` stays unescaped for
+/// matching/display. Mirrors `GitWorktree.localBranches`' parsing.
 public func gitNameCandidates(from stdout: String) -> [Candidate] {
     stdout
         .split(separator: "\n")
         .map { $0.trimmingCharacters(in: .whitespaces) }
         .filter { !$0.isEmpty }
-        .map { Candidate(name: $0, description: nil, kind: .argument, insertion: $0 + " ") }
+        // Escape the name (rare but possible: `#`, `(`, `)` from some workflows); the trailing
+        // space is the token separator and must stay UNescaped.
+        .map { Candidate(name: $0, description: nil, kind: .argument, insertion: shellEscapeForInsertion($0) + " ") }
 }

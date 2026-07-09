@@ -112,4 +112,52 @@ final class DynamicCandidatesTests: XCTestCase {
     func testGitParseEmptyOutput() {
         XCTAssertTrue(gitNameCandidates(from: "").isEmpty)
     }
+
+    // MARK: - shell escaping (insertion only)
+
+    func testShellEscapePlainNameUnchanged() {
+        XCTAssertEqual(shellEscapeForInsertion("Documents"), "Documents")
+        // Non-special punctuation and non-ASCII stay untouched.
+        XCTAssertEqual(shellEscapeForInsertion("my-file.v2_final,café@x:1"), "my-file.v2_final,café@x:1")
+    }
+
+    func testShellEscapeSlashStaysLiteral() {
+        XCTAssertEqual(shellEscapeForInsertion("src/My File"), "src/My\\ File")
+    }
+
+    func testShellEscapeSpecialCharacters() {
+        XCTAssertEqual(shellEscapeForInsertion("a b"), "a\\ b")
+        XCTAssertEqual(shellEscapeForInsertion("f(1)"), "f\\(1\\)")
+        XCTAssertEqual(shellEscapeForInsertion("cost$x"), "cost\\$x")
+        XCTAssertEqual(shellEscapeForInsertion("a&b;c|d"), "a\\&b\\;c\\|d")
+    }
+
+    func testDirectoryWithSpaceEscapesInsertionButNotName() {
+        let entries = [DirectoryEntry(name: "Application Support", isDirectory: true)]
+        let cands = filesystemCandidates(from: entries, dirPart: "", namePrefix: "Appl", foldersOnly: true)
+        XCTAssertEqual(cands.count, 1)
+        // name stays unescaped (query-matchable + displayed); insertion is escaped, trailing / kept.
+        XCTAssertEqual(cands[0].name, "Application Support")
+        XCTAssertEqual(cands[0].insertion, "Application\\ Support/")
+    }
+
+    func testFileWithSpecialCharsEscapedInInsertion() {
+        let entries = [DirectoryEntry(name: "totals($).csv", isDirectory: false)]
+        let cands = filesystemCandidates(from: entries, dirPart: "", namePrefix: "t", foldersOnly: false)
+        XCTAssertEqual(cands[0].name, "totals($).csv")
+        XCTAssertEqual(cands[0].insertion, "totals\\(\\$\\).csv") // no trailing slash for files
+    }
+
+    func testDirPartWithSlashKeepsSeparatorLiteralAndEscapesSpace() {
+        let entries = [DirectoryEntry(name: "My File", isDirectory: false)]
+        let cands = filesystemCandidates(from: entries, dirPart: "sub/", namePrefix: "My", foldersOnly: false)
+        XCTAssertEqual(cands[0].name, "sub/My File")
+        XCTAssertEqual(cands[0].insertion, "sub/My\\ File")
+    }
+
+    func testGitBranchWithSpecialCharEscapedTrailingSpacePreserved() {
+        let cands = gitNameCandidates(from: "feature/my thing\n")
+        XCTAssertEqual(cands[0].name, "feature/my thing")           // unescaped
+        XCTAssertEqual(cands[0].insertion, "feature/my\\ thing ")   // escaped body + unescaped space
+    }
 }
