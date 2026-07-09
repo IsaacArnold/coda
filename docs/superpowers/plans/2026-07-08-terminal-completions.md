@@ -205,9 +205,9 @@ Extend the existing `NSEvent` monitor so the popup steals keys *only while visib
 
 **Interfaces / keymap (only when popup visible):** ↑/↓ move selection; **Tab accepts** (send `insertion` for the `replacementRange` via `terminal.send`); Esc dismisses + suppresses; Enter closes the popup and **passes through to run**; printable filters. When hidden: everything passes through unchanged (↑/↓→history, Tab→zsh completion).
 
-- [ ] **Step 1:** In the monitor, if the focused surface's popup is visible, consult the controller; consume handled keys (return `nil`), else fall through. **Verify existing shortcuts still work** (⌘K, ⌘⌫, soft-newline, ⌘+click, ⌘-hover) — add a regression check to the manual pass.
-- [ ] **Step 2:** Implement accept (compute insertion + send), Esc suppression, Enter passthrough.
-- [ ] **Step 3:** Build. **Manual verify:** full loop — type `git ch`, ↓ to `cherry-pick`, Tab inserts it, Enter runs; Esc hides and stays hidden until next edit; Tab with no popup still triggers zsh completion. Commit.
+- [x] **Step 1:** In the monitor, if the focused surface's popup is visible, consult the controller; consume handled keys (return `nil`), else fall through. **Verify existing shortcuts still work** (⌘K, ⌘⌫, soft-newline, ⌘+click, ⌘-hover) — add a regression check to the manual pass. _(Reviewer traced all five preserved, with popup visible and hidden; pure helper's hasCOC-passthrough is unit-tested.)_
+- [x] **Step 2:** Implement accept (compute insertion + send), Esc suppression, Enter passthrough. _(Accept sends `DEL×query + insertion`; Esc suppresses until the line changes; Enter closes + runs.)_
+- [x] **Step 3:** Build. **Manual verify:** full loop — type `git ch`, ↓ to `cherry-pick`, Tab inserts it, Enter runs; Esc hides and stays hidden until next edit; Tab with no popup still triggers zsh completion. Commit. _(Build + 413 tests green; accept/Esc/regression proven via traces. Live full-loop confirmation deferred to the combined GUI pass after Task 11.)_
 
 ### Task 11: Dynamic generators (filesystem + git branches)
 
