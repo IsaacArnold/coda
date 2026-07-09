@@ -221,9 +221,9 @@ The impure candidate sources, throttled and cached.
 - `func gitBranchCandidates(cwd: URL) async -> [Candidate]` (spawn `git branch`/`git remote`, parse) — **throttled + cached per cwd** to avoid a process per keystroke.
 - Consumes: `DynamicSource` from Task 4; produces `[Candidate]` merged before `rankCandidates`.
 
-- [ ] **Step 1:** Implement filesystem enumeration (sync, cheap) and git generators (async, cached with a short TTL + in-flight de-dup).
-- [ ] **Step 2:** Wire into `CompletionController.refresh()` between `resolveCompletion` and `rankCandidates`.
-- [ ] **Step 3:** Build. **Manual verify:** `cd ./` lists dirs; `git checkout ` lists branches; rapid typing doesn't spawn a `git` storm (log spawn count). Commit.
+- [x] **Step 1:** Implement filesystem enumeration (sync, cheap) and git generators (async, cached with a short TTL + in-flight de-dup). _(Pure logic in `CodaCore/DynamicCandidates.swift` + 12 tests; I/O wrapper in `CompletionGenerators.swift`.)_
+- [x] **Step 2:** Wire into `CompletionController.refresh()` between `resolveCompletion` and `rankCandidates`. _(Also fixed the accept erase-count to `shownRange.count` for escaped/quoted path tokens.)_
+- [x] **Step 3:** Build. **Manual verify:** `cd ./` lists dirs; `git checkout ` lists branches; rapid typing doesn't spawn a `git` storm (log spawn count). Commit. _(Build + 425 tests green; traces + throttle (≤1 spawn/cwd/TTL) + loop-termination proven. Live listing + spawn-count confirmation deferred to the combined GUI pass.)_
 
 ---
 
