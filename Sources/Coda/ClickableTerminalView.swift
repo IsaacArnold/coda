@@ -316,6 +316,12 @@ final class ClickableTerminalView: LocalProcessTerminalView {
         completionPopup.hide()
     }
 
+    /// Push a new highlighted row to the popup (arrow-key navigation). The popup's `selectedIndex`
+    /// `didSet` restyles the affected rows and scrolls the selection into view.
+    func setCompletionPopupSelectedIndex(_ index: Int) {
+        completionPopup.selectedIndex = index
+    }
+
     /// True while a valid drag hovers this pane; toggles the drop-highlight overlay.
     private var isDragHighlighted = false {
         didSet {

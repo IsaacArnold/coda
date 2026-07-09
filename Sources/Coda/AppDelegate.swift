@@ -132,6 +132,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             guard let self, event.window === self.window else { return event }
             let mods = event.modifierFlags
+            // Completion popup navigation — engaged ONLY when the focused pane's popup is visible.
+            // When it's hidden this whole block is skipped, so Tab still triggers zsh completion,
+            // ↑/↓ still do shell history, etc. ⌘/⌥/⌃ combos always fall through here (hasCOC),
+            // so ⌘K / ⌘⌫ / ⌘·⇧·⌥+Enter keep their meaning even with a visible popup.
+            let hasCOC = mods.contains(.command) || mods.contains(.option) || mods.contains(.control)
+            if let pane = self.currentSurface?.focusedPane, pane.isCompletionPopupVisible {
+                switch completionPopupKeyAction(keyCode: event.keyCode, hasCommandOptionControl: hasCOC) {
+                case .moveUp:      pane.moveCompletionSelection(-1); return nil
+                case .moveDown:    pane.moveCompletionSelection(1);  return nil
+                case .accept:      pane.acceptCompletion();          return nil   // Tab consumed → no zsh completion
+                case .dismiss:     pane.dismissCompletion();         return nil   // Esc consumed
+                case .runAndClose: pane.hideCompletion()             // fall through so Enter still runs the command
+                case .passThrough: break                             // printable/backspace → shell; refresh re-filters
+                }
+            }
             guard terminalKeyAction(charactersIgnoringModifiers: event.charactersIgnoringModifiers ?? "",
                                     command: mods.contains(.command), shift: mods.contains(.shift),
                                     option: mods.contains(.option)) == .insertNewline,

@@ -83,8 +83,35 @@ final class TerminalSurface: NSViewController {
                 self?.terminal.showCompletionPopup(candidates, anchorLineOffset: range.lowerBound)
             }
             completionController?.onHide = { [weak self] in self?.terminal.hideCompletionPopup() }
+            // Task 10: arrow-key navigation restyles the popup; accept sends erase+insert bytes
+            // straight to the PTY (same path as `sendCommand`).
+            completionController?.onSelectionChange = { [weak self] idx in
+                self?.terminal.setCompletionPopupSelectedIndex(idx)
+            }
+            completionController?.onAccept = { [weak self] bytes in self?.terminal.send(txt: bytes) }
         }
     }
+
+    // MARK: - Completion popup keyboard control (Task 10)
+    //
+    // Thin forwarders the app-level key monitor calls while the popup is visible. Each no-ops
+    // safely when completions are off (the controller is nil).
+
+    /// Whether this surface's completion popup is currently visible — the key monitor only steals
+    /// ↑/↓/Tab/Esc/Enter while this is true.
+    var isCompletionPopupVisible: Bool { completionController?.isPopupVisible ?? false }
+
+    /// Move the popup's highlighted row (arrow keys). Clamps at the ends (no wrap in v1).
+    func moveCompletionSelection(_ delta: Int) { completionController?.moveSelection(by: delta) }
+
+    /// Accept the highlighted candidate (Tab): erase the typed prefix and insert the candidate.
+    func acceptCompletion() { completionController?.acceptSelected() }
+
+    /// Dismiss the popup (Esc): hide and stay hidden until the next edit.
+    func dismissCompletion() { completionController?.suppress() }
+
+    /// Hide the popup (Enter): close it without suppressing, so the command still runs.
+    func hideCompletion() { completionController?.hide() }
 
     /// Current shell prompt phase (OSC 133-driven), for the completion controller (a later
     /// task) to decide whether/when a completion popup makes sense.

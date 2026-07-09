@@ -54,3 +54,52 @@ final class TerminalKeyBindingsTests: XCTestCase {
                                          command: false, shift: false, option: false), .passThrough)
     }
 }
+
+/// The completion-popup navigation keymap — consulted only while the popup IS visible.
+final class CompletionPopupKeyActionTests: XCTestCase {
+    private func action(_ keyCode: UInt16, coc: Bool = false) -> CompletionPopupKeyAction {
+        completionPopupKeyAction(keyCode: keyCode, hasCommandOptionControl: coc)
+    }
+
+    func testArrowUpMovesUp() {
+        XCTAssertEqual(action(126), .moveUp)
+    }
+
+    func testArrowDownMovesDown() {
+        XCTAssertEqual(action(125), .moveDown)
+    }
+
+    func testTabAccepts() {
+        // Tab must be consumed on accept so it never also reaches zsh completion.
+        XCTAssertEqual(action(48), .accept)
+    }
+
+    func testEscDismisses() {
+        XCTAssertEqual(action(53), .dismiss)
+    }
+
+    func testReturnRunsAndCloses() {
+        XCTAssertEqual(action(36), .runAndClose)   // Return
+        XCTAssertEqual(action(76), .runAndClose)   // keypad Enter
+    }
+
+    func testPrintableKeyPassesThrough() {
+        // 'd' (keyCode 2): a normal character re-filters the query, never navigates.
+        XCTAssertEqual(action(2), .passThrough)
+    }
+
+    func testBackspacePassesThrough() {
+        // Delete/Backspace (51) edits the line; the refresh re-filters, it doesn't navigate.
+        XCTAssertEqual(action(51), .passThrough)
+    }
+
+    func testNavKeysWithCommandOptionControlPassThrough() {
+        // ⌘/⌥/⌃ combos keep their existing meaning (⌘K, ⌘⌫, ⌘/⌥+Enter soft newline), so even
+        // a nav keyCode must pass through untouched when one of those modifiers is held.
+        XCTAssertEqual(action(126, coc: true), .passThrough)   // ⌘↑
+        XCTAssertEqual(action(125, coc: true), .passThrough)   // ⌘↓
+        XCTAssertEqual(action(48, coc: true), .passThrough)    // ⌥Tab
+        XCTAssertEqual(action(53, coc: true), .passThrough)    // ⌘Esc
+        XCTAssertEqual(action(36, coc: true), .passThrough)    // ⌘Return (soft newline)
+    }
+}
