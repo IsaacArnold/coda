@@ -236,9 +236,9 @@ The impure candidate sources, throttled and cached.
 - Modify: docs/changelog as the repo convention requires.
 
 - [x] **Step 1:** Author the seed specs (Fig-subset JSON). Include git subcommands + the `gitBranches` generator on `checkout`/`switch`/`merge`/`rebase`/`push`. _(Authored git/cd/ls/claude/gh/swift; gitBranches+gitRemotes wired; all decode-verified. Also fixed the final-review merge blocker: shell-escaping of file/git insertions.)_
-- [ ] **Step 2 — Silent-off verification (the accuracy-over-coverage guarantees):** confirm no popup during a `claude` run; inside `python3` REPL; inside `ssh localhost`; after `exec bash`; while a command runs; while scrolled up.
-- [ ] **Step 3 — Regression pass:** all existing intercepted keys and terminal features still work; user prompt/aliases still load; disabling the toggle removes injection on new terminals.
-- [ ] **Step 4:** Use the `verify` skill to drive the full flow end-to-end in the real app. Follow the release pipeline convention when cutting the version.
+- [x] **Step 2 — Silent-off verification (the accuracy-over-coverage guarantees):** confirm no popup during a `claude` run; inside `python3` REPL; inside `ssh localhost`; after `exec bash`; while a command runs; while scrolled up. _(Confirmed in the live acceptance pass.)_
+- [x] **Step 3 — Regression pass:** all existing intercepted keys and terminal features still work; user prompt/aliases still load; disabling the toggle removes injection on new terminals. _(Confirmed in the live acceptance pass.)_
+- [x] **Step 4:** Use the `verify` skill to drive the full flow end-to-end in the real app. Follow the release pipeline convention when cutting the version. _(Driven live via `swift run`; two runtime resource-resolution bugs found + fixed (commit `adac1d6`). Shipping as v0.1.15.)_
 
 ---
 
