@@ -30,3 +30,39 @@ public func terminalKeyAction(charactersIgnoringModifiers chars: String,
     default: return .passThrough
     }
 }
+
+/// What a keystroke means to a visible completion popup.
+public enum CompletionPopupKeyAction: Equatable {
+    /// ↑ — move the selection up one row.
+    case moveUp
+    /// ↓ — move the selection down one row.
+    case moveDown
+    /// Tab — accept the selected candidate (and consume the key so zsh never also completes).
+    case accept
+    /// Esc — dismiss the popup and suppress it until the next edit.
+    case dismiss
+    /// Return / keypad Enter — close the popup, then let the key run the command.
+    case runAndClose
+    /// Anything else — hand the key to the shell unchanged (printable chars re-filter the
+    /// query via the normal output-driven refresh; backspace edits the line).
+    case passThrough
+}
+
+/// Maps a keystroke to a popup action, given the popup IS visible. `hasCommandOptionControl`
+/// is true if ⌘/⌥/⌃ is held — those keep their existing meaning (⌘K, ⌘⌫, ⌘/⌥+Enter soft
+/// newline), so we pass them through untouched. Shift alone does NOT disable nav.
+///
+/// Uses hardware key codes (layout-independent) rather than characters: the arrow keys and Esc
+/// have no useful `charactersIgnoringModifiers`, and Tab/Return are cleaner to match by code.
+public func completionPopupKeyAction(keyCode: UInt16, hasCommandOptionControl: Bool) -> CompletionPopupKeyAction {
+    // ⌘/⌥/⌃ combos always fall through so their existing bindings survive with a visible popup.
+    guard !hasCommandOptionControl else { return .passThrough }
+    switch keyCode {
+    case 126: return .moveUp        // ↑
+    case 125: return .moveDown      // ↓
+    case 48:  return .accept        // Tab
+    case 53:  return .dismiss       // Esc
+    case 36, 76: return .runAndClose // Return / keypad Enter
+    default:  return .passThrough    // printable, 51 = Delete/Backspace, etc.
+    }
+}

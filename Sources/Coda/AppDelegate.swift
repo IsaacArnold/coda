@@ -91,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         seedBranchesAndWatchers()
         startHookServer()
         promptForHookInstallIfNeeded()
+        promptForCompletionsConsentIfNeeded()
         // UNUserNotificationCenter requires a real app bundle (CFBundleIdentifier); under
         // `swift run`/`swift test` there is none, and just touching `.current()` throws
         // NSInternalInconsistencyException, crashing the dev workflow. Badges still work
@@ -131,6 +132,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             guard let self, event.window === self.window else { return event }
             let mods = event.modifierFlags
+            // Completion popup navigation — engaged ONLY when the focused pane's popup is visible.
+            // When it's hidden this whole block is skipped, so Tab still triggers zsh completion,
+            // ↑/↓ still do shell history, etc. ⌘/⌥/⌃ combos always fall through here (hasCOC),
+            // so ⌘K / ⌘⌫ / ⌘·⇧·⌥+Enter keep their meaning even with a visible popup.
+            let hasCOC = mods.contains(.command) || mods.contains(.option) || mods.contains(.control)
+            if let pane = self.currentSurface?.focusedPane, pane.isCompletionPopupVisible {
+                switch completionPopupKeyAction(keyCode: event.keyCode, hasCommandOptionControl: hasCOC) {
+                case .moveUp:      pane.moveCompletionSelection(-1); return nil
+                case .moveDown:    pane.moveCompletionSelection(1);  return nil
+                case .accept:      pane.acceptCompletion();          return nil   // Tab consumed → no zsh completion
+                case .dismiss:     pane.dismissCompletion();         return nil   // Esc consumed
+                case .runAndClose: pane.hideCompletion()             // fall through so Enter still runs the command
+                case .passThrough: break                             // printable/backspace → shell; refresh re-filters
+                }
+            }
             guard terminalKeyAction(charactersIgnoringModifiers: event.charactersIgnoringModifiers ?? "",
                                     command: mods.contains(.command), shift: mods.contains(.shift),
                                     option: mods.contains(.option)) == .insertNewline,
@@ -217,6 +233,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             preferences.declinedHookInstall = true
             do { try prefsStore.save(preferences) } catch { presentError(error) }
         }
+    }
+
+    /// One-time consent prompt for the terminal-completions shell integration: only shown
+    /// once (`askedCompletionsConsent`). States plainly what changes (a small zsh startup
+    /// snippet via `ZDOTDIR`, Coda-spawned terminals only, no dotfile edits) and that it can
+    /// be turned off anytime in Settings.
+    private func promptForCompletionsConsentIfNeeded() {
+        guard !preferences.askedCompletionsConsent else { return }
+        let alert = NSAlert()
+        alert.messageText = "Enable command completions?"
+        alert.informativeText = """
+        Coda can show a completion popup as you type by adding a small zsh startup snippet \
+        (via ZDOTDIR) to terminals it opens. It does not modify your dotfiles and only affects \
+        terminals opened inside Coda. You can turn this off anytime in Settings.
+        """
+        alert.addButton(withTitle: "Enable")
+        alert.addButton(withTitle: "Not now")
+        if alert.runModal() == .alertFirstButtonReturn {
+            preferences.completionsEnabled = true
+        } else {
+            preferences.completionsEnabled = false
+        }
+        preferences.askedCompletionsConsent = true
+        do { try prefsStore.save(preferences) } catch { presentError(error) }
     }
 
     // MARK: - Thread-safe surface allowlist (read by the hook socket server's background queue)
@@ -484,7 +524,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 notifyOnDone: preferences.notifyOnDone,
                 onChangeNotifyOnDone: { [weak self] on in self?.setNotifyOnDone(on) },
                 shell: preferences.shell,
-                onChangeShell: { [weak self] choice in self?.setShell(choice) })
+                onChangeShell: { [weak self] choice in self?.setShell(choice) },
+                completionsEnabled: preferences.completionsEnabled,
+                onChangeCompletionsEnabled: { [weak self] on in self?.setCompletionsEnabled(on) })
             let win = NSWindow(contentViewController: tab)
             win.title = "Settings"
             win.styleMask = [.titled, .closable]
@@ -757,7 +799,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let pane = TerminalSurface(workingDirectory: wt.worktreePath, command: command, setupScript: setup,
                                    hookWorktreeID: wt.id, hookSurfaceID: surfaceID,
                                    hookSocketPath: hookServer?.socketPath ?? "",
-                                   shell: resolvedShell())
+                                   shell: resolvedShell(),
+                                   completionsEnabled: preferences.completionsEnabled)
         pane.onOpenFile = { [weak self] path, line in self?.openInDefaultEditor(path: path, line: line) }
         pane.onTitleChange = { [weak self] _ in self?.refreshTabBar() }
         pane.applyTheme(activeTheme)
@@ -1089,6 +1132,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// Persist the "notify when an agent finishes" toggle.
     private func setNotifyOnDone(_ on: Bool) {
         preferences.notifyOnDone = on
+        do { try prefsStore.save(preferences) } catch { presentError(error) }
+    }
+
+    /// Persist the terminal-completions toggle. Applies to newly-opened terminals only —
+    /// the ZDOTDIR wrapper is fixed at PTY spawn, so running terminals are unaffected.
+    private func setCompletionsEnabled(_ on: Bool) {
+        preferences.completionsEnabled = on
         do { try prefsStore.save(preferences) } catch { presentError(error) }
     }
 

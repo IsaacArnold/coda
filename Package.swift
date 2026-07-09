@@ -21,7 +21,11 @@ let package = Package(
             name: "CodaHook",
             dependencies: ["CodaCore"]
         ),
-        .testTarget(name: "CodaCoreTests", dependencies: ["CodaCore"])
+        .testTarget(
+            name: "CodaCoreTests",
+            dependencies: ["CodaCore"],
+            resources: [.copy("Fixtures")]
+        )
     ],
     swiftLanguageModes: [.v5]
 )

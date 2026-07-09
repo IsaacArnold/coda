@@ -1,0 +1,39 @@
+{
+  "name": ["git"],
+  "description": "the stupid content tracker",
+  "options": [
+    {
+      "name": ["--help", "-h"],
+      "description": "display help for git"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": ["checkout", "co"],
+      "description": "switch branches or restore working tree files",
+      "options": [
+        {
+          "name": ["--force", "-f"],
+          "description": "force checkout, throwing away local changes"
+        }
+      ],
+      "args": [
+        {
+          "name": "branch",
+          "generator": "gitBranches"
+        }
+      ]
+    },
+    {
+      "name": ["clone"],
+      "description": "clone a repository into a new directory",
+      "args": [
+        {
+          "name": "directory",
+          "template": "folders",
+          "isOptional": true
+        }
+      ]
+    }
+  ]
+}

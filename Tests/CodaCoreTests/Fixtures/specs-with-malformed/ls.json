@@ -1,0 +1,12 @@
+{
+  "name": ["ls"],
+  "description": "list directory contents",
+  "args": [
+    {
+      "name": "path",
+      "template": "filepaths",
+      "isOptional": true,
+      "isVariadic": true
+    }
+  ]
+}

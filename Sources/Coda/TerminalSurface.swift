@@ -13,9 +13,14 @@ final class TerminalSurface: NSViewController {
     private let hookSurfaceID: String
     private let hookSocketPath: String
     private let shell: ResolvedShell
+    private let completionsEnabled: Bool
     private var terminal: ClickableTerminalView!
     private var pendingTheme: TerminalTheme?
     private var pendingFont: NSFont?
+    /// The per-surface completion conductor. Created in `loadView` ONLY when `completionsEnabled`
+    /// is true, so the feature costs nothing when off. `nil` otherwise — every `refresh()` call
+    /// site optional-chains through it.
+    private var completionController: CompletionController?
 
     /// Opens a ⌘-clicked `path:line` in the default editor (wired by AppDelegate).
     var onOpenFile: ((String, Int?) -> Void)?
@@ -25,10 +30,16 @@ final class TerminalSurface: NSViewController {
     var onTitleChange: ((String) -> Void)?
     /// Fired when this surface's terminal gains focus (forwarded from the terminal view).
     var onFocused: (() -> Void)?
+    /// Fired when the terminal's OSC 133-driven prompt phase changes (forwarded from the
+    /// terminal view). Set before or after the view loads — wired in `loadView()` below via
+    /// `[weak self]`, same idiom as `onOpenFile`/`onFocused`. Consumed by the completion
+    /// controller (a later task).
+    var onPromptPhaseChange: ((PromptPhase) -> Void)?
 
     init(workingDirectory: String, command: String, setupScript: String = "",
          hookWorktreeID: String = "", hookSurfaceID: String = "", hookSocketPath: String = "",
-         shell: ResolvedShell = ResolvedShell(executablePath: "/bin/zsh")) {
+         shell: ResolvedShell = ResolvedShell(executablePath: "/bin/zsh"),
+         completionsEnabled: Bool = false) {
         self.workingDirectory = workingDirectory
         self.command = command
         self.setupScript = setupScript
@@ -36,6 +47,7 @@ final class TerminalSurface: NSViewController {
         self.hookSurfaceID = hookSurfaceID
         self.hookSocketPath = hookSocketPath
         self.shell = shell
+        self.completionsEnabled = completionsEnabled
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -45,9 +57,92 @@ final class TerminalSurface: NSViewController {
         terminal.autoresizingMask = [.width, .height]
         terminal.fallbackDirectory = workingDirectory
         terminal.onOpenFile = { [weak self] path, line in self?.onOpenFile?(path, line) }
-        terminal.onBecomeFirstResponder = { [weak self] in self?.onFocused?() }
+        terminal.onBecomeFirstResponder = { [weak self] in
+            self?.onFocused?()
+            self?.completionController?.refresh()
+        }
+        terminal.onPromptPhaseChange = { [weak self] phase in
+            self?.onPromptPhaseChange?(phase)
+            self?.completionController?.refresh()
+        }
         terminal.processDelegate = self
         view = terminal
+
+        // Own one completion controller, but only when the feature is on — a session with
+        // completions disabled never allocates it, so it adds zero overhead (no specs load, no
+        // debounce timers, no output hook). Wire it to refresh on prompt-phase changes (above),
+        // terminal output (below), and focus changes (above). Keystroke-driven refresh + accept/
+        // navigation is Task 10.
+        if completionsEnabled {
+            completionController = CompletionController(surface: self)
+            terminal.onOutput = { [weak self] in self?.completionController?.refresh() }
+            // Task 9: wire the controller's show/hide seams to the popup overlay. The controller
+            // has already run the pure engine + visibility gate by the time either fires — this
+            // is pure "display what it decided," no further gating here.
+            completionController?.onShow = { [weak self] candidates, range in
+                self?.terminal.showCompletionPopup(candidates, anchorLineOffset: range.lowerBound)
+            }
+            completionController?.onHide = { [weak self] in self?.terminal.hideCompletionPopup() }
+            // Task 10: arrow-key navigation restyles the popup; accept sends erase+insert bytes
+            // straight to the PTY (same path as `sendCommand`).
+            completionController?.onSelectionChange = { [weak self] idx in
+                self?.terminal.setCompletionPopupSelectedIndex(idx)
+            }
+            completionController?.onAccept = { [weak self] bytes in self?.terminal.send(txt: bytes) }
+        }
+    }
+
+    // MARK: - Completion popup keyboard control (Task 10)
+    //
+    // Thin forwarders the app-level key monitor calls while the popup is visible. Each no-ops
+    // safely when completions are off (the controller is nil).
+
+    /// Whether this surface's completion popup is currently visible — the key monitor only steals
+    /// ↑/↓/Tab/Esc/Enter while this is true.
+    var isCompletionPopupVisible: Bool { completionController?.isPopupVisible ?? false }
+
+    /// Move the popup's highlighted row (arrow keys). Clamps at the ends (no wrap in v1).
+    func moveCompletionSelection(_ delta: Int) { completionController?.moveSelection(by: delta) }
+
+    /// Accept the highlighted candidate (Tab): erase the typed prefix and insert the candidate.
+    func acceptCompletion() { completionController?.acceptSelected() }
+
+    /// Dismiss the popup (Esc): hide and stay hidden until the next edit.
+    func dismissCompletion() { completionController?.suppress() }
+
+    /// Hide the popup (Enter): close it without suppressing, so the command still runs.
+    func hideCompletion() { completionController?.hide() }
+
+    /// Current shell prompt phase (OSC 133-driven), for the completion controller (a later
+    /// task) to decide whether/when a completion popup makes sense.
+    var promptPhase: PromptPhase { terminal?.promptPhase ?? .unknown }
+
+    /// Exit code of the most recently finished command, if any.
+    var lastCommandExitCode: Int? { terminal?.lastCommandExitCode }
+
+    /// The terminal's live cursor cell and whether the viewport is scrolled to the live
+    /// bottom — both needed by the completion controller to decide/position a popup.
+    var cursorCell: (col: Int, row: Int) { terminal?.cursorCell ?? (0, 0) }
+    var isScrolledToBottom: Bool { terminal?.isScrolledToBottom ?? true }
+
+    /// Whether this surface's terminal holds keyboard focus (for the completion gate).
+    var isTerminalFocused: Bool { terminal?.isTerminalFocused ?? false }
+
+    /// The shell's cwd as a file URL (for resolving filesystem completion sources). Falls back to
+    /// `workingDirectory` before the view exists.
+    var currentDirectoryURL: URL {
+        terminal?.currentDirectoryURL ?? URL(fileURLWithPath: workingDirectory)
+    }
+
+    /// Maps a cursor cell to the view point just below it, for anchoring the completion popup.
+    func cursorCellToViewPoint(_ cell: (col: Int, row: Int)) -> CGPoint {
+        terminal?.cursorCellToViewPoint(cell) ?? .zero
+    }
+
+    /// The editable command line from command-start to cursor, or `nil` if unreadable. Forwarded
+    /// from the terminal view (which stays private) for the completion controller.
+    func commandLineToCursor() -> (line: String, cursorOffset: Int)? {
+        terminal?.commandLineToCursor()
     }
 
     private var processStarted = false
@@ -134,16 +229,20 @@ final class TerminalSurface: NSViewController {
         let args = terminalShellArgs(workingDirectory: workingDirectory,
                                      setupScript: setupScript,
                                      command: command, shell: shell.name)
-        // Seed the CODA_* hook-correlation vars only when we actually have a socket +
-        // ids (a fully wired-up surface); otherwise pass nil so the shell inherits the
-        // app's own environment unmodified, same as before this surface existed.
-        var envArray: [String]? = nil
-        if !hookSocketPath.isEmpty, !hookWorktreeID.isEmpty, !hookSurfaceID.isEmpty {
-            let dict = hookEnvironment(base: ProcessInfo.processInfo.environment,
-                                       socketPath: hookSocketPath,
-                                       worktreeID: hookWorktreeID, surfaceID: hookSurfaceID)
-            envArray = dict.map { "\($0.key)=\($0.value)" }
-        }
+        // Build the PTY environment. `hookEnvironment` folds in the CODA_* hook-correlation
+        // vars only when this surface is wired to the hook socket (non-empty ids), the bundled
+        // zsh shell-integration (completions) whenever it's enabled, and the TERM/COLORTERM
+        // defaults SwiftTerm would otherwise inject. These are INDEPENDENT: a scratch terminal,
+        // or an app launched without a bundle id (so the hook socket never started), has empty
+        // hook ids but must still get the ZDOTDIR injection — otherwise no OSC 133 markers ever
+        // arrive and the completion popup never shows. So we always build and pass the env,
+        // rather than gating the whole thing on the hook ids (which regressed completions to
+        // hook-wired surfaces only).
+        let dict = hookEnvironment(base: ProcessInfo.processInfo.environment,
+                                   socketPath: hookSocketPath,
+                                   worktreeID: hookWorktreeID, surfaceID: hookSurfaceID,
+                                   shellIntegration: resolvedShellIntegrationEnv())
+        let envArray = dict.map { "\($0.key)=\($0.value)" }
         terminal.startProcess(executable: shell.executablePath,
                               args: args,
                               environment: envArray,
@@ -151,6 +250,26 @@ final class TerminalSurface: NSViewController {
                               currentDirectory: workingDirectory)
         if let pendingFont { applyFont(pendingFont) }
         if let pendingTheme { applyTheme(pendingTheme) }
+    }
+
+    /// Resolves the env additions that route this surface's shell through Coda's bundled
+    /// OSC 133 wrapper (see `Sources/Coda/Resources/shell-integration/zsh` and
+    /// `ShellIntegration.swift`). Silent-off (returns `[:]`) if the bundled wrapper can't be
+    /// located — a spawn must never fail because of this.
+    private func resolvedShellIntegrationEnv() -> [String: String] {
+        // Zero overhead when the feature is off: skip the bundle lookup entirely.
+        guard completionsEnabled else { return [:] }
+        guard let bundleZdotdir = Bundle.codaBundledResource("shell-integration/zsh"),
+              FileManager.default.fileExists(atPath: bundleZdotdir.appendingPathComponent(".zshrc").path)
+        else { return [:] }
+        let userZdotdir: URL
+        if let existing = ProcessInfo.processInfo.environment["ZDOTDIR"], !existing.isEmpty {
+            userZdotdir = URL(fileURLWithPath: existing)
+        } else {
+            userZdotdir = FileManager.default.homeDirectoryForCurrentUser
+        }
+        return shellIntegrationEnv(enabled: true, shell: shell,
+                                   bundleZdotdir: bundleZdotdir, userZdotdir: userZdotdir)
     }
 }
 
@@ -168,3 +287,8 @@ extension TerminalSurface: LocalProcessTerminalViewDelegate {
 
     func processTerminated(source: TerminalView, exitCode: Int32?) {}
 }
+
+/// Conformance is satisfied entirely by accessors declared above (`promptPhase`,
+/// `isTerminalFocused`, `isScrolledToBottom`, `currentDirectoryURL`, `commandLineToCursor()`) —
+/// this only declares the relationship the controller depends on.
+extension TerminalSurface: CompletionSurface {}

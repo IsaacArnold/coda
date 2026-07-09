@@ -1,0 +1,25 @@
+{
+  "name": ["swift"],
+  "description": "Swift compiler and package manager toolchain",
+  "subcommands": [
+    {
+      "name": ["build"],
+      "description": "Build sources into binary products",
+      "options": [
+        { "name": ["--configuration", "-c"], "description": "Build with configuration (debug or release)" },
+        { "name": ["--build-path"], "description": "Specify a custom build directory path" }
+      ]
+    },
+    {
+      "name": ["test"],
+      "description": "Build and run tests",
+      "options": [
+        { "name": ["--configuration", "-c"], "description": "Build with configuration (debug or release)" },
+        { "name": ["--build-path"], "description": "Specify a custom build directory path" }
+      ]
+    },
+    { "name": ["run"], "description": "Build and run an executable product" },
+    { "name": ["package"], "description": "Perform operations on Swift packages" },
+    { "name": ["repl"], "description": "Launch the Swift REPL" }
+  ]
+}

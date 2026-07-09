@@ -1,0 +1,4 @@
+{
+  "name": ["valid"],
+  "description": "a normal spec that must still load despite an empty-name sibling"
+}

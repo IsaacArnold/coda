@@ -92,10 +92,21 @@ public struct Preferences: Codable, Equatable {
     /// older prefs files without the key decode to `.automatic` via the custom decoder below.
     /// Changing this affects new terminals only. Portable (an enum, never a path).
     public var shell: ShellChoice
+    /// Whether the terminal-completions shell integration (the bundled `ZDOTDIR` wrapper that
+    /// emits OSC 133 prompt markers) is injected into newly-spawned terminals. Defaults to
+    /// `false` — pre-consent it is off; the first-run consent prompt flips it on if the user
+    /// accepts. Older prefs files without the key decode to `false` via the custom decoder
+    /// below. Changing this affects newly-opened terminals only.
+    public var completionsEnabled: Bool
+    /// Whether the first-run terminal-completions consent prompt has already been shown.
+    /// Defaults to `false`; older prefs files without the key decode to `false` via the custom
+    /// decoder below, so existing users see the prompt exactly once.
+    public var askedCompletionsConsent: Bool
     public init(defaultEditor: Editor = .vsCode, activeTheme: String? = nil,
                 terminalFont: TerminalFontPref? = nil, uiScale: UIScale = .medium,
                 declinedHookInstall: Bool = false, notifyOnNeedsYou: Bool = true,
-                notifyOnDone: Bool = true, shell: ShellChoice = .automatic) {
+                notifyOnDone: Bool = true, shell: ShellChoice = .automatic,
+                completionsEnabled: Bool = false, askedCompletionsConsent: Bool = false) {
         self.defaultEditor = defaultEditor
         self.activeTheme = activeTheme
         self.terminalFont = terminalFont
@@ -104,14 +115,17 @@ public struct Preferences: Codable, Equatable {
         self.notifyOnNeedsYou = notifyOnNeedsYou
         self.notifyOnDone = notifyOnDone
         self.shell = shell
+        self.completionsEnabled = completionsEnabled
+        self.askedCompletionsConsent = askedCompletionsConsent
     }
 
     // Synthesized Codable would make `uiScale`/`declinedHookInstall`/`notifyOnNeedsYou`/
-    // `notifyOnDone` required keys and fail to decode older prefs files. A custom decoder
-    // defaults each missing key (and keeps the other keys' existing optional/required behavior).
+    // `notifyOnDone`/`completionsEnabled`/`askedCompletionsConsent` required keys and fail to
+    // decode older prefs files. A custom decoder defaults each missing key (and keeps the other
+    // keys' existing optional/required behavior).
     private enum CodingKeys: String, CodingKey {
         case defaultEditor, activeTheme, terminalFont, uiScale, declinedHookInstall
-        case notifyOnNeedsYou, notifyOnDone, shell
+        case notifyOnNeedsYou, notifyOnDone, shell, completionsEnabled, askedCompletionsConsent
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -123,6 +137,8 @@ public struct Preferences: Codable, Equatable {
         self.notifyOnNeedsYou = try c.decodeIfPresent(Bool.self, forKey: .notifyOnNeedsYou) ?? true
         self.notifyOnDone = try c.decodeIfPresent(Bool.self, forKey: .notifyOnDone) ?? true
         self.shell = try c.decodeIfPresent(ShellChoice.self, forKey: .shell) ?? .automatic
+        self.completionsEnabled = try c.decodeIfPresent(Bool.self, forKey: .completionsEnabled) ?? false
+        self.askedCompletionsConsent = try c.decodeIfPresent(Bool.self, forKey: .askedCompletionsConsent) ?? false
     }
 }
 

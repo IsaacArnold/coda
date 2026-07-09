@@ -1,0 +1,16 @@
+{
+  "name": ["claude"],
+  "description": "Claude Code - starts an interactive session by default",
+  "options": [
+    { "name": ["--help", "-h"], "description": "Display help for command" },
+    { "name": ["--version", "-v"], "description": "Output the version number" },
+    { "name": ["--model"], "description": "Model for the current session (e.g. 'sonnet', 'opus')" },
+    { "name": ["--print", "-p"], "description": "Print response and exit (useful for pipes)" },
+    { "name": ["--continue", "-c"], "description": "Continue the most recent conversation in the current directory" },
+    { "name": ["--resume", "-r"], "description": "Resume a conversation by session ID, or open interactive picker" },
+    { "name": ["--dangerously-skip-permissions"], "description": "Bypass all permission checks" }
+  ],
+  "args": [
+    { "name": "prompt", "isOptional": true }
+  ]
+}
