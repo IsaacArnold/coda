@@ -31,7 +31,8 @@ protocol CompletionSurface: AnyObject {
 /// enabled — so a session with the feature off pays zero cost (the controller isn't even
 /// allocated). The surface reference is `weak`; the surface outlives the controller.
 ///
-/// Task 11 (dynamic sources) still stubs `resolveDynamicSources` (returns `[]`). Task 10 added the
+/// Task 11 wired the dynamic sources: `resolveDynamicSources` now delegates to an owned
+/// `CompletionGenerators` (filesystem + throttled git). Task 10 added the
 /// keyboard-navigation API: the controller now RETAINS what the popup is showing
 /// (`shownCandidates`/`shownRange`/`shownQuery`, `selectedIndex`) and exposes `moveSelection(by:)`
 /// / `acceptSelected()` plus the `onSelectionChange`/`onAccept` seams that push those decisions to
@@ -41,6 +42,12 @@ final class CompletionController {
 
     /// Loaded once at init; `[:]` if the bundled specs dir is missing/unreadable (never crashes).
     private let specs: [String: CompletionSpec]
+
+    /// Resolves the dynamic (filesystem / git) sources. Owned here (created in init) because it
+    /// holds the throttled git cache and only exists while completions are enabled — same lifetime
+    /// as this controller. Its `onAsyncUpdate` is wired to `refresh()` so a git fetch landing
+    /// re-runs the pipeline (see `CompletionGenerators` for why that loop terminates).
+    private let generators = CompletionGenerators()
 
     /// The in-flight debounced refresh, cancelled and replaced on each `refresh()`.
     private var pendingRefresh: DispatchWorkItem?
@@ -92,6 +99,7 @@ final class CompletionController {
         } else {
             self.specs = [:]
         }
+        generators.onAsyncUpdate = { [weak self] in self?.refresh() }
     }
 
     /// Schedule a debounced refresh, cancelling any pending one. Cheap to call on every output
@@ -139,18 +147,27 @@ final class CompletionController {
     /// prefix and insert the candidate, then hide. No-op unless the popup is visible with a valid
     /// selection.
     ///
-    /// **Bytes:** `String(repeating: "\u{7f}", count: shownQuery.count) + candidate.insertion`.
-    /// `\u{7f}` (DEL) is zsh's `backward-delete-char`, so it rubs out the `query.count` characters
-    /// the user already typed for the current token; `insertion` then supplies the full token
-    /// (carrying its own trailing space for static candidates).
+    /// **Bytes:** `String(repeating: "\u{7f}", count: shownRange.count) + candidate.insertion`.
+    /// `\u{7f}` (DEL) is zsh's `backward-delete-char`, so it rubs out the on-screen characters the
+    /// current token occupies; `insertion` then supplies the full token (carrying its own trailing
+    /// space for static candidates, or a trailing `/` for a directory).
+    ///
+    /// **Why `shownRange.count`, not `shownQuery.count`.** `shownQuery` is `ctx.query` — the
+    /// tokenizer's `cursorPrefix`, which is *unescaped / quote-relative*. For an escaped token like
+    /// `cd my\ di` the query is `"my di"` (5 chars) while the on-screen span is 6, so erasing
+    /// `query.count` DELs would under-erase and corrupt the line. `shownRange` is the token's raw
+    /// character span (quote-aware per the tokenizer's accept contract: for an open-quoted token it
+    /// begins after the quote, i.e. exactly the content we want to erase, not the quote) — that is
+    /// what must be rubbed out. This became reachable once file-path candidates could be
+    /// escaped/quoted (Task 11).
     ///
     /// **v1 assumption:** the cursor sits at the end of the current token on a single input row —
-    /// the same assumption `commandLineToCursor` documents. Under it, `query.count` DELs land
-    /// exactly on the typed prefix.
+    /// the same assumption `commandLineToCursor` documents. Under it, `shownRange.count` DELs land
+    /// exactly on the on-screen token.
     func acceptSelected() {
         guard isPopupVisible, shownCandidates.indices.contains(selectedIndex) else { return }
         let candidate = shownCandidates[selectedIndex]
-        let erase = String(repeating: "\u{7f}", count: shownQuery.count)
+        let erase = String(repeating: "\u{7f}", count: shownRange.count)
         onAccept?(erase + candidate.insertion)
         hide()
     }
@@ -170,7 +187,9 @@ final class CompletionController {
         }
 
         let ctx = resolveCompletion(line: line, cursorOffset: offset, specs: specs)
-        let dynamic = resolveDynamicSources(ctx.dynamicSources, cwd: surface.currentDirectoryURL)
+        let dynamic = resolveDynamicSources(
+            ctx.dynamicSources, query: ctx.query, cwd: surface.currentDirectoryURL
+        )
         let ranked = rankCandidates(ctx.staticCandidates + dynamic, query: ctx.query)
 
         // Re-tokenize for the gate's `hasCommandToken`/`endsWithSeparator` inputs. This repeats
@@ -209,12 +228,25 @@ final class CompletionController {
         onShow?(ranked, ctx.replacementRange)
     }
 
-    /// Resolves the dynamic (I/O-backed) completion sources into concrete candidates.
-    ///
-    /// **STUB (Task 11):** returns `[]`. The real signature is in place so Task 11 only fills the
-    /// body — `cwd` is the directory filesystem sources resolve against and git generators run in.
-    private func resolveDynamicSources(_ sources: [DynamicSource], cwd: URL) -> [Candidate] {
-        // TODO(Task 11): filesystem (filepaths/folders) + git (gitBranches/gitRemotes) generators.
-        []
+    /// Resolves the dynamic (I/O-backed) completion sources into concrete candidates, delegating to
+    /// the owned `CompletionGenerators`. `query` is the current token's path fragment (filesystem
+    /// sources complete against it); `cwd` is the directory those sources resolve against and git
+    /// generators run in. Filesystem work is sync and bounded; git work is cached/throttled and
+    /// never spawns on this (main) thread — see `CompletionGenerators`.
+    private func resolveDynamicSources(
+        _ sources: [DynamicSource], query: String, cwd: URL
+    ) -> [Candidate] {
+        sources.flatMap { source -> [Candidate] in
+            switch source {
+            case .filepaths:
+                return generators.filesystemCandidates(prefix: query, cwd: cwd, foldersOnly: false)
+            case .folders:
+                return generators.filesystemCandidates(prefix: query, cwd: cwd, foldersOnly: true)
+            case .generator(.gitBranches):
+                return generators.gitBranches(cwd: cwd)
+            case .generator(.gitRemotes):
+                return generators.gitRemotes(cwd: cwd)
+            }
+        }
     }
 }
