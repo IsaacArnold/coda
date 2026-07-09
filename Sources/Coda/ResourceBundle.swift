@@ -27,4 +27,27 @@ extension Bundle {
         }
         return .module
     }()
+
+    /// Resolve a bundled resource subpath (e.g. `"shell-integration/zsh"`,
+    /// `"completion-specs"`) to an on-disk URL, robust to the two runtime layouts.
+    ///
+    /// The two layouts nest our `Resources/` tree at different depths relative to
+    /// `resourceURL`, so a single `appendingPathComponent` can't serve both:
+    ///
+    /// * **`swift run` / tests** — `Bundle.module.resourceURL` already points *into*
+    ///   `Coda_Coda.bundle/Resources`, so the files sit directly at `<resourceURL>/<subpath>`.
+    /// * **Distributed `.app`** — `make-app.sh` copies the SwiftPM bundle's *contents* (its
+    ///   `Resources/` dir included) flat into `Contents/Resources`, and `Bundle.main.resourceURL`
+    ///   is `Contents/Resources`, so the files sit at `<resourceURL>/Resources/<subpath>`.
+    ///
+    /// Probing both (without the extra `Resources/`, then with) resolves correctly in either,
+    /// and returns nil if neither exists — callers treat that as "feature unavailable", never a
+    /// crash. (Using raw `resourceURL.appendingPathComponent("Resources/<subpath>")` shipped a
+    /// path-doubling bug that broke completions under `swift run`.)
+    static func codaBundledResource(_ subpath: String) -> URL? {
+        guard let base = codaAssets.resourceURL else { return nil }
+        let candidates = [base.appendingPathComponent(subpath),
+                          base.appendingPathComponent("Resources/\(subpath)")]
+        return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
+    }
 }

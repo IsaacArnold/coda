@@ -9,8 +9,16 @@ public enum HookEnv {
     public static let surfaceID  = "CODA_SURFACE_ID"
 }
 
-/// The full environment for a surface's PTY: the inherited environment plus the three
-/// CODA_* keys, plus terminal defaults. Pure; performs no I/O.
+/// The full environment for a surface's PTY: the inherited environment, plus the three
+/// CODA_* hook-correlation keys *when this surface is wired to the hook socket*, plus the
+/// bundled-zsh shell-integration keys *when completions are enabled*, plus terminal defaults.
+/// Pure; performs no I/O.
+///
+/// The hook vars and the shell integration are INDEPENDENT: a surface may have completions
+/// without hook wiring (e.g. a scratch terminal, or an app launched without a bundle id, so
+/// the hook socket never started) and vice-versa. Each `CODA_*` var is therefore seeded only
+/// when its value is non-empty — an empty id means "not wired", not "set me to empty" — so this
+/// function builds a correct PTY env for every combination.
 ///
 /// Passing an explicit environment to SwiftTerm's `startProcess` bypasses the defaults it
 /// would otherwise inject (`Terminal.getEnvironmentVariables`). A GUI app launched from
@@ -23,9 +31,9 @@ public func hookEnvironment(base: [String: String],
                             surfaceID: String,
                             shellIntegration: [String: String] = [:]) -> [String: String] {
     var env = base
-    env[HookEnv.socketPath] = socketPath
-    env[HookEnv.worktreeID] = worktreeID
-    env[HookEnv.surfaceID]  = surfaceID
+    if !socketPath.isEmpty { env[HookEnv.socketPath] = socketPath }
+    if !worktreeID.isEmpty { env[HookEnv.worktreeID] = worktreeID }
+    if !surfaceID.isEmpty  { env[HookEnv.surfaceID]  = surfaceID }
     // Mirror SwiftTerm's default PTY environment (see Terminal.getEnvironmentVariables).
     for (key, value) in ["TERM": "xterm-256color",
                          "COLORTERM": "truecolor",

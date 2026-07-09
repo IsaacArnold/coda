@@ -93,8 +93,7 @@ final class CompletionController {
 
     init(surface: CompletionSurface) {
         self.surface = surface
-        if let dir = Bundle.codaAssets.resourceURL?
-            .appendingPathComponent("Resources/completion-specs") {
+        if let dir = Bundle.codaBundledResource("completion-specs") {
             self.specs = (try? loadCompletionSpecs(from: dir)) ?? [:]
         } else {
             self.specs = [:]

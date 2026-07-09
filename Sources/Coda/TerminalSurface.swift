@@ -229,17 +229,20 @@ final class TerminalSurface: NSViewController {
         let args = terminalShellArgs(workingDirectory: workingDirectory,
                                      setupScript: setupScript,
                                      command: command, shell: shell.name)
-        // Seed the CODA_* hook-correlation vars only when we actually have a socket +
-        // ids (a fully wired-up surface); otherwise pass nil so the shell inherits the
-        // app's own environment unmodified, same as before this surface existed.
-        var envArray: [String]? = nil
-        if !hookSocketPath.isEmpty, !hookWorktreeID.isEmpty, !hookSurfaceID.isEmpty {
-            let dict = hookEnvironment(base: ProcessInfo.processInfo.environment,
-                                       socketPath: hookSocketPath,
-                                       worktreeID: hookWorktreeID, surfaceID: hookSurfaceID,
-                                       shellIntegration: resolvedShellIntegrationEnv())
-            envArray = dict.map { "\($0.key)=\($0.value)" }
-        }
+        // Build the PTY environment. `hookEnvironment` folds in the CODA_* hook-correlation
+        // vars only when this surface is wired to the hook socket (non-empty ids), the bundled
+        // zsh shell-integration (completions) whenever it's enabled, and the TERM/COLORTERM
+        // defaults SwiftTerm would otherwise inject. These are INDEPENDENT: a scratch terminal,
+        // or an app launched without a bundle id (so the hook socket never started), has empty
+        // hook ids but must still get the ZDOTDIR injection — otherwise no OSC 133 markers ever
+        // arrive and the completion popup never shows. So we always build and pass the env,
+        // rather than gating the whole thing on the hook ids (which regressed completions to
+        // hook-wired surfaces only).
+        let dict = hookEnvironment(base: ProcessInfo.processInfo.environment,
+                                   socketPath: hookSocketPath,
+                                   worktreeID: hookWorktreeID, surfaceID: hookSurfaceID,
+                                   shellIntegration: resolvedShellIntegrationEnv())
+        let envArray = dict.map { "\($0.key)=\($0.value)" }
         terminal.startProcess(executable: shell.executablePath,
                               args: args,
                               environment: envArray,
@@ -254,9 +257,9 @@ final class TerminalSurface: NSViewController {
     /// `ShellIntegration.swift`). Silent-off (returns `[:]`) if the bundled wrapper can't be
     /// located — a spawn must never fail because of this.
     private func resolvedShellIntegrationEnv() -> [String: String] {
-        let enabled = completionsEnabled
-        guard let bundleZdotdir = Bundle.codaAssets.resourceURL?
-                .appendingPathComponent("Resources/shell-integration/zsh"),
+        // Zero overhead when the feature is off: skip the bundle lookup entirely.
+        guard completionsEnabled else { return [:] }
+        guard let bundleZdotdir = Bundle.codaBundledResource("shell-integration/zsh"),
               FileManager.default.fileExists(atPath: bundleZdotdir.appendingPathComponent(".zshrc").path)
         else { return [:] }
         let userZdotdir: URL
@@ -265,7 +268,7 @@ final class TerminalSurface: NSViewController {
         } else {
             userZdotdir = FileManager.default.homeDirectoryForCurrentUser
         }
-        return shellIntegrationEnv(enabled: enabled, shell: shell,
+        return shellIntegrationEnv(enabled: true, shell: shell,
                                    bundleZdotdir: bundleZdotdir, userZdotdir: userZdotdir)
     }
 }
