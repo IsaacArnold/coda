@@ -192,8 +192,8 @@ Native-chrome dropdown, anchored at the cursor.
 - Native `NSVisualEffectView`-backed panel, system font; rows = name + dimmed description; ~8 visible, scrolls; selection highlighted.
 - **Placement:** below the current line, left-aligned to the completed token's start; **flips above** near the window's bottom edge; repositions on cursor move.
 
-- [ ] **Step 1:** Build the view + positioning/flip logic; drive it from the controller.
-- [ ] **Step 2:** Build. **Manual verify:** popup appears at the cursor for `git ch`, flips above near the bottom, shows descriptions. Commit.
+- [x] **Step 1:** Build the view + positioning/flip logic; drive it from the controller.
+- [x] **Step 2:** Build. **Manual verify:** popup appears at the cursor for `git ch`, flips above near the bottom, shows descriptions. Commit. _(Build + 405 tests green; positioning/flip/clamp proven via traces. Live on-screen verification deferred to the combined GUI pass after Task 10, when the popup is keyboard-drivable.)_
 
 ### Task 10: Keystroke interception for popup navigation
 
