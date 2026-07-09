@@ -2,11 +2,109 @@
   "name": ["git"],
   "description": "The stupid content tracker",
   "subcommands": [
-    { "name": ["checkout"], "description": "Switch branches or restore files" },
-    { "name": ["cherry-pick"], "description": "Apply commits from another branch" },
-    { "name": ["commit"], "description": "Record changes to the repository" },
-    { "name": ["clone"], "description": "Clone a repository" },
-    { "name": ["branch"], "description": "List or manage branches" },
-    { "name": ["status"], "description": "Show the working tree status" }
+    {
+      "name": ["add"],
+      "description": "Add file contents to the index",
+      "args": [
+        { "name": "pathspec", "template": "filepaths", "isOptional": true, "isVariadic": true }
+      ]
+    },
+    { "name": ["status"], "description": "Show the working tree status" },
+    {
+      "name": ["commit"],
+      "description": "Record changes to the repository",
+      "options": [
+        { "name": ["--message", "-m"], "description": "Use the given message as the commit message" },
+        { "name": ["--amend"], "description": "Amend the previous commit" },
+        { "name": ["--all", "-a"], "description": "Stage all modified/deleted files before committing" }
+      ]
+    },
+    {
+      "name": ["checkout", "co"],
+      "description": "Switch branches or restore files",
+      "options": [
+        { "name": ["-b"], "description": "Create a new branch and switch to it" }
+      ],
+      "args": [
+        { "name": "branch", "generator": "gitBranches", "isOptional": true }
+      ]
+    },
+    {
+      "name": ["switch"],
+      "description": "Switch to another branch",
+      "args": [
+        { "name": "branch", "generator": "gitBranches" }
+      ]
+    },
+    {
+      "name": ["branch"],
+      "description": "List or manage branches",
+      "options": [
+        { "name": ["--delete", "-d"], "description": "Delete a branch" }
+      ],
+      "args": [
+        { "name": "branch", "generator": "gitBranches", "isOptional": true }
+      ]
+    },
+    {
+      "name": ["merge"],
+      "description": "Join two or more development histories together",
+      "args": [
+        { "name": "branch", "generator": "gitBranches" }
+      ]
+    },
+    {
+      "name": ["rebase"],
+      "description": "Reapply commits on top of another base tip",
+      "args": [
+        { "name": "branch", "generator": "gitBranches" }
+      ]
+    },
+    {
+      "name": ["pull"],
+      "description": "Fetch from and integrate with another repository or branch",
+      "args": [
+        { "name": "remote", "generator": "gitRemotes", "isOptional": true },
+        { "name": "branch", "generator": "gitBranches", "isOptional": true }
+      ]
+    },
+    {
+      "name": ["push"],
+      "description": "Update remote refs along with associated objects",
+      "options": [
+        { "name": ["--force-with-lease"], "description": "Force push, refusing if the remote ref is not what's expected" },
+        { "name": ["--set-upstream", "-u"], "description": "Set the upstream for the pushed branch" }
+      ],
+      "args": [
+        { "name": "remote", "generator": "gitRemotes", "isOptional": true },
+        { "name": "branch", "generator": "gitBranches", "isOptional": true }
+      ]
+    },
+    {
+      "name": ["fetch"],
+      "description": "Download objects and refs from another repository",
+      "args": [
+        { "name": "remote", "generator": "gitRemotes", "isOptional": true },
+        { "name": "branch", "generator": "gitBranches", "isOptional": true }
+      ]
+    },
+    {
+      "name": ["clone"],
+      "description": "Clone a repository into a new directory",
+      "args": [
+        { "name": "repository" },
+        { "name": "directory", "template": "folders", "isOptional": true }
+      ]
+    },
+    { "name": ["log"], "description": "Show commit logs" },
+    { "name": ["diff"], "description": "Show changes between commits, commit and working tree, etc" },
+    { "name": ["stash"], "description": "Stash the changes in a dirty working directory away" },
+    { "name": ["reset"], "description": "Reset current HEAD to the specified state" },
+    { "name": ["restore"], "description": "Restore working tree files" },
+    { "name": ["remote"], "description": "Manage the set of tracked repositories" },
+    { "name": ["cherry-pick"], "description": "Apply the changes introduced by some existing commits" },
+    { "name": ["tag"], "description": "Create, list, delete or verify a tag object" },
+    { "name": ["init"], "description": "Create an empty Git repository or reinitialize an existing one" },
+    { "name": ["show"], "description": "Show various types of objects" }
   ]
 }

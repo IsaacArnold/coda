@@ -1,0 +1,14 @@
+{
+  "name": ["ls"],
+  "description": "List directory contents",
+  "options": [
+    { "name": ["-l"], "description": "Use a long listing format" },
+    { "name": ["-a", "--all"], "description": "Do not ignore entries starting with ." },
+    { "name": ["-h", "--human-readable"], "description": "Print sizes in a human-readable format" },
+    { "name": ["-t"], "description": "Sort by modification time, newest first" },
+    { "name": ["-R", "--recursive"], "description": "List subdirectories recursively" }
+  ],
+  "args": [
+    { "name": "path", "template": "filepaths", "isOptional": true, "isVariadic": true }
+  ]
+}

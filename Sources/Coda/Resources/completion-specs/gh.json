@@ -1,0 +1,32 @@
+{
+  "name": ["gh"],
+  "description": "Work seamlessly with GitHub from the command line",
+  "subcommands": [
+    {
+      "name": ["pr"],
+      "description": "Manage pull requests",
+      "subcommands": [
+        { "name": ["create"], "description": "Create a pull request" },
+        { "name": ["checkout"], "description": "Check out a pull request in git" },
+        { "name": ["view"], "description": "View a pull request" },
+        { "name": ["list"], "description": "List pull requests in a repository" },
+        { "name": ["merge"], "description": "Merge a pull request" }
+      ]
+    },
+    {
+      "name": ["issue"],
+      "description": "Manage issues",
+      "subcommands": [
+        { "name": ["create"], "description": "Create a new issue" },
+        { "name": ["list"], "description": "List issues in a repository" },
+        { "name": ["view"], "description": "View an issue" }
+      ]
+    },
+    { "name": ["repo"], "description": "Manage repositories" },
+    { "name": ["run"], "description": "List, view, and watch recent workflow runs from GitHub Actions" },
+    { "name": ["release"], "description": "Manage releases" },
+    { "name": ["auth"], "description": "Authenticate gh and git with GitHub" },
+    { "name": ["browse"], "description": "Open the repository, issue, or pull request in the browser" },
+    { "name": ["status"], "description": "Print information about relevant issues, pull requests, and notifications" }
+  ]
+}
