@@ -81,24 +81,42 @@ private final class WorktreeCellView: NSTableCellView {
     /// so it would keep its dim secondary color and vanish against the accent blue. Invert it
     /// here to match. The trailing +/- stats keep their green/red — those stay legible on the
     /// selection fill and preserve the diff semantic.
+    /// The colour the title/subtitle take when this is the selected (accent-filled) row — the
+    /// accent's contrasting colour, so light accents get dark text. Set by the sidebar in
+    /// `viewFor`; defaults to white for the (dark) default purple accent.
+    var selectedTextColor: NSColor = .white
+
     override var backgroundStyle: NSView.BackgroundStyle {
         didSet {
-            subtitleLabel.textColor = backgroundStyle == .emphasized
-                ? .white.withAlphaComponent(0.75)
+            let selected = backgroundStyle == .emphasized
+            textField?.textColor = selected ? selectedTextColor : .labelColor
+            subtitleLabel.textColor = selected
+                ? selectedTextColor.withAlphaComponent(0.75)
                 : .secondaryLabelColor
         }
     }
 }
 
-/// The sidebar keeps a visible accent-colored fill on the selected worktree/branch even when
-/// the outline view isn't first responder (the usual case — focus lives in the terminal).
-/// A stock source-list row dims its selection to muted gray whenever it loses first-responder
-/// status; forcing `isEmphasized` true keeps the vivid accent fill so the focused worktree is
-/// always obvious at a glance.
+/// The sidebar keeps a visible, accent-coloured fill on the selected worktree/branch even when
+/// the outline view isn't first responder (focus normally lives in the terminal). A stock
+/// source-list row dims its selection to muted grey when it loses first-responder status, and
+/// its fill colour is the fixed system accent — so we force emphasis (keeps the fill vivid and
+/// drives the cell's `.emphasized` backgroundStyle for contrast-aware text) and draw the fill
+/// ourselves in the chosen accent colour.
 private final class FocusHighlightRowView: NSTableRowView {
+    /// The fill colour for the selected row (the app accent). Set by the sidebar per row.
+    var accentColor: NSColor = NSColor(hex: AccentColor.defaultHex) ?? .controlAccentColor
+
     override var isEmphasized: Bool {
         get { true }
         set { }
+    }
+
+    override func drawSelection(in dirtyRect: NSRect) {
+        guard isSelected else { return }
+        accentColor.setFill()
+        let rect = bounds.insetBy(dx: 4, dy: 1)
+        NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
     }
 }
 
@@ -150,6 +168,22 @@ final class SidebarController: NSViewController {
         let changed = identityOverrides[id] != color
         if let color { identityOverrides[id] = color } else { identityOverrides[id] = nil }
         if changed { outline.reloadData() }
+    }
+
+    /// The app accent, used to fill the focused worktree/branch row. Seeded to the default;
+    /// AppDelegate pushes the user's choice via `setAccentColor(_:)`.
+    private var accentFill: NSColor = NSColor(hex: AccentColor.defaultHex) ?? .controlAccentColor
+    /// The accent's contrasting text colour (black/white), applied to the selected row's labels
+    /// so light accents (yellow/cyan/green) stay legible.
+    private var accentTextColor: NSColor = RGB(hex: AccentColor.defaultHex)?.contrastingText.nsColor ?? .white
+
+    /// Set the accent colour used for the focused-row highlight and repaint. Reloads (matching
+    /// `setIdentityOverride`/`applyChrome`), which preserves the current selection since the
+    /// items are unchanged.
+    func setAccentColor(_ hex: String) {
+        accentFill = NSColor(hex: hex) ?? .controlAccentColor
+        accentTextColor = RGB(hex: hex)?.contrastingText.nsColor ?? .white
+        outline.reloadData()
     }
 
     /// Adopt a new interface scale and restyle live. Row heights and cell fonts are
@@ -377,11 +411,9 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// even when the sidebar isn't first responder (focus normally lives in the terminal).
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
         let id = NSUserInterfaceItemIdentifier("focusRow")
-        if let reused = outline.makeView(withIdentifier: id, owner: self) as? FocusHighlightRowView {
-            return reused
-        }
-        let row = FocusHighlightRowView()
-        row.identifier = id
+        let row = (outline.makeView(withIdentifier: id, owner: self) as? FocusHighlightRowView)
+            ?? { let r = FocusHighlightRowView(); r.identifier = id; return r }()
+        row.accentColor = accentFill
         return row
     }
 
@@ -398,6 +430,7 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
         if let wt = item as? WorktreeNode {
             let cell = makeWorktreeCell()
+            cell.selectedTextColor = accentTextColor
             cell.textField?.stringValue = wt.worktree.title
             // Subtitle is just the branch — the repo name is already the section header above.
             cell.subtitleLabel.stringValue = wt.worktree.branch
