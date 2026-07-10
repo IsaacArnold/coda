@@ -159,6 +159,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         // mouse-move tracking area, so these events reliably flow to us.
         hoverMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .flagsChanged]) { [weak self] event in
             self?.updateLinkCursor(for: event)
+            // Drop plain hover motion over a pane whose program has any-event mouse tracking on.
+            // SwiftTerm would otherwise stream that motion to the PTY, and Claude Code's TUI moves
+            // its selection to follow the cursor — so hovering an option "selects" it. Swallowing
+            // the move (returning nil) stops that; clicks are `.leftMouseDown`/`.leftMouseUp`, not
+            // matched here, so clicking an option in the TUI still works.
+            if let self, event.type == .mouseMoved, event.window === self.window,
+               self.currentSurface?.paneContaining(event)?.isReportingMouseMotion == true {
+                return nil
+            }
             return event
         }
     }

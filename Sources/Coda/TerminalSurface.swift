@@ -125,6 +125,10 @@ final class TerminalSurface: NSViewController {
     var cursorCell: (col: Int, row: Int) { terminal?.cursorCell ?? (0, 0) }
     var isScrolledToBottom: Bool { terminal?.isScrolledToBottom ?? true }
 
+    /// Whether the running program has any-event mouse tracking on (hover motion streamed to the
+    /// PTY). The app-level hover monitor uses this to swallow hover-select events over this pane.
+    var isReportingMouseMotion: Bool { terminal?.isReportingMouseMotion ?? false }
+
     /// Whether this surface's terminal holds keyboard focus (for the completion gate).
     var isTerminalFocused: Bool { terminal?.isTerminalFocused ?? false }
 

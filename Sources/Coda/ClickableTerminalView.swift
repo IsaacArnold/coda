@@ -40,9 +40,35 @@ final class ClickableTerminalView: LocalProcessTerminalView {
     /// agent-state poll uses this to skip re-snapshotting panes whose grid hasn't changed.
     override func dataReceived(slice: ArraySlice<UInt8>) {
         outputSinceLastPoll = true
+        // SwiftTerm yanks the viewport back to the live bottom on every new line: its
+        // `Terminal.scroll()` forces `yDisp = yBase` unless an internal `userScrolling` flag
+        // is set — and that flag is never set anywhere (and is module-internal, so we can't
+        // set it either). The upshot is that scrolling up to read history is interrupted the
+        // instant the agent prints another line. Capture the scroll state before feeding, and
+        // if the user had scrolled up, restore their top row afterward so live output no
+        // longer steals the viewport. When the buffer is trimmed (full scrollback) the content
+        // shifts by the trimmed count and this drifts by that much — still vastly better than
+        // snapping to the bottom, and exact in the common not-yet-full case.
+        let wasScrolledUp = !isScrolledToBottom
+        let savedTopRow = getTerminal().getTopVisibleRow()
         super.dataReceived(slice: slice)
+        // Both the `super` feed (which pinned to the bottom) and this restore mark the view
+        // dirty within one synchronous main-thread call, so AppKit coalesces them into a
+        // single redraw at the live scroll position — no flash of the bottom.
+        if wasScrolledUp {
+            scrollTo(row: savedTopRow)
+        }
         // After `super` so the buffer reflects this chunk before the controller reads it.
         onOutput?()
+    }
+
+    /// True when the running program has turned on any-event mouse tracking (DECSET 1003), i.e.
+    /// SwiftTerm will stream pointer *motion* (not just clicks) to the PTY. Claude Code's TUI uses
+    /// those motion reports to move its selection to follow the cursor, so a plain hover "selects"
+    /// an option. SwiftTerm's `mouseMoved` is `public` (not `open`), so we can't override it on the
+    /// view; the app-level hover monitor consults this to swallow those hover events instead.
+    var isReportingMouseMotion: Bool {
+        getTerminal().mouseMode.sendMotionEvent()
     }
 
     /// Whether new output has arrived since the previous call; resets the flag.

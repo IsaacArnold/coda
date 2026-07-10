@@ -75,6 +75,31 @@ private final class WorktreeCellView: NSTableCellView {
     func applyIdentityColor(_ identity: NSColor?, repoColor: NSColor?, glyphTint: NSColor?) {
         imageView?.contentTintColor = identity ?? repoColor ?? glyphTint ?? .secondaryLabelColor
     }
+
+    /// NSTableCellView auto-inverts its `textField` (the title) to white when the row is drawn
+    /// with the emphasized selection fill, but the branch subtitle isn't the `textField` outlet,
+    /// so it would keep its dim secondary color and vanish against the accent blue. Invert it
+    /// here to match. The trailing +/- stats keep their green/red — those stay legible on the
+    /// selection fill and preserve the diff semantic.
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet {
+            subtitleLabel.textColor = backgroundStyle == .emphasized
+                ? .white.withAlphaComponent(0.75)
+                : .secondaryLabelColor
+        }
+    }
+}
+
+/// The sidebar keeps a visible accent-colored fill on the selected worktree/branch even when
+/// the outline view isn't first responder (the usual case — focus lives in the terminal).
+/// A stock source-list row dims its selection to muted gray whenever it loses first-responder
+/// status; forcing `isEmphasized` true keeps the vivid accent fill so the focused worktree is
+/// always obvious at a glance.
+private final class FocusHighlightRowView: NSTableRowView {
+    override var isEmphasized: Bool {
+        get { true }
+        set { }
+    }
 }
 
 /// A source-list sidebar: repositories as header rows with their worktrees nested
@@ -346,6 +371,18 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// Worktree rows are two-line (title + subtitle); repo headers stay single-line.
     func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
         item is WorktreeNode ? metrics.length(38) : metrics.length(24)
+    }
+
+    /// Use a row view that stays emphasized so the focused worktree keeps its vivid accent fill
+    /// even when the sidebar isn't first responder (focus normally lives in the terminal).
+    func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
+        let id = NSUserInterfaceItemIdentifier("focusRow")
+        if let reused = outline.makeView(withIdentifier: id, owner: self) as? FocusHighlightRowView {
+            return reused
+        }
+        let row = FocusHighlightRowView()
+        row.identifier = id
+        return row
     }
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
