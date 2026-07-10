@@ -1160,7 +1160,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         sidebar.setAccentColor(hex)
     }
 
-    /// Persist the chosen app icon and apply it immediately (Dock + Finder).
+    /// Persist the chosen app icon and apply it immediately (running Dock icon).
     private func setAppIcon(_ id: String) {
         preferences.appIconName = id
         do { try prefsStore.save(preferences) } catch { presentError(error) }

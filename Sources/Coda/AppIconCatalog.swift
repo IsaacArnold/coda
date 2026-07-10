@@ -1,5 +1,4 @@
 import AppKit
-import CodaCore
 
 /// One selectable app icon: a stable `id` (used as the persisted preference and the swatch's
 /// identity), a human `displayName`, and the loaded `image`.
