@@ -76,14 +76,13 @@ private final class WorktreeCellView: NSTableCellView {
         imageView?.contentTintColor = identity ?? repoColor ?? glyphTint ?? .secondaryLabelColor
     }
 
-    /// NSTableCellView auto-inverts its `textField` (the title) to white when the row is drawn
-    /// with the emphasized selection fill, but the branch subtitle isn't the `textField` outlet,
-    /// so it would keep its dim secondary color and vanish against the accent blue. Invert it
-    /// here to match. The trailing +/- stats keep their green/red — those stay legible on the
-    /// selection fill and preserve the diff semantic.
     /// The colour the title/subtitle take when this is the selected (accent-filled) row — the
-    /// accent's contrasting colour, so light accents get dark text. Set by the sidebar in
-    /// `viewFor`; defaults to white for the (dark) default purple accent.
+    /// accent's contrasting colour (black on light fills, white on dark), so every swatch stays
+    /// legible. Set by the sidebar in `viewFor`; the `.white` here is only a defensive default
+    /// before the sidebar seeds it (the default purple accent actually resolves to black text).
+    /// `backgroundStyle`'s didSet runs after NSTableCellView's own white-inversion of the title,
+    /// so it overrides that; the subtitle isn't the `textField` outlet and wouldn't be inverted
+    /// at all otherwise. The trailing +/- stats keep their green/red.
     var selectedTextColor: NSColor = .white
 
     override var backgroundStyle: NSView.BackgroundStyle {

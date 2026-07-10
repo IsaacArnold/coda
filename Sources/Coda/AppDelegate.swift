@@ -165,6 +165,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             // its selection to follow the cursor — so hovering an option "selects" it. Swallowing
             // the move (returning nil) stops that; clicks are `.leftMouseDown`/`.leftMouseUp`, not
             // matched here, so clicking an option in the TUI still works.
+            // NB: this applies to ANY program that enables any-event tracking (DECSET 1003), not
+            // just Claude — a deliberate Claude-first tradeoff. Another 1003 TUI (btop, some file
+            // managers) loses hover-motion reporting inside Coda; button-tracking modes (1000/1002)
+            // are unaffected since `isReportingMouseMotion` is true only for `.anyEvent`.
             if let self, event.type == .mouseMoved, event.window === self.window,
                self.currentSurface?.paneContaining(event)?.isReportingMouseMotion == true {
                 return nil
