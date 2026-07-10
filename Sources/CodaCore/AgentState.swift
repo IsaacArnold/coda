@@ -82,3 +82,9 @@ public func rollup(_ states: [AgentState]) -> AgentState {
     if states.contains(.done) { return .done }
     return .idle
 }
+
+/// How many worktrees are awaiting the user (rolled-up state `.needsYou`).
+/// Drives the Dock badge count. Pure so it is unit-testable without AppKit.
+public func needsYouCount(_ rollups: [String: AgentState]) -> Int {
+    rollups.values.filter { $0 == .needsYou }.count
+}
