@@ -296,10 +296,22 @@ final class SidebarController: NSViewController {
         if let selectedItem {
             let row = outline.row(forItem: selectedItem)
             if row >= 0 {
+                // The first `selectRowIndexes` in the same runloop turn as `reloadData()` +
+                // `expandItem(...)` is a silent no-op — the outline hasn't committed its new row
+                // set yet, so a single call (sync OR deferred) leaves `selectedRow` at -1 and the
+                // focused-row highlight never paints on launch (clicking already worked via the
+                // mouse-selection path). Priming with a sync call and re-asserting on the next
+                // turn is what makes the selection actually stick (verified). `isReloading` spans
+                // both so `outlineViewSelectionDidChange` treats it as a reload, not a user click,
+                // and doesn't steal terminal focus.
                 isReloading = true
                 outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-                isReloading = false
-                outline.scrollRowToVisible(row)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+                    self.isReloading = false
+                    self.outline.scrollRowToVisible(row)
+                }
             }
         }
     }
@@ -465,14 +477,25 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
     func updateAgentStates(_ states: [String: AgentState]) {
         guard states != agentStates else { return }
         agentStates = states
-        outline.reloadData()
+        reloadRowsPreservingSelection()
+    }
+
+    /// Refresh every visible row's cell views in place, WITHOUT the full `reloadData()` — a full
+    /// reload silently drops the outline's selection (verified: `selectedRow` 1→-1), which would
+    /// erase the focused-worktree highlight on every background sweep. Reloading by row index
+    /// updates the badges / diff figures while leaving the selection (and thus the highlight)
+    /// intact.
+    private func reloadRowsPreservingSelection() {
+        guard outline.numberOfRows > 0 else { return }
+        outline.reloadData(forRowIndexes: IndexSet(integersIn: 0..<outline.numberOfRows),
+                           columnIndexes: IndexSet(integer: 0))
     }
 
     /// Live +/- figures, keyed by worktree id — fed by the launch sweep and kept fresh
     /// on the same triggers as the diff pane (hook events, HEAD changes, activation).
     func updateDiffStats(_ stats: [String: DiffStats]) {
         diffStats = stats
-        outline.reloadData()
+        reloadRowsPreservingSelection()
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
