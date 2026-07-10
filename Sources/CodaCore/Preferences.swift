@@ -110,12 +110,16 @@ public struct Preferences: Codable, Equatable {
     /// input. Defaults to `true`; older prefs files without the key decode to `true` via the
     /// custom decoder below.
     public var showDockBadge: Bool
+    /// The chosen app icon's id (a bundled icon filename stem, e.g. "Alternate"). nil → the
+    /// built-in default (`Resources/Coda.icns`). Stores an id, never a path, so config stays
+    /// portable. Older prefs files without the key decode to nil via the custom decoder below.
+    public var appIconName: String?
     public init(defaultEditor: Editor = .vsCode, activeTheme: String? = nil,
                 terminalFont: TerminalFontPref? = nil, uiScale: UIScale = .medium,
                 declinedHookInstall: Bool = false, notifyOnNeedsYou: Bool = true,
                 notifyOnDone: Bool = true, shell: ShellChoice = .automatic,
                 completionsEnabled: Bool = false, askedCompletionsConsent: Bool = false,
-                accentColor: String? = nil, showDockBadge: Bool = true) {
+                accentColor: String? = nil, showDockBadge: Bool = true, appIconName: String? = nil) {
         self.defaultEditor = defaultEditor
         self.activeTheme = activeTheme
         self.terminalFont = terminalFont
@@ -128,6 +132,7 @@ public struct Preferences: Codable, Equatable {
         self.askedCompletionsConsent = askedCompletionsConsent
         self.accentColor = accentColor
         self.showDockBadge = showDockBadge
+        self.appIconName = appIconName
     }
 
     // Synthesized Codable would make `uiScale`/`declinedHookInstall`/`notifyOnNeedsYou`/
@@ -137,7 +142,7 @@ public struct Preferences: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case defaultEditor, activeTheme, terminalFont, uiScale, declinedHookInstall
         case notifyOnNeedsYou, notifyOnDone, shell, completionsEnabled, askedCompletionsConsent
-        case accentColor, showDockBadge
+        case accentColor, showDockBadge, appIconName
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -153,6 +158,7 @@ public struct Preferences: Codable, Equatable {
         self.askedCompletionsConsent = try c.decodeIfPresent(Bool.self, forKey: .askedCompletionsConsent) ?? false
         self.accentColor = try c.decodeIfPresent(String.self, forKey: .accentColor)
         self.showDockBadge = try c.decodeIfPresent(Bool.self, forKey: .showDockBadge) ?? true
+        self.appIconName = try c.decodeIfPresent(String.self, forKey: .appIconName)
     }
 }
 

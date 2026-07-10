@@ -144,6 +144,19 @@ final class PreferencesTests: XCTestCase {
         let data = try JSONEncoder().encode(prefs)
         XCTAssertFalse(try JSONDecoder().decode(Preferences.self, from: data).showDockBadge)
     }
+
+    func testAppIconNameDefaultsNilForOldPrefs() throws {
+        let json = #"{"defaultEditor":{"name":"Visual Studio Code","bundleID":"com.microsoft.VSCode","urlScheme":"vscode"}}"#
+        let prefs = try JSONDecoder().decode(Preferences.self, from: Data(json.utf8))
+        XCTAssertNil(prefs.appIconName)
+    }
+
+    func testAppIconNameRoundTrips() throws {
+        var prefs = Preferences()
+        prefs.appIconName = "Alternate"
+        let data = try JSONEncoder().encode(prefs)
+        XCTAssertEqual(try JSONDecoder().decode(Preferences.self, from: data).appIconName, "Alternate")
+    }
 }
 
 final class KnownEditorsTests: XCTestCase {
