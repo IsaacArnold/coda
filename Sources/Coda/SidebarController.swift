@@ -76,22 +76,15 @@ private final class WorktreeCellView: NSTableCellView {
         imageView?.contentTintColor = identity ?? repoColor ?? glyphTint ?? .secondaryLabelColor
     }
 
-    /// The colour the title/subtitle take when this is the selected (accent-filled) row — the
-    /// accent's contrasting colour (black on light fills, white on dark), so every swatch stays
-    /// legible. Set by the sidebar in `viewFor`; the `.white` here is only a defensive default
-    /// before the sidebar seeds it (the default purple accent actually resolves to black text).
-    /// `backgroundStyle`'s didSet runs after NSTableCellView's own white-inversion of the title,
-    /// so it overrides that; the subtitle isn't the `textField` outlet and wouldn't be inverted
-    /// at all otherwise. The trailing +/- stats keep their green/red.
-    var selectedTextColor: NSColor = .white
-
+    /// The focused row is drawn with a translucent "glass" fill (see `FocusHighlightRowView`),
+    /// so its background stays close to the sidebar's and the title/subtitle keep their normal
+    /// theme-adaptive colours. Pin them here to defeat NSTableCellView's automatic
+    /// white-on-emphasized inversion of the title, which would be wrong in light mode and
+    /// unnecessary over the translucent fill. The trailing +/- stats keep their green/red.
     override var backgroundStyle: NSView.BackgroundStyle {
         didSet {
-            let selected = backgroundStyle == .emphasized
-            textField?.textColor = selected ? selectedTextColor : .labelColor
-            subtitleLabel.textColor = selected
-                ? selectedTextColor.withAlphaComponent(0.75)
-                : .secondaryLabelColor
+            textField?.textColor = .labelColor
+            subtitleLabel.textColor = .secondaryLabelColor
         }
     }
 }
@@ -113,9 +106,18 @@ private final class FocusHighlightRowView: NSTableRowView {
 
     override func drawSelection(in dirtyRect: NSRect) {
         guard isSelected else { return }
-        accentColor.setFill()
         let rect = bounds.insetBy(dx: 4, dy: 1)
-        NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
+        let path = NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5)
+        // A translucent "glass" fill — the accent tints the row but the sidebar shows through,
+        // so the highlight reads as a frosted panel rather than a solid block. A slightly
+        // stronger hairline rim gives the panel a defined, glassy edge. Because the row stays
+        // close to the sidebar's own colour, the cell keeps its normal theme-adaptive text
+        // colours (no black/white inversion — see WorktreeCellView.backgroundStyle).
+        accentColor.withAlphaComponent(0.22).setFill()
+        path.fill()
+        accentColor.withAlphaComponent(0.5).setStroke()
+        path.lineWidth = 1
+        path.stroke()
     }
 }
 
@@ -169,20 +171,22 @@ final class SidebarController: NSViewController {
         if changed { outline.reloadData() }
     }
 
-    /// The app accent, used to fill the focused worktree/branch row. Seeded to the default;
-    /// AppDelegate pushes the user's choice via `setAccentColor(_:)`.
+    /// The app accent, used for the translucent fill on the focused worktree/branch row. Seeded
+    /// to the default; AppDelegate pushes the user's choice via `setAccentColor(_:)`.
     private var accentFill: NSColor = NSColor(hex: AccentColor.defaultHex) ?? .controlAccentColor
-    /// The accent's contrasting text colour (black/white), applied to the selected row's labels
-    /// so light accents (yellow/cyan/green) stay legible.
-    private var accentTextColor: NSColor = RGB(hex: AccentColor.defaultHex)?.contrastingText.nsColor ?? .white
 
-    /// Set the accent colour used for the focused-row highlight and repaint. Reloads (matching
-    /// `setIdentityOverride`/`applyChrome`), which preserves the current selection since the
-    /// items are unchanged.
+    /// Set the accent colour for the focused-row highlight and repaint live. Pushes the colour
+    /// onto the visible row views and redraws them in place — deliberately NOT `reloadData()`,
+    /// which drops the outline selection and would erase the highlight until the next click.
+    /// Off-screen rows pick up the new colour from `accentFill` when they next become visible.
     func setAccentColor(_ hex: String) {
         accentFill = NSColor(hex: hex) ?? .controlAccentColor
-        accentTextColor = RGB(hex: hex)?.contrastingText.nsColor ?? .white
-        outline.reloadData()
+        outline.enumerateAvailableRowViews { rowView, _ in
+            if let focusRow = rowView as? FocusHighlightRowView {
+                focusRow.accentColor = self.accentFill
+                focusRow.needsDisplay = true
+            }
+        }
     }
 
     /// Adopt a new interface scale and restyle live. Row heights and cell fonts are
@@ -441,7 +445,6 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
         if let wt = item as? WorktreeNode {
             let cell = makeWorktreeCell()
-            cell.selectedTextColor = accentTextColor
             cell.textField?.stringValue = wt.worktree.title
             // Subtitle is just the branch — the repo name is already the section header above.
             cell.subtitleLabel.stringValue = wt.worktree.branch
