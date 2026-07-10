@@ -130,6 +130,33 @@ final class PreferencesTests: XCTestCase {
         XCTAssertTrue(back.completionsEnabled)
         XCTAssertTrue(back.askedCompletionsConsent)
     }
+
+    func testShowDockBadgeDefaultsTrueForOldPrefs() throws {
+        // Prefs written before the Dock badge existed omit the key → must default true.
+        let json = #"{"defaultEditor":{"name":"Visual Studio Code","bundleID":"com.microsoft.VSCode","urlScheme":"vscode"}}"#
+        let prefs = try JSONDecoder().decode(Preferences.self, from: Data(json.utf8))
+        XCTAssertTrue(prefs.showDockBadge)
+    }
+
+    func testShowDockBadgeRoundTrips() throws {
+        var prefs = Preferences()
+        prefs.showDockBadge = false
+        let data = try JSONEncoder().encode(prefs)
+        XCTAssertFalse(try JSONDecoder().decode(Preferences.self, from: data).showDockBadge)
+    }
+
+    func testAppIconNameDefaultsNilForOldPrefs() throws {
+        let json = #"{"defaultEditor":{"name":"Visual Studio Code","bundleID":"com.microsoft.VSCode","urlScheme":"vscode"}}"#
+        let prefs = try JSONDecoder().decode(Preferences.self, from: Data(json.utf8))
+        XCTAssertNil(prefs.appIconName)
+    }
+
+    func testAppIconNameRoundTrips() throws {
+        var prefs = Preferences()
+        prefs.appIconName = "Alternate"
+        let data = try JSONEncoder().encode(prefs)
+        XCTAssertEqual(try JSONDecoder().decode(Preferences.self, from: data).appIconName, "Alternate")
+    }
 }
 
 final class KnownEditorsTests: XCTestCase {

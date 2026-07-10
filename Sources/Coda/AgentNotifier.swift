@@ -11,7 +11,7 @@ import CodaCore
 enum AgentNotifier {
     static func requestAuthorization() {
         UNUserNotificationCenter.current()
-            .requestAuthorization(options: [.alert, .sound]) { _, _ in }
+            .requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
 
     /// title = worktree display name, body = the agent's last message (plain text data field).

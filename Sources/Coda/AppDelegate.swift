@@ -72,7 +72,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private weak var toggleDiffButton: NSButton?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        applyDockIcon()
         let home = FileManager.default.homeDirectoryForCurrentUser
         // One-time settings migration from the app's former name (~/.conductor → ~/.coda).
         DataDirMigration.migrateSettings(from: home.appendingPathComponent(".conductor"),
@@ -80,6 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         store = makeStore()
         prefsStore = PreferencesStore(url: home.appendingPathComponent(".coda/preferences.json"))
         preferences = prefsStore.load()
+        applyAppIcon()
         themeStore = ThemeStore(directory: home.appendingPathComponent(".coda/themes"))
         try? themeStore.seedIfEmpty(from: bundledThemeURLs())
         activeTheme = loadActiveTheme()
@@ -313,14 +313,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    /// Set the Dock/app-switcher icon at runtime. We run as a bare `swift run`
-    /// executable with no `.app` bundle (so no `CFBundleIconFile`), so the icon must
-    /// be applied programmatically from the bundled multi-resolution `Coda.icns`.
-    private func applyDockIcon() {
-        if let url = Bundle.codaAssets.url(forResource: "Coda", withExtension: "icns", subdirectory: "Resources"),
-           let icon = NSImage(contentsOf: url) {
-            NSApp.applicationIconImage = icon
-        }
+    /// Apply the user's chosen app icon to the running Dock/app-switcher icon.
+    ///
+    /// Uses `NSApp.applicationIconImage` only — immediate, works in every layout (we run as a bare
+    /// executable with no `CFBundleIconFile` under `swift run`, so the icon is always applied
+    /// programmatically), and persists across launches via `preferences.appIconName`.
+    ///
+    /// It deliberately does NOT change the installed `.app`'s Finder icon. The only mechanism for
+    /// that — `NSWorkspace.setIcon(_:forFile:)` — writes a `com.apple.FinderInfo` xattr on the
+    /// bundle root, which `codesign`/Gatekeeper explicitly disallow ("Disallowed xattr
+    /// com.apple.FinderInfo found"): verified to invalidate the signature and get the notarized
+    /// app rejected by `spctl`. The bundle can't re-sign itself (no Developer-ID key on a user's
+    /// machine, and `codesign` refuses to sign a bundle carrying that xattr), so there is no
+    /// signature-safe way to touch the Finder icon. The Dock icon is what the user sees while the
+    /// app runs; Finder keeps the shipped icon.
+    private func applyAppIcon() {
+        guard let image = AppIconCatalog.image(forID: preferences.appIconName) else { return }
+        NSApp.applicationIconImage = image
     }
 
     /// The bundled starter `.itermcolors` shipped as app resources.
@@ -537,12 +546,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 onChangeNotifyOnNeedsYou: { [weak self] on in self?.setNotifyOnNeedsYou(on) },
                 notifyOnDone: preferences.notifyOnDone,
                 onChangeNotifyOnDone: { [weak self] on in self?.setNotifyOnDone(on) },
+                showDockBadge: preferences.showDockBadge,
+                onChangeShowDockBadge: { [weak self] on in self?.setShowDockBadge(on) },
                 shell: preferences.shell,
                 onChangeShell: { [weak self] choice in self?.setShell(choice) },
                 completionsEnabled: preferences.completionsEnabled,
                 onChangeCompletionsEnabled: { [weak self] on in self?.setCompletionsEnabled(on) },
                 accentColor: AccentColor.resolve(preferences.accentColor),
-                onChangeAccentColor: { [weak self] hex in self?.setAccentColor(hex) })
+                onChangeAccentColor: { [weak self] hex in self?.setAccentColor(hex) },
+                appIconName: preferences.appIconName,
+                onChangeAppIcon: { [weak self] id in self?.setAppIcon(id) })
             let win = NSWindow(contentViewController: tab)
             win.title = "Settings"
             win.styleMask = [.titled, .closable]
@@ -1147,6 +1160,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         sidebar.setAccentColor(hex)
     }
 
+    /// Persist the chosen app icon and apply it immediately (running Dock icon).
+    private func setAppIcon(_ id: String) {
+        preferences.appIconName = id
+        do { try prefsStore.save(preferences) } catch { presentError(error) }
+        applyAppIcon()
+    }
+
     /// Persist the "notify when an agent needs you" toggle.
     private func setNotifyOnNeedsYou(_ on: Bool) {
         preferences.notifyOnNeedsYou = on
@@ -1157,6 +1177,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private func setNotifyOnDone(_ on: Bool) {
         preferences.notifyOnDone = on
         do { try prefsStore.save(preferences) } catch { presentError(error) }
+    }
+
+    /// Persist the Dock-badge toggle and apply it immediately.
+    private func setShowDockBadge(_ on: Bool) {
+        preferences.showDockBadge = on
+        do { try prefsStore.save(preferences) } catch { presentError(error) }
+        recomputeRollupsAndRefreshUI()   // re-evaluates the badge with the new setting
     }
 
     /// Persist the terminal-completions toggle. Applies to newly-opened terminals only —
@@ -1618,9 +1645,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
         for (k, v) in rollups { agentStates[k] = v }
         sidebar.updateAgentStates(rollups)
+        updateDockBadge(rollups)
         updateNotch()
         refreshChromeForActiveSurface()
         refreshTabBar()
+    }
+
+    /// Set the Dock badge to the number of worktrees awaiting the user, or clear it when zero
+    /// (or when the preference is off). Called from `recomputeRollupsAndRefreshUI`, the single
+    /// point every agent-state change flows through. Safe with or without an `.app` bundle.
+    ///
+    /// NB: macOS silently drops `dockTile.badgeLabel` unless the user has enabled "Badge app
+    /// icon" for Coda in System Settings → Notifications — the Dock enforces that setting itself
+    /// (verified: with it off, the label is set but never rendered). That setting only exists
+    /// once the app has requested `.badge` authorization, which is why `AgentNotifier`'s request
+    /// includes `.badge`. Users who granted notifications before badge was requested keep a
+    /// cached grant without it and won't see the badge until their notification permission is
+    /// reset — a macOS limitation with no per-app reset API.
+    private func updateDockBadge(_ rollups: [String: AgentState]) {
+        let count = preferences.showDockBadge ? needsYouCount(rollups) : 0
+        NSApp.dockTile.badgeLabel = count > 0 ? String(count) : nil
     }
 
     /// Route one decoded Claude Code hook event into the same `agentStates` map the poll

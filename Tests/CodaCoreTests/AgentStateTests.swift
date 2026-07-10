@@ -106,6 +106,21 @@ final class AgentStateTests: XCTestCase {
     func testIdleOnEmptyOutput() {
         XCTAssertEqual(agentState(fromOutput: "   \n  "), .idle)
     }
+
+    func testNeedsYouCountEmpty() {
+        XCTAssertEqual(needsYouCount([:]), 0)
+    }
+
+    func testNeedsYouCountCountsOnlyNeedsYou() {
+        let rollups: [String: AgentState] = [
+            "a": .needsYou, "b": .working, "c": .needsYou, "d": .done, "e": .idle,
+        ]
+        XCTAssertEqual(needsYouCount(rollups), 2)
+    }
+
+    func testNeedsYouCountNoneNeedYou() {
+        XCTAssertEqual(needsYouCount(["a": .working, "b": .idle, "c": .done]), 0)
+    }
 }
 
 final class AgentStateRollupTests: XCTestCase {

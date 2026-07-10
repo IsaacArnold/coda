@@ -20,27 +20,34 @@ final class SettingsTabController: NSTabViewController {
          onChangeNotifyOnNeedsYou: @escaping (Bool) -> Void,
          notifyOnDone: Bool,
          onChangeNotifyOnDone: @escaping (Bool) -> Void,
+         showDockBadge: Bool,
+         onChangeShowDockBadge: @escaping (Bool) -> Void,
          shell: ShellChoice,
          onChangeShell: @escaping (ShellChoice) -> Void,
          completionsEnabled: Bool,
          onChangeCompletionsEnabled: @escaping (Bool) -> Void,
          accentColor: String,
-         onChangeAccentColor: @escaping (String) -> Void) {
+         onChangeAccentColor: @escaping (String) -> Void,
+         appIconName: String?,
+         onChangeAppIcon: @escaping (String) -> Void) {
         super.init(nibName: nil, bundle: nil)
         tabStyle = .toolbar
 
         let general = GeneralSettingsViewController(editor: editor, terminalFont: terminalFont, uiScale: uiScale,
                                                     notifyOnNeedsYou: notifyOnNeedsYou, notifyOnDone: notifyOnDone,
+                                                    showDockBadge: showDockBadge,
                                                     shell: shell, completionsEnabled: completionsEnabled,
-                                                    accentColor: accentColor)
+                                                    accentColor: accentColor, appIconName: appIconName)
         general.onChangeEditor = onChangeEditor
         general.onChangeFont = onChangeFont
         general.onChangeUIScale = onChangeUIScale
         general.onChangeNotifyOnNeedsYou = onChangeNotifyOnNeedsYou
         general.onChangeNotifyOnDone = onChangeNotifyOnDone
+        general.onChangeShowDockBadge = onChangeShowDockBadge
         general.onChangeShell = onChangeShell
         general.onChangeCompletionsEnabled = onChangeCompletionsEnabled
         general.onChangeAccentColor = onChangeAccentColor
+        general.onChangeAppIcon = onChangeAppIcon
         let generalItem = NSTabViewItem(viewController: general)
         generalItem.label = "General"
         generalItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "General")
