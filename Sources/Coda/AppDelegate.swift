@@ -103,6 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         refreshSidebar(select: allDisplayWorktrees().first?.id)
         applyChromeTheme()
         applyUIMetrics()
+        sidebar.setAccentColor(AccentColor.resolve(preferences.accentColor))
         startDiffStatsSweep()
         // Keep the notch clock current.
         notchTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
@@ -535,7 +536,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 shell: preferences.shell,
                 onChangeShell: { [weak self] choice in self?.setShell(choice) },
                 completionsEnabled: preferences.completionsEnabled,
-                onChangeCompletionsEnabled: { [weak self] on in self?.setCompletionsEnabled(on) })
+                onChangeCompletionsEnabled: { [weak self] on in self?.setCompletionsEnabled(on) },
+                accentColor: AccentColor.resolve(preferences.accentColor),
+                onChangeAccentColor: { [weak self] hex in self?.setAccentColor(hex) })
             let win = NSWindow(contentViewController: tab)
             win.title = "Settings"
             win.styleMask = [.titled, .closable]
@@ -1130,6 +1133,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         preferences.shell = shell
         do { try prefsStore.save(preferences) } catch { presentError(error) }
         // Applies to new terminals only; running shells keep their process.
+    }
+
+    /// Persist and apply the accent colour. Distinct from `sidebar.setAccentColor`, which is
+    /// view-only (used on launch to seed the view without re-saving prefs).
+    private func setAccentColor(_ hex: String) {
+        preferences.accentColor = hex
+        do { try prefsStore.save(preferences) } catch { presentError(error) }
+        sidebar.setAccentColor(hex)
     }
 
     /// Persist the "notify when an agent needs you" toggle.
