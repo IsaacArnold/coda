@@ -313,26 +313,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    /// Whether we're running from a real `.app` bundle (vs a bare `swift run` executable).
-    /// Only then does it make sense — or is it permitted — to set the bundle's Finder icon.
-    private var isRunningFromAppBundle: Bool { Bundle.main.bundlePath.hasSuffix(".app") }
-
-    /// Apply the user's chosen app icon to the running Dock/app-switcher icon and, when running
-    /// as an installed `.app`, to the bundle's Finder icon.
+    /// Apply the user's chosen app icon to the running Dock/app-switcher icon.
     ///
-    /// - Dock: `NSApp.applicationIconImage` — immediate, works in every layout (we run as a bare
-    ///   executable with no `CFBundleIconFile` under `swift run`, so the icon is always applied
-    ///   programmatically).
-    /// - Finder: `NSWorkspace.setIcon(_:forFile:)` writes a custom icon as an extended attribute
-    ///   on the `.app` directory. It does NOT modify the sealed `Contents/`, so the Developer-ID
-    ///   code signature stays valid. A Homebrew update replaces the whole `.app` and drops the
-    ///   xattr; because this runs on every launch, the first post-update launch re-applies it.
+    /// Uses `NSApp.applicationIconImage` only — immediate, works in every layout (we run as a bare
+    /// executable with no `CFBundleIconFile` under `swift run`, so the icon is always applied
+    /// programmatically), and persists across launches via `preferences.appIconName`.
+    ///
+    /// It deliberately does NOT change the installed `.app`'s Finder icon. The only mechanism for
+    /// that — `NSWorkspace.setIcon(_:forFile:)` — writes a `com.apple.FinderInfo` xattr on the
+    /// bundle root, which `codesign`/Gatekeeper explicitly disallow ("Disallowed xattr
+    /// com.apple.FinderInfo found"): verified to invalidate the signature and get the notarized
+    /// app rejected by `spctl`. The bundle can't re-sign itself (no Developer-ID key on a user's
+    /// machine, and `codesign` refuses to sign a bundle carrying that xattr), so there is no
+    /// signature-safe way to touch the Finder icon. The Dock icon is what the user sees while the
+    /// app runs; Finder keeps the shipped icon.
     private func applyAppIcon() {
         guard let image = AppIconCatalog.image(forID: preferences.appIconName) else { return }
         NSApp.applicationIconImage = image
-        if isRunningFromAppBundle {
-            NSWorkspace.shared.setIcon(image, forFile: Bundle.main.bundlePath, options: [])
-        }
     }
 
     /// The bundled starter `.itermcolors` shipped as app resources.

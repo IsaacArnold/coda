@@ -201,7 +201,7 @@ final class GeneralSettingsViewController: NSViewController {
         accentHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         accentHint.textColor = .secondaryLabelColor
 
-        // App icon — a gallery of bundled icons. Selecting one changes the Dock + Finder icon.
+        // App icon — a gallery of bundled icons. Selecting one changes the running Dock icon.
         let appIconTitle = NSTextField(labelWithString: "App Icon")
         appIconTitle.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
         appIconRow.orientation = .horizontal
@@ -223,7 +223,7 @@ final class GeneralSettingsViewController: NSViewController {
             appIconRow.addArrangedSubview(button)
             return button
         }
-        let appIconHint = NSTextField(labelWithString: "Changes the Dock and Finder icon. Applies immediately.")
+        let appIconHint = NSTextField(labelWithString: "Changes the Dock icon. Applies immediately.")
         appIconHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         appIconHint.textColor = .secondaryLabelColor
 
