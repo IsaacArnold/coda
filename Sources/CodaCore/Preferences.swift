@@ -102,11 +102,16 @@ public struct Preferences: Codable, Equatable {
     /// Defaults to `false`; older prefs files without the key decode to `false` via the custom
     /// decoder below, so existing users see the prompt exactly once.
     public var askedCompletionsConsent: Bool
+    /// The app accent colour (hex) for the sidebar's focused-worktree highlight. nil → the
+    /// app default (`AccentColor.defaultHex`). Older prefs files without the key decode to nil
+    /// via the custom decoder below.
+    public var accentColor: String?
     public init(defaultEditor: Editor = .vsCode, activeTheme: String? = nil,
                 terminalFont: TerminalFontPref? = nil, uiScale: UIScale = .medium,
                 declinedHookInstall: Bool = false, notifyOnNeedsYou: Bool = true,
                 notifyOnDone: Bool = true, shell: ShellChoice = .automatic,
-                completionsEnabled: Bool = false, askedCompletionsConsent: Bool = false) {
+                completionsEnabled: Bool = false, askedCompletionsConsent: Bool = false,
+                accentColor: String? = nil) {
         self.defaultEditor = defaultEditor
         self.activeTheme = activeTheme
         self.terminalFont = terminalFont
@@ -117,6 +122,7 @@ public struct Preferences: Codable, Equatable {
         self.shell = shell
         self.completionsEnabled = completionsEnabled
         self.askedCompletionsConsent = askedCompletionsConsent
+        self.accentColor = accentColor
     }
 
     // Synthesized Codable would make `uiScale`/`declinedHookInstall`/`notifyOnNeedsYou`/
@@ -126,6 +132,7 @@ public struct Preferences: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case defaultEditor, activeTheme, terminalFont, uiScale, declinedHookInstall
         case notifyOnNeedsYou, notifyOnDone, shell, completionsEnabled, askedCompletionsConsent
+        case accentColor
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -139,6 +146,7 @@ public struct Preferences: Codable, Equatable {
         self.shell = try c.decodeIfPresent(ShellChoice.self, forKey: .shell) ?? .automatic
         self.completionsEnabled = try c.decodeIfPresent(Bool.self, forKey: .completionsEnabled) ?? false
         self.askedCompletionsConsent = try c.decodeIfPresent(Bool.self, forKey: .askedCompletionsConsent) ?? false
+        self.accentColor = try c.decodeIfPresent(String.self, forKey: .accentColor)
     }
 }
 

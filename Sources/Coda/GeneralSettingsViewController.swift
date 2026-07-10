@@ -31,6 +31,10 @@ final class GeneralSettingsViewController: NSViewController {
     private let completionsCheckbox = NSButton(checkboxWithTitle: "Show command completions in the terminal",
                                                target: nil, action: nil)
 
+    private var accentColor: String
+    private let accentSwatchRow = NSStackView()
+    private var accentButtons: [NSButton] = []
+
     var onChangeEditor: ((Editor) -> Void)?
     var onChangeFont: ((TerminalFontPref) -> Void)?
     var onChangeUIScale: ((UIScale) -> Void)?
@@ -38,12 +42,13 @@ final class GeneralSettingsViewController: NSViewController {
     var onChangeNotifyOnDone: ((Bool) -> Void)?
     var onChangeShell: ((ShellChoice) -> Void)?
     var onChangeCompletionsEnabled: ((Bool) -> Void)?
+    var onChangeAccentColor: ((String) -> Void)?
 
     private static let otherTitle = "Other…"
 
     init(editor: Editor, terminalFont: NSFont, uiScale: UIScale,
          notifyOnNeedsYou: Bool, notifyOnDone: Bool, shell: ShellChoice,
-         completionsEnabled: Bool) {
+         completionsEnabled: Bool, accentColor: String) {
         self.editor = editor
         self.terminalFont = terminalFont
         self.uiScale = uiScale
@@ -51,6 +56,7 @@ final class GeneralSettingsViewController: NSViewController {
         self.notifyOnDone = notifyOnDone
         self.shell = shell
         self.completionsEnabled = completionsEnabled
+        self.accentColor = accentColor
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -154,6 +160,31 @@ final class GeneralSettingsViewController: NSViewController {
         completionsHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         completionsHint.textColor = .secondaryLabelColor
 
+        // Accent colour — the sidebar's focused-worktree highlight. Curated swatches only.
+        let accentTitle = NSTextField(labelWithString: "Accent Colour")
+        accentTitle.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        accentSwatchRow.orientation = .horizontal
+        accentSwatchRow.spacing = 8
+        accentButtons = AccentColor.swatches.enumerated().map { index, hex in
+            let button = NSButton()
+            button.title = ""
+            button.isBordered = false
+            button.image = Self.circleImage(NSColor(hex: hex) ?? .gray, diameter: 20)
+            button.imageScaling = .scaleNone
+            button.target = self
+            button.action = #selector(accentSwatchClicked(_:))
+            button.tag = index
+            button.wantsLayer = true
+            button.layer?.cornerRadius = 13
+            button.widthAnchor.constraint(equalToConstant: 26).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 26).isActive = true
+            accentSwatchRow.addArrangedSubview(button)
+            return button
+        }
+        let accentHint = NSTextField(labelWithString: "Colour of the selected worktree/branch in the sidebar.")
+        accentHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        accentHint.textColor = .secondaryLabelColor
+
         let stack = NSStackView(views: [
             title, row, hint,
             fontTitle, fontRow, fontHint,
@@ -161,6 +192,7 @@ final class GeneralSettingsViewController: NSViewController {
             notifyTitle, notifyStack,
             shellTitle, shellRow, shellHint,
             completionsTitle, completionsCheckbox, completionsHint,
+            accentTitle, accentSwatchRow, accentHint,
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -176,6 +208,7 @@ final class GeneralSettingsViewController: NSViewController {
             container.widthAnchor.constraint(equalToConstant: 420),
         ])
         view = container
+        updateAccentSelection()
     }
 
     private func rebuildPopup() {
@@ -299,6 +332,34 @@ final class GeneralSettingsViewController: NSViewController {
     @objc private func completionsEnabledChanged() {
         completionsEnabled = completionsCheckbox.state == .on
         onChangeCompletionsEnabled?(completionsEnabled)
+    }
+
+    @objc private func accentSwatchClicked(_ sender: NSButton) {
+        let swatches = AccentColor.swatches
+        guard swatches.indices.contains(sender.tag) else { return }
+        accentColor = swatches[sender.tag]
+        updateAccentSelection()
+        onChangeAccentColor?(accentColor)
+    }
+
+    /// Ring the button whose swatch matches the active accent.
+    private func updateAccentSelection() {
+        for (index, button) in accentButtons.enumerated() {
+            let isSelected = AccentColor.swatches[index] == accentColor
+            button.layer?.borderWidth = isSelected ? 2 : 0
+            button.layer?.borderColor = isSelected ? NSColor.labelColor.cgColor : nil
+        }
+    }
+
+    /// A filled circle image for a swatch button.
+    private static func circleImage(_ color: NSColor, diameter: CGFloat) -> NSImage {
+        let size = NSSize(width: diameter, height: diameter)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        color.setFill()
+        NSBezierPath(ovalIn: NSRect(origin: .zero, size: size)).fill()
+        image.unlockFocus()
+        return image
     }
 
     private func pickOtherApp() {

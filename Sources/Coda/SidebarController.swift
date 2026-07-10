@@ -75,6 +75,50 @@ private final class WorktreeCellView: NSTableCellView {
     func applyIdentityColor(_ identity: NSColor?, repoColor: NSColor?, glyphTint: NSColor?) {
         imageView?.contentTintColor = identity ?? repoColor ?? glyphTint ?? .secondaryLabelColor
     }
+
+    /// The focused row is drawn with a translucent "glass" fill (see `FocusHighlightRowView`),
+    /// so its background stays close to the sidebar's and the title/subtitle keep their normal
+    /// theme-adaptive colours. Pin them here to defeat NSTableCellView's automatic
+    /// white-on-emphasized inversion of the title, which would be wrong in light mode and
+    /// unnecessary over the translucent fill. The trailing +/- stats keep their green/red.
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet {
+            textField?.textColor = .labelColor
+            subtitleLabel.textColor = .secondaryLabelColor
+        }
+    }
+}
+
+/// The sidebar keeps a visible, accent-coloured fill on the selected worktree/branch even when
+/// the outline view isn't first responder (focus normally lives in the terminal). A stock
+/// source-list row dims its selection to muted grey when it loses first-responder status, and
+/// its fill colour is the fixed system accent — so we force emphasis (keeps the fill vivid and
+/// drives the cell's `.emphasized` backgroundStyle for contrast-aware text) and draw the fill
+/// ourselves in the chosen accent colour.
+private final class FocusHighlightRowView: NSTableRowView {
+    /// The fill colour for the selected row (the app accent). Set by the sidebar per row.
+    var accentColor: NSColor = NSColor(hex: AccentColor.defaultHex) ?? .controlAccentColor
+
+    override var isEmphasized: Bool {
+        get { true }
+        set { }
+    }
+
+    override func drawSelection(in dirtyRect: NSRect) {
+        guard isSelected else { return }
+        let rect = bounds.insetBy(dx: 4, dy: 1)
+        let path = NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5)
+        // A translucent "glass" fill — the accent tints the row but the sidebar shows through,
+        // so the highlight reads as a frosted panel rather than a solid block. A slightly
+        // stronger hairline rim gives the panel a defined, glassy edge. Because the row stays
+        // close to the sidebar's own colour, the cell keeps its normal theme-adaptive text
+        // colours (no black/white inversion — see WorktreeCellView.backgroundStyle).
+        accentColor.withAlphaComponent(0.22).setFill()
+        path.fill()
+        accentColor.withAlphaComponent(0.5).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+    }
 }
 
 /// A source-list sidebar: repositories as header rows with their worktrees nested
@@ -125,6 +169,24 @@ final class SidebarController: NSViewController {
         let changed = identityOverrides[id] != color
         if let color { identityOverrides[id] = color } else { identityOverrides[id] = nil }
         if changed { outline.reloadData() }
+    }
+
+    /// The app accent, used for the translucent fill on the focused worktree/branch row. Seeded
+    /// to the default; AppDelegate pushes the user's choice via `setAccentColor(_:)`.
+    private var accentFill: NSColor = NSColor(hex: AccentColor.defaultHex) ?? .controlAccentColor
+
+    /// Set the accent colour for the focused-row highlight and repaint live. Pushes the colour
+    /// onto the visible row views and redraws them in place — deliberately NOT `reloadData()`,
+    /// which drops the outline selection and would erase the highlight until the next click.
+    /// Off-screen rows pick up the new colour from `accentFill` when they next become visible.
+    func setAccentColor(_ hex: String) {
+        accentFill = NSColor(hex: hex) ?? .controlAccentColor
+        outline.enumerateAvailableRowViews { rowView, _ in
+            if let focusRow = rowView as? FocusHighlightRowView {
+                focusRow.accentColor = self.accentFill
+                focusRow.needsDisplay = true
+            }
+        }
     }
 
     /// Adopt a new interface scale and restyle live. Row heights and cell fonts are
@@ -238,10 +300,22 @@ final class SidebarController: NSViewController {
         if let selectedItem {
             let row = outline.row(forItem: selectedItem)
             if row >= 0 {
+                // The first `selectRowIndexes` in the same runloop turn as `reloadData()` +
+                // `expandItem(...)` is a silent no-op — the outline hasn't committed its new row
+                // set yet, so a single call (sync OR deferred) leaves `selectedRow` at -1 and the
+                // focused-row highlight never paints on launch (clicking already worked via the
+                // mouse-selection path). Priming with a sync call and re-asserting on the next
+                // turn is what makes the selection actually stick (verified). `isReloading` spans
+                // both so `outlineViewSelectionDidChange` treats it as a reload, not a user click,
+                // and doesn't steal terminal focus.
                 isReloading = true
                 outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-                isReloading = false
-                outline.scrollRowToVisible(row)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+                    self.isReloading = false
+                    self.outline.scrollRowToVisible(row)
+                }
             }
         }
     }
@@ -348,6 +422,16 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         item is WorktreeNode ? metrics.length(38) : metrics.length(24)
     }
 
+    /// Use a row view that stays emphasized so the focused worktree keeps its vivid accent fill
+    /// even when the sidebar isn't first responder (focus normally lives in the terminal).
+    func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
+        let id = NSUserInterfaceItemIdentifier("focusRow")
+        let row = (outline.makeView(withIdentifier: id, owner: self) as? FocusHighlightRowView)
+            ?? { let r = FocusHighlightRowView(); r.identifier = id; return r }()
+        row.accentColor = accentFill
+        return row
+    }
+
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         if let repo = item as? RepoNode {
             // Repo rows are plain section headers, à la Supacode; tinted by the repo's color.
@@ -396,14 +480,25 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
     func updateAgentStates(_ states: [String: AgentState]) {
         guard states != agentStates else { return }
         agentStates = states
-        outline.reloadData()
+        reloadRowsPreservingSelection()
+    }
+
+    /// Refresh every visible row's cell views in place, WITHOUT the full `reloadData()` — a full
+    /// reload silently drops the outline's selection (verified: `selectedRow` 1→-1), which would
+    /// erase the focused-worktree highlight on every background sweep. Reloading by row index
+    /// updates the badges / diff figures while leaving the selection (and thus the highlight)
+    /// intact.
+    private func reloadRowsPreservingSelection() {
+        guard outline.numberOfRows > 0 else { return }
+        outline.reloadData(forRowIndexes: IndexSet(integersIn: 0..<outline.numberOfRows),
+                           columnIndexes: IndexSet(integer: 0))
     }
 
     /// Live +/- figures, keyed by worktree id — fed by the launch sweep and kept fresh
     /// on the same triggers as the diff pane (hook events, HEAD changes, activation).
     func updateDiffStats(_ stats: [String: DiffStats]) {
         diffStats = stats
-        outline.reloadData()
+        reloadRowsPreservingSelection()
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
