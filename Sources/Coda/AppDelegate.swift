@@ -1654,6 +1654,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// Set the Dock badge to the number of worktrees awaiting the user, or clear it when zero
     /// (or when the preference is off). Called from `recomputeRollupsAndRefreshUI`, the single
     /// point every agent-state change flows through. Safe with or without an `.app` bundle.
+    ///
+    /// NB: macOS silently drops `dockTile.badgeLabel` unless the user has enabled "Badge app
+    /// icon" for Coda in System Settings → Notifications — the Dock enforces that setting itself
+    /// (verified: with it off, the label is set but never rendered). That setting only exists
+    /// once the app has requested `.badge` authorization, which is why `AgentNotifier`'s request
+    /// includes `.badge`. Users who granted notifications before badge was requested keep a
+    /// cached grant without it and won't see the badge until their notification permission is
+    /// reset — a macOS limitation with no per-app reset API.
     private func updateDockBadge(_ rollups: [String: AgentState]) {
         let count = preferences.showDockBadge ? needsYouCount(rollups) : 0
         NSApp.dockTile.badgeLabel = count > 0 ? String(count) : nil
