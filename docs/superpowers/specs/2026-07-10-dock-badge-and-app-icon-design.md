@@ -12,6 +12,19 @@ Two independent features for Coda:
 They share nothing except living in the same `AppDelegate`/settings surfaces, so
 they can be built and reviewed independently.
 
+> **Correction (verification finding, 2026-07-10):** The Finder-icon half of
+> Feature 2 below was **dropped during implementation**. This spec claimed
+> `NSWorkspace.setIcon(_:forFile:)` sets the Finder icon via an xattr without
+> touching the sealed `Contents/`, leaving the code signature valid. That is
+> false: it writes `com.apple.FinderInfo` on the bundle root, which
+> `codesign`/Gatekeeper disallow — verified on the built `.app`, where after the
+> write `codesign --verify --strict` fails and `spctl` **rejects** the app (a
+> notarized build would risk "damaged app" errors on relaunch/update). There is
+> no signature-safe way to give a signed `.app` a custom Finder icon. The
+> shipped picker therefore changes **only the running Dock/app-switcher icon**
+> (`NSApp.applicationIconImage`, persisted across launches); Finder keeps the
+> shipped icon. Everything else below is as-built.
+
 ---
 
 ## Feature 1 — Dock badge (count of worktrees needing input)
