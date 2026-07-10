@@ -39,6 +39,11 @@ final class GeneralSettingsViewController: NSViewController {
     private let accentSwatchRow = NSStackView()
     private var accentButtons: [NSButton] = []
 
+    private var appIconName: String?
+    private let appIconRow = NSStackView()
+    private var appIconButtons: [NSButton] = []
+    private let appIcons = AppIconCatalog.all()
+
     var onChangeEditor: ((Editor) -> Void)?
     var onChangeFont: ((TerminalFontPref) -> Void)?
     var onChangeUIScale: ((UIScale) -> Void)?
@@ -48,12 +53,13 @@ final class GeneralSettingsViewController: NSViewController {
     var onChangeShell: ((ShellChoice) -> Void)?
     var onChangeCompletionsEnabled: ((Bool) -> Void)?
     var onChangeAccentColor: ((String) -> Void)?
+    var onChangeAppIcon: ((String) -> Void)?
 
     private static let otherTitle = "Other…"
 
     init(editor: Editor, terminalFont: NSFont, uiScale: UIScale,
          notifyOnNeedsYou: Bool, notifyOnDone: Bool, showDockBadge: Bool, shell: ShellChoice,
-         completionsEnabled: Bool, accentColor: String) {
+         completionsEnabled: Bool, accentColor: String, appIconName: String?) {
         self.editor = editor
         self.terminalFont = terminalFont
         self.uiScale = uiScale
@@ -63,6 +69,7 @@ final class GeneralSettingsViewController: NSViewController {
         self.shell = shell
         self.completionsEnabled = completionsEnabled
         self.accentColor = accentColor
+        self.appIconName = appIconName
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -194,6 +201,32 @@ final class GeneralSettingsViewController: NSViewController {
         accentHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         accentHint.textColor = .secondaryLabelColor
 
+        // App icon — a gallery of bundled icons. Selecting one changes the Dock + Finder icon.
+        let appIconTitle = NSTextField(labelWithString: "App Icon")
+        appIconTitle.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        appIconRow.orientation = .horizontal
+        appIconRow.spacing = 10
+        appIconButtons = appIcons.enumerated().map { index, icon in
+            let button = NSButton()
+            button.title = ""
+            button.isBordered = false
+            button.image = Self.iconThumbnail(icon.image, side: 48)
+            button.imageScaling = .scaleProportionallyUpOrDown
+            button.toolTip = icon.displayName
+            button.target = self
+            button.action = #selector(appIconClicked(_:))
+            button.tag = index
+            button.wantsLayer = true
+            button.layer?.cornerRadius = 8
+            button.widthAnchor.constraint(equalToConstant: 56).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 56).isActive = true
+            appIconRow.addArrangedSubview(button)
+            return button
+        }
+        let appIconHint = NSTextField(labelWithString: "Changes the Dock and Finder icon. Applies immediately.")
+        appIconHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        appIconHint.textColor = .secondaryLabelColor
+
         let stack = NSStackView(views: [
             title, row, hint,
             fontTitle, fontRow, fontHint,
@@ -202,6 +235,7 @@ final class GeneralSettingsViewController: NSViewController {
             shellTitle, shellRow, shellHint,
             completionsTitle, completionsCheckbox, completionsHint,
             accentTitle, accentSwatchRow, accentHint,
+            appIconTitle, appIconRow, appIconHint,
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -218,6 +252,7 @@ final class GeneralSettingsViewController: NSViewController {
         ])
         view = container
         updateAccentSelection()
+        updateAppIconSelection()
     }
 
     private func rebuildPopup() {
@@ -374,6 +409,31 @@ final class GeneralSettingsViewController: NSViewController {
         NSBezierPath(ovalIn: NSRect(origin: .zero, size: size)).fill()
         image.unlockFocus()
         return image
+    }
+
+    @objc private func appIconClicked(_ sender: NSButton) {
+        guard appIcons.indices.contains(sender.tag) else { return }
+        appIconName = appIcons[sender.tag].id
+        updateAppIconSelection()
+        onChangeAppIcon?(appIcons[sender.tag].id)
+    }
+
+    /// Ring the button whose icon matches the active choice (nil → the "Default" entry).
+    private func updateAppIconSelection() {
+        let selectedID = appIconName ?? AppIconCatalog.defaultID
+        for (index, button) in appIconButtons.enumerated() {
+            let isSelected = appIcons[index].id == selectedID
+            button.layer?.borderWidth = isSelected ? 2 : 0
+            button.layer?.borderColor = isSelected ? NSColor.controlAccentColor.cgColor : nil
+        }
+    }
+
+    /// A square, correctly-sized thumbnail for a swatch button (`.icns` images are multi-rep;
+    /// setting an explicit size makes AppKit pick a crisp representation).
+    private static func iconThumbnail(_ image: NSImage, side: CGFloat) -> NSImage {
+        let copy = image.copy() as! NSImage
+        copy.size = NSSize(width: side, height: side)
+        return copy
     }
 
     private func pickOtherApp() {

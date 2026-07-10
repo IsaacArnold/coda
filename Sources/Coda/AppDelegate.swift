@@ -72,7 +72,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private weak var toggleDiffButton: NSButton?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        applyDockIcon()
         let home = FileManager.default.homeDirectoryForCurrentUser
         // One-time settings migration from the app's former name (~/.conductor → ~/.coda).
         DataDirMigration.migrateSettings(from: home.appendingPathComponent(".conductor"),
@@ -80,6 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         store = makeStore()
         prefsStore = PreferencesStore(url: home.appendingPathComponent(".coda/preferences.json"))
         preferences = prefsStore.load()
+        applyAppIcon()
         themeStore = ThemeStore(directory: home.appendingPathComponent(".coda/themes"))
         try? themeStore.seedIfEmpty(from: bundledThemeURLs())
         activeTheme = loadActiveTheme()
@@ -313,13 +313,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    /// Set the Dock/app-switcher icon at runtime. We run as a bare `swift run`
-    /// executable with no `.app` bundle (so no `CFBundleIconFile`), so the icon must
-    /// be applied programmatically from the bundled multi-resolution `Coda.icns`.
-    private func applyDockIcon() {
-        if let url = Bundle.codaAssets.url(forResource: "Coda", withExtension: "icns", subdirectory: "Resources"),
-           let icon = NSImage(contentsOf: url) {
-            NSApp.applicationIconImage = icon
+    /// Whether we're running from a real `.app` bundle (vs a bare `swift run` executable).
+    /// Only then does it make sense — or is it permitted — to set the bundle's Finder icon.
+    private var isRunningFromAppBundle: Bool { Bundle.main.bundlePath.hasSuffix(".app") }
+
+    /// Apply the user's chosen app icon to the running Dock/app-switcher icon and, when running
+    /// as an installed `.app`, to the bundle's Finder icon.
+    ///
+    /// - Dock: `NSApp.applicationIconImage` — immediate, works in every layout (we run as a bare
+    ///   executable with no `CFBundleIconFile` under `swift run`, so the icon is always applied
+    ///   programmatically).
+    /// - Finder: `NSWorkspace.setIcon(_:forFile:)` writes a custom icon as an extended attribute
+    ///   on the `.app` directory. It does NOT modify the sealed `Contents/`, so the Developer-ID
+    ///   code signature stays valid. A Homebrew update replaces the whole `.app` and drops the
+    ///   xattr; because this runs on every launch, the first post-update launch re-applies it.
+    private func applyAppIcon() {
+        guard let image = AppIconCatalog.image(forID: preferences.appIconName) else { return }
+        NSApp.applicationIconImage = image
+        if isRunningFromAppBundle {
+            NSWorkspace.shared.setIcon(image, forFile: Bundle.main.bundlePath, options: [])
         }
     }
 
@@ -544,7 +556,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 completionsEnabled: preferences.completionsEnabled,
                 onChangeCompletionsEnabled: { [weak self] on in self?.setCompletionsEnabled(on) },
                 accentColor: AccentColor.resolve(preferences.accentColor),
-                onChangeAccentColor: { [weak self] hex in self?.setAccentColor(hex) })
+                onChangeAccentColor: { [weak self] hex in self?.setAccentColor(hex) },
+                appIconName: preferences.appIconName,
+                onChangeAppIcon: { [weak self] id in self?.setAppIcon(id) })
             let win = NSWindow(contentViewController: tab)
             win.title = "Settings"
             win.styleMask = [.titled, .closable]
@@ -1147,6 +1161,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         preferences.accentColor = hex
         do { try prefsStore.save(preferences) } catch { presentError(error) }
         sidebar.setAccentColor(hex)
+    }
+
+    /// Persist the chosen app icon and apply it immediately (Dock + Finder).
+    private func setAppIcon(_ id: String) {
+        preferences.appIconName = id
+        do { try prefsStore.save(preferences) } catch { presentError(error) }
+        applyAppIcon()
     }
 
     /// Persist the "notify when an agent needs you" toggle.

@@ -27,7 +27,9 @@ final class SettingsTabController: NSTabViewController {
          completionsEnabled: Bool,
          onChangeCompletionsEnabled: @escaping (Bool) -> Void,
          accentColor: String,
-         onChangeAccentColor: @escaping (String) -> Void) {
+         onChangeAccentColor: @escaping (String) -> Void,
+         appIconName: String?,
+         onChangeAppIcon: @escaping (String) -> Void) {
         super.init(nibName: nil, bundle: nil)
         tabStyle = .toolbar
 
@@ -35,7 +37,7 @@ final class SettingsTabController: NSTabViewController {
                                                     notifyOnNeedsYou: notifyOnNeedsYou, notifyOnDone: notifyOnDone,
                                                     showDockBadge: showDockBadge,
                                                     shell: shell, completionsEnabled: completionsEnabled,
-                                                    accentColor: accentColor)
+                                                    accentColor: accentColor, appIconName: appIconName)
         general.onChangeEditor = onChangeEditor
         general.onChangeFont = onChangeFont
         general.onChangeUIScale = onChangeUIScale
@@ -45,6 +47,7 @@ final class SettingsTabController: NSTabViewController {
         general.onChangeShell = onChangeShell
         general.onChangeCompletionsEnabled = onChangeCompletionsEnabled
         general.onChangeAccentColor = onChangeAccentColor
+        general.onChangeAppIcon = onChangeAppIcon
         let generalItem = NSTabViewItem(viewController: general)
         generalItem.label = "General"
         generalItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "General")
