@@ -537,6 +537,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 onChangeNotifyOnNeedsYou: { [weak self] on in self?.setNotifyOnNeedsYou(on) },
                 notifyOnDone: preferences.notifyOnDone,
                 onChangeNotifyOnDone: { [weak self] on in self?.setNotifyOnDone(on) },
+                showDockBadge: preferences.showDockBadge,
+                onChangeShowDockBadge: { [weak self] on in self?.setShowDockBadge(on) },
                 shell: preferences.shell,
                 onChangeShell: { [weak self] choice in self?.setShell(choice) },
                 completionsEnabled: preferences.completionsEnabled,
@@ -1159,6 +1161,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         do { try prefsStore.save(preferences) } catch { presentError(error) }
     }
 
+    /// Persist the Dock-badge toggle and apply it immediately.
+    private func setShowDockBadge(_ on: Bool) {
+        preferences.showDockBadge = on
+        do { try prefsStore.save(preferences) } catch { presentError(error) }
+        recomputeRollupsAndRefreshUI()   // re-evaluates the badge with the new setting
+    }
+
     /// Persist the terminal-completions toggle. Applies to newly-opened terminals only —
     /// the ZDOTDIR wrapper is fixed at PTY spawn, so running terminals are unaffected.
     private func setCompletionsEnabled(_ on: Bool) {
@@ -1618,9 +1627,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
         for (k, v) in rollups { agentStates[k] = v }
         sidebar.updateAgentStates(rollups)
+        updateDockBadge(rollups)
         updateNotch()
         refreshChromeForActiveSurface()
         refreshTabBar()
+    }
+
+    /// Set the Dock badge to the number of worktrees awaiting the user, or clear it when zero
+    /// (or when the preference is off). Called from `recomputeRollupsAndRefreshUI`, the single
+    /// point every agent-state change flows through. Safe with or without an `.app` bundle.
+    private func updateDockBadge(_ rollups: [String: AgentState]) {
+        let count = preferences.showDockBadge ? needsYouCount(rollups) : 0
+        NSApp.dockTile.badgeLabel = count > 0 ? String(count) : nil
     }
 
     /// Route one decoded Claude Code hook event into the same `agentStates` map the poll

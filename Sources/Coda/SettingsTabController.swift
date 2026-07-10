@@ -20,6 +20,8 @@ final class SettingsTabController: NSTabViewController {
          onChangeNotifyOnNeedsYou: @escaping (Bool) -> Void,
          notifyOnDone: Bool,
          onChangeNotifyOnDone: @escaping (Bool) -> Void,
+         showDockBadge: Bool,
+         onChangeShowDockBadge: @escaping (Bool) -> Void,
          shell: ShellChoice,
          onChangeShell: @escaping (ShellChoice) -> Void,
          completionsEnabled: Bool,
@@ -31,6 +33,7 @@ final class SettingsTabController: NSTabViewController {
 
         let general = GeneralSettingsViewController(editor: editor, terminalFont: terminalFont, uiScale: uiScale,
                                                     notifyOnNeedsYou: notifyOnNeedsYou, notifyOnDone: notifyOnDone,
+                                                    showDockBadge: showDockBadge,
                                                     shell: shell, completionsEnabled: completionsEnabled,
                                                     accentColor: accentColor)
         general.onChangeEditor = onChangeEditor
@@ -38,6 +41,7 @@ final class SettingsTabController: NSTabViewController {
         general.onChangeUIScale = onChangeUIScale
         general.onChangeNotifyOnNeedsYou = onChangeNotifyOnNeedsYou
         general.onChangeNotifyOnDone = onChangeNotifyOnDone
+        general.onChangeShowDockBadge = onChangeShowDockBadge
         general.onChangeShell = onChangeShell
         general.onChangeCompletionsEnabled = onChangeCompletionsEnabled
         general.onChangeAccentColor = onChangeAccentColor

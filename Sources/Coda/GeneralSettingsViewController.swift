@@ -27,6 +27,10 @@ final class GeneralSettingsViewController: NSViewController {
     private let notifyDoneCheckbox = NSButton(checkboxWithTitle: "Notify when an agent finishes",
                                               target: nil, action: nil)
 
+    private var showDockBadge: Bool
+    private let showDockBadgeCheckbox = NSButton(checkboxWithTitle: "Show a Dock badge when agents need you",
+                                                 target: nil, action: nil)
+
     private var completionsEnabled: Bool
     private let completionsCheckbox = NSButton(checkboxWithTitle: "Show command completions in the terminal",
                                                target: nil, action: nil)
@@ -40,6 +44,7 @@ final class GeneralSettingsViewController: NSViewController {
     var onChangeUIScale: ((UIScale) -> Void)?
     var onChangeNotifyOnNeedsYou: ((Bool) -> Void)?
     var onChangeNotifyOnDone: ((Bool) -> Void)?
+    var onChangeShowDockBadge: ((Bool) -> Void)?
     var onChangeShell: ((ShellChoice) -> Void)?
     var onChangeCompletionsEnabled: ((Bool) -> Void)?
     var onChangeAccentColor: ((String) -> Void)?
@@ -47,13 +52,14 @@ final class GeneralSettingsViewController: NSViewController {
     private static let otherTitle = "Other…"
 
     init(editor: Editor, terminalFont: NSFont, uiScale: UIScale,
-         notifyOnNeedsYou: Bool, notifyOnDone: Bool, shell: ShellChoice,
+         notifyOnNeedsYou: Bool, notifyOnDone: Bool, showDockBadge: Bool, shell: ShellChoice,
          completionsEnabled: Bool, accentColor: String) {
         self.editor = editor
         self.terminalFont = terminalFont
         self.uiScale = uiScale
         self.notifyOnNeedsYou = notifyOnNeedsYou
         self.notifyOnDone = notifyOnDone
+        self.showDockBadge = showDockBadge
         self.shell = shell
         self.completionsEnabled = completionsEnabled
         self.accentColor = accentColor
@@ -130,7 +136,10 @@ final class GeneralSettingsViewController: NSViewController {
         notifyDoneCheckbox.state = notifyOnDone ? .on : .off
         notifyDoneCheckbox.target = self
         notifyDoneCheckbox.action = #selector(notifyDoneChanged)
-        let notifyStack = NSStackView(views: [notifyNeedsYouCheckbox, notifyDoneCheckbox])
+        showDockBadgeCheckbox.state = showDockBadge ? .on : .off
+        showDockBadgeCheckbox.target = self
+        showDockBadgeCheckbox.action = #selector(showDockBadgeChanged)
+        let notifyStack = NSStackView(views: [notifyNeedsYouCheckbox, notifyDoneCheckbox, showDockBadgeCheckbox])
         notifyStack.orientation = .vertical
         notifyStack.alignment = .leading
         notifyStack.spacing = 6
@@ -327,6 +336,11 @@ final class GeneralSettingsViewController: NSViewController {
     @objc private func notifyDoneChanged() {
         notifyOnDone = notifyDoneCheckbox.state == .on
         onChangeNotifyOnDone?(notifyOnDone)
+    }
+
+    @objc private func showDockBadgeChanged() {
+        showDockBadge = showDockBadgeCheckbox.state == .on
+        onChangeShowDockBadge?(showDockBadge)
     }
 
     @objc private func completionsEnabledChanged() {
