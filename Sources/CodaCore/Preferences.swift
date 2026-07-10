@@ -106,12 +106,16 @@ public struct Preferences: Codable, Equatable {
     /// app default (`AccentColor.defaultHex`). Older prefs files without the key decode to nil
     /// via the custom decoder below.
     public var accentColor: String?
+    /// Whether the Dock icon shows a badge with the count of worktrees that need the user's
+    /// input. Defaults to `true`; older prefs files without the key decode to `true` via the
+    /// custom decoder below.
+    public var showDockBadge: Bool
     public init(defaultEditor: Editor = .vsCode, activeTheme: String? = nil,
                 terminalFont: TerminalFontPref? = nil, uiScale: UIScale = .medium,
                 declinedHookInstall: Bool = false, notifyOnNeedsYou: Bool = true,
                 notifyOnDone: Bool = true, shell: ShellChoice = .automatic,
                 completionsEnabled: Bool = false, askedCompletionsConsent: Bool = false,
-                accentColor: String? = nil) {
+                accentColor: String? = nil, showDockBadge: Bool = true) {
         self.defaultEditor = defaultEditor
         self.activeTheme = activeTheme
         self.terminalFont = terminalFont
@@ -123,6 +127,7 @@ public struct Preferences: Codable, Equatable {
         self.completionsEnabled = completionsEnabled
         self.askedCompletionsConsent = askedCompletionsConsent
         self.accentColor = accentColor
+        self.showDockBadge = showDockBadge
     }
 
     // Synthesized Codable would make `uiScale`/`declinedHookInstall`/`notifyOnNeedsYou`/
@@ -132,7 +137,7 @@ public struct Preferences: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case defaultEditor, activeTheme, terminalFont, uiScale, declinedHookInstall
         case notifyOnNeedsYou, notifyOnDone, shell, completionsEnabled, askedCompletionsConsent
-        case accentColor
+        case accentColor, showDockBadge
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -147,6 +152,7 @@ public struct Preferences: Codable, Equatable {
         self.completionsEnabled = try c.decodeIfPresent(Bool.self, forKey: .completionsEnabled) ?? false
         self.askedCompletionsConsent = try c.decodeIfPresent(Bool.self, forKey: .askedCompletionsConsent) ?? false
         self.accentColor = try c.decodeIfPresent(String.self, forKey: .accentColor)
+        self.showDockBadge = try c.decodeIfPresent(Bool.self, forKey: .showDockBadge) ?? true
     }
 }
 
