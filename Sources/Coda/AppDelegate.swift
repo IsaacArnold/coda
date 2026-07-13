@@ -1738,6 +1738,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     // MARK: - UNUserNotificationCenterDelegate
 
+    /// Present agent notifications even while Coda is the frontmost app.
+    ///
+    /// macOS asks the delegate how to present a notification only when the target app is active;
+    /// with no `willPresent` the default is *no* presentation, so the banner/sound is silently
+    /// dropped and the notification is filed into Notification Center unseen. Since the user is
+    /// typically looking at Coda when an agent finishes, that suppressed every foreground alert.
+    /// Returning the full options makes the banner + sound fire regardless of focus.
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                 willPresent notification: UNNotification,
+                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .list, .sound])
+    }
+
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                  didReceive response: UNNotificationResponse,
                                  withCompletionHandler completionHandler: @escaping () -> Void) {
