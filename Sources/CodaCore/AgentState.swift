@@ -83,8 +83,14 @@ public func rollup(_ states: [AgentState]) -> AgentState {
     return .idle
 }
 
-/// How many worktrees are awaiting the user (rolled-up state `.needsYou`).
-/// Drives the Dock badge count. Pure so it is unit-testable without AppKit.
-public func needsYouCount(_ rollups: [String: AgentState]) -> Int {
-    rollups.values.filter { $0 == .needsYou }.count
+/// How many worktrees want the user's attention: rolled-up state `.needsYou` (Claude is
+/// waiting on a decision) or `.done` (Claude finished its turn). Excludes `.working` (Claude
+/// is busy — nothing to do yet) and `.idle` (a plain shell). Worktrees in `seen` — those the
+/// user has already looked at since their state last changed — are excluded, so focusing a
+/// worktree's terminal clears it from the Dock badge. Drives the Dock badge count. Pure so it
+/// is unit-testable without AppKit.
+public func attentionCount(_ rollups: [String: AgentState], seen: Set<String> = []) -> Int {
+    rollups.filter { id, state in
+        (state == .needsYou || state == .done) && !seen.contains(id)
+    }.count
 }
