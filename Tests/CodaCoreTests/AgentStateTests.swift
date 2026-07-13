@@ -107,19 +107,35 @@ final class AgentStateTests: XCTestCase {
         XCTAssertEqual(agentState(fromOutput: "   \n  "), .idle)
     }
 
-    func testNeedsYouCountEmpty() {
-        XCTAssertEqual(needsYouCount([:]), 0)
+    func testAttentionCountEmpty() {
+        XCTAssertEqual(attentionCount([:]), 0)
     }
 
-    func testNeedsYouCountCountsOnlyNeedsYou() {
+    func testAttentionCountCountsNeedsYouAndDone() {
         let rollups: [String: AgentState] = [
             "a": .needsYou, "b": .working, "c": .needsYou, "d": .done, "e": .idle,
         ]
-        XCTAssertEqual(needsYouCount(rollups), 2)
+        // needsYou (a, c) + done (d); working and idle are excluded.
+        XCTAssertEqual(attentionCount(rollups), 3)
     }
 
-    func testNeedsYouCountNoneNeedYou() {
-        XCTAssertEqual(needsYouCount(["a": .working, "b": .idle, "c": .done]), 0)
+    func testAttentionCountCountsDoneAlone() {
+        XCTAssertEqual(attentionCount(["a": .done, "b": .done]), 2)
+    }
+
+    func testAttentionCountExcludesWorkingAndIdle() {
+        XCTAssertEqual(attentionCount(["a": .working, "b": .idle]), 0)
+    }
+
+    func testAttentionCountExcludesSeenWorktrees() {
+        let rollups: [String: AgentState] = ["a": .done, "b": .needsYou, "c": .done]
+        // The user has looked at "a" and "b"; only unseen "c" still wants attention.
+        XCTAssertEqual(attentionCount(rollups, seen: ["a", "b"]), 1)
+    }
+
+    func testAttentionCountSeenIrrelevantForNonAttentionStates() {
+        // A seen worktree that isn't in an attention state doesn't underflow the count.
+        XCTAssertEqual(attentionCount(["a": .working, "b": .done], seen: ["a"]), 1)
     }
 }
 

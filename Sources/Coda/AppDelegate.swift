@@ -71,6 +71,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     // pattern above (store the ref, mutate its appearance from the single state-changing spot).
     private weak var toggleDiffButton: NSButton?
 
+    /// Coming back to the app counts as looking at whatever worktree terminal is on screen, so
+    /// clear its badge contribution.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        if let id = shownWorktreeID { markWorktreeSeen(id) }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         let home = FileManager.default.homeDirectoryForCurrentUser
         // One-time settings migration from the app's former name (~/.conductor → ~/.coda).
@@ -660,6 +666,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
             headWatcher.unwatch(repoID: repoID)
             currentBranches[repoID] = nil
+            seenWorktrees.subtract(evictIDs)
             if let shown = shownWorktreeID, evictIDs.contains(shown) {
                 shownWorktreeID = nil
                 currentSurface = nil
@@ -708,6 +715,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             try store.archiveWorktree(id: s.id, deleteBranch: true)
             // Tear down all of the archived worktree’s surfaces (kills every PTY, no leak).
             for split in evictSurfaces(worktreeID: s.id) { tearDown(split) }
+            seenWorktrees.remove(s.id)
             if shownWorktreeID == s.id {
                 shownWorktreeID = nil
                 currentSurface = nil
@@ -723,7 +731,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     private var shownWorktreeID: String?
 
+    /// Worktrees the user has looked at since their agent state last changed. Excluded from the
+    /// Dock badge so bringing a worktree's terminal back into focus clears its `.done`/`.needsYou`
+    /// contribution. A fresh attention event for an unfocused worktree evicts it (see
+    /// `handleHookEvent`), making it count again. The sidebar dot is unaffected — this only gates
+    /// the badge.
+    private var seenWorktrees: Set<String> = []
+    /// The most recent worktree rollups, kept so `markWorktreeSeen` can re-badge without a full
+    /// recompute.
+    private var lastRollups: [String: AgentState] = [:]
+
+    /// Mark a worktree as looked-at and refresh the Dock badge. No-op if already seen.
+    private func markWorktreeSeen(_ worktreeID: String) {
+        guard seenWorktrees.insert(worktreeID).inserted else { return }
+        updateDockBadge(lastRollups)
+    }
+
     private func select(_ s: Worktree?, focusTerminal: Bool = true) {
+        // Focusing a worktree's terminal clears its badge contribution.
+        if focusTerminal, let id = s?.id { markWorktreeSeen(id) }
         guard shownWorktreeID != s?.id else {
             // Already shown — honor an explicit click by returning focus to its terminal.
             if focusTerminal, let cur = currentSurface { view(focus: cur) }
@@ -1644,6 +1670,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             rollups[wtID] = rollup(perSurface)
         }
         for (k, v) in rollups { agentStates[k] = v }
+        lastRollups = rollups
         sidebar.updateAgentStates(rollups)
         updateDockBadge(rollups)
         updateNotch()
@@ -1651,9 +1678,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         refreshTabBar()
     }
 
-    /// Set the Dock badge to the number of worktrees awaiting the user, or clear it when zero
-    /// (or when the preference is off). Called from `recomputeRollupsAndRefreshUI`, the single
-    /// point every agent-state change flows through. Safe with or without an `.app` bundle.
+    /// Set the Dock badge to the number of worktrees wanting attention — Claude finished
+    /// (`.done`) or is awaiting input (`.needsYou`) — or clear it when zero (or when the
+    /// preference is off). Called from `recomputeRollupsAndRefreshUI`, the single point every
+    /// agent-state change flows through. Safe with or without an `.app` bundle.
     ///
     /// NB: macOS silently drops `dockTile.badgeLabel` unless the user has enabled "Badge app
     /// icon" for Coda in System Settings → Notifications — the Dock enforces that setting itself
@@ -1663,7 +1691,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// cached grant without it and won't see the badge until their notification permission is
     /// reset — a macOS limitation with no per-app reset API.
     private func updateDockBadge(_ rollups: [String: AgentState]) {
-        let count = preferences.showDockBadge ? needsYouCount(rollups) : 0
+        let count = preferences.showDockBadge ? attentionCount(rollups, seen: seenWorktrees) : 0
         NSApp.dockTile.badgeLabel = count > 0 ? String(count) : nil
     }
 
@@ -1690,6 +1718,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         default:        body = nil
         }
         maybeNotify(worktreeID: event.worktreeID, state: newState, body: body)
+        // Badge "unread" tracking. A fresh attention state (`.done`/`.needsYou`) counts unless
+        // the user is actively looking at that worktree right now (app active + its terminal
+        // shown) — in which case it's already seen and shouldn't badge.
+        if newState == .needsYou || newState == .done {
+            let viewingNow = NSApp.isActive && shownWorktreeID == event.worktreeID
+            if viewingNow { seenWorktrees.insert(event.worktreeID) }
+            else { seenWorktrees.remove(event.worktreeID) }
+        }
         recomputeRollupsAndRefreshUI()
         if let wt = store.state.worktrees.first(where: { $0.id == event.worktreeID }) {
             scheduleStatsRecompute(for: wt)
@@ -1720,7 +1756,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let allowed = (state == .needsYou && preferences.notifyOnNeedsYou)
                    || (state == .done && preferences.notifyOnDone)
         guard allowed else { return }
-        let title = displayWorktree(id: worktreeID)?.title ?? "Coda"
+        // "<repo> · <worktree>" — the repo qualifies the worktree title, which is otherwise
+        // ambiguous across repos (every repo has a "Workspace"). Falls back gracefully.
+        let title: String
+        if let wt = displayWorktree(id: worktreeID) {
+            let repoName = store.state.repositories.first { $0.id == wt.repoID }?.sidebarDisplayName
+            title = repoName.map { "\($0) · \(wt.title)" } ?? wt.title
+        } else {
+            title = "Coda"
+        }
         AgentNotifier.notify(worktreeID: worktreeID, title: title, state: state, body: body)
     }
 
@@ -1737,6 +1781,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     // MARK: - UNUserNotificationCenterDelegate
+
+    /// Present agent notifications even while Coda is the frontmost app.
+    ///
+    /// macOS asks the delegate how to present a notification only when the target app is active;
+    /// with no `willPresent` the default is *no* presentation, so the banner/sound is silently
+    /// dropped and the notification is filed into Notification Center unseen. Since the user is
+    /// typically looking at Coda when an agent finishes, that suppressed every foreground alert.
+    /// Returning the full options makes the banner + sound fire regardless of focus.
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                 willPresent notification: UNNotification,
+                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .list, .sound])
+    }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                  didReceive response: UNNotificationResponse,
