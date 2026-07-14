@@ -546,7 +546,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 themeNames: themeStore.themeNames(),
                 activeTheme: preferences.activeTheme ?? defaultThemeName,
                 onApplyTheme: { [weak self] name in self?.setActiveTheme(named: name) },
-                onImportTheme: { [weak self] url in try? self?.themeStore.importTheme(from: url) },
+                onImportTheme: { [weak self] url in _ = try? self?.themeStore.importTheme(from: url) },
                 terminalFont: resolvedTerminalFont(),
                 onChangeFont: { [weak self] pref in self?.setTerminalFont(pref) },
                 uiScale: preferences.uiScale,
