@@ -33,16 +33,9 @@ public struct ChromeTheme {
         switch role {
         case .windowBackground: return terminal.background
         case .primaryText:      return terminal.foreground
-        case .secondaryText:    return blend(terminal.foreground, terminal.background, 0.45)
+        case .secondaryText:    return terminal.foreground.blended(with: terminal.background, t: 0.45)
         case .accent:           return terminal.ansi.indices.contains(4) ? terminal.ansi[4] : terminal.foreground
-        case .glyphTint:        return blend(terminal.foreground, terminal.background, 0.35)
+        case .glyphTint:        return terminal.foreground.blended(with: terminal.background, t: 0.35)
         }
-    }
-
-    /// Linear interpolation: `t = 0` → a, `t = 1` → b.
-    private func blend(_ a: RGB, _ b: RGB, _ t: Double) -> RGB {
-        RGB(r: a.r + (b.r - a.r) * t,
-            g: a.g + (b.g - a.g) * t,
-            b: a.b + (b.b - a.b) * t)
     }
 }

@@ -77,9 +77,9 @@ final class WorktreeSurfacesTests: XCTestCase {
         let s = make()
         s.add("hA", surface: Surface(id: "a"))
         s.rename(id: "a", to: "logs")
-        s.setColor(id: "a", to: RGB(r: 0, g: 1, b: 0))
+        s.setColor(id: "a", to: .hue(.green))
         XCTAssertEqual(s.entry(for: "a")?.surface.nameOverride, "logs")
-        XCTAssertEqual(s.entry(for: "a")?.surface.colorOverride, RGB(r: 0, g: 1, b: 0))
+        XCTAssertEqual(s.entry(for: "a")?.surface.colorOverride, .hue(.green))
     }
 
     func testSetActiveIgnoresUnknownID() {

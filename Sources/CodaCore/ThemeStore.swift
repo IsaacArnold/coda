@@ -39,4 +39,15 @@ public final class ThemeStore {
         guard availableThemeURLs().isEmpty else { return }
         for source in sources { try importTheme(from: source) }
     }
+
+    /// Copy in each source whose destination doesn't already exist. Unlike
+    /// `seedIfEmpty`, this runs on every launch so upgraders receive newly-bundled
+    /// themes — while never overwriting a theme the user already has (or edited).
+    public func installMissing(from sources: [URL]) throws {
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        for source in sources {
+            let dest = directory.appendingPathComponent(source.lastPathComponent)
+            if !fm.fileExists(atPath: dest.path) { try fm.copyItem(at: source, to: dest) }
+        }
+    }
 }

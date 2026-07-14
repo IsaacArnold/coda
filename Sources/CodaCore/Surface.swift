@@ -12,19 +12,23 @@ public enum SurfaceKind: String, Codable, Equatable {
 public struct Surface: Equatable {
     public let id: String
     public var nameOverride: String?
-    public var colorOverride: RGB?
+    public var colorOverride: IdentityColorValue?
     public var kind: SurfaceKind
 
     public init(id: String, nameOverride: String? = nil,
-                colorOverride: RGB? = nil, kind: SurfaceKind = .worktree) {
+                colorOverride: IdentityColorValue? = nil, kind: SurfaceKind = .worktree) {
         self.id = id
         self.nameOverride = nameOverride
         self.colorOverride = colorOverride
         self.kind = kind
     }
 
-    /// The color this surface contributes to chrome: its own override, else the worktree's.
-    public func effectiveColor(worktreeColor: RGB?) -> RGB? { colorOverride ?? worktreeColor }
+    /// The identity value this surface contributes: its own override, else the
+    /// worktree's. Resolution to a concrete colour (through the active theme)
+    /// happens in the shell via `IdentityColorValue.resolved(_:)`.
+    public func effectiveValue(worktreeValue: IdentityColorValue?) -> IdentityColorValue? {
+        colorOverride ?? worktreeValue
+    }
 }
 
 /// The label to show for a surface tab: an explicit rename wins; otherwise the repo name

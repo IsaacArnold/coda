@@ -87,7 +87,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         preferences = prefsStore.load()
         applyAppIcon()
         themeStore = ThemeStore(directory: home.appendingPathComponent(".coda/themes"))
-        try? themeStore.seedIfEmpty(from: bundledThemeURLs())
+        // installMissing (not seedIfEmpty) so upgraders get newly-bundled themes
+        // (e.g. Xcode Dark, Rider Darcula) without clobbering their existing files.
+        try? themeStore.installMissing(from: bundledThemeURLs())
         activeTheme = loadActiveTheme()
         kbStore = KeybindingsStore(url: home.appendingPathComponent(".coda/keybindings.json"))
         keybindings = kbStore.load()
@@ -106,10 +108,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             UNUserNotificationCenter.current().delegate = self
             AgentNotifier.requestAuthorization()
         }
+        sidebar.setActiveTheme(activeTheme)
         refreshSidebar(select: allDisplayWorktrees().first?.id)
         applyChromeTheme()
         applyUIMetrics()
-        sidebar.setAccentColor(AccentColor.resolve(preferences.accentColor))
+        sidebar.setAccentColor(AccentColor.resolve(preferences.accentColor, theme: activeTheme).hexString)
         startDiffStatsSweep()
         // Keep the notch clock current.
         notchTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
@@ -558,8 +561,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 onChangeShell: { [weak self] choice in self?.setShell(choice) },
                 completionsEnabled: preferences.completionsEnabled,
                 onChangeCompletionsEnabled: { [weak self] on in self?.setCompletionsEnabled(on) },
-                accentColor: AccentColor.resolve(preferences.accentColor),
-                onChangeAccentColor: { [weak self] hex in self?.setAccentColor(hex) },
+                accentValue: preferences.accentColor ?? AccentColor.defaultValue.serialized,
+                accentTheme: activeTheme,
+                onChangeAccentColor: { [weak self] value in self?.setAccentColor(value) },
                 appIconName: preferences.appIconName,
                 onChangeAppIcon: { [weak self] id in self?.setAppIcon(id) })
             let win = NSWindow(contentViewController: tab)
@@ -840,7 +844,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             split.view.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor, constant: -8),
         ])
         currentSurface = split
-        split.identityColor = selectedWorktree.flatMap { identityBase(for: $0) }?.nsColor
+        split.identityColor = selectedWorktree
+            .flatMap { worktreeIdentityValue($0)?.resolved(activeTheme) }?.nsColor
         view(focus: split)
         refreshChromeForActiveSurface()
         refreshTabBar()
@@ -891,11 +896,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return
         }
         surfaceTabBar.isHidden = false
-        let base = store.state.worktrees.first { $0.id == wtID }.flatMap { identityBase(for: $0) }
+        let base = store.state.worktrees.first { $0.id == wtID }.flatMap { worktreeIdentityValue($0) }
         let repoName = store.state.worktrees.first { $0.id == wtID }
             .flatMap { wt in store.state.repositories.first { $0.id == wt.repoID } }?.name
         let items: [SurfaceTabItem] = list.entries.enumerated().map { idx, entry in
-            let effective = entry.surface.effectiveColor(worktreeColor: base)
+            let effective = entry.surface.effectiveValue(worktreeValue: base)?.resolved(activeTheme)
             return SurfaceTabItem(
                 id: entry.surface.id,
                 label: surfaceLabel(nameOverride: entry.surface.nameOverride,
@@ -989,23 +994,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         refreshTabBar()
     }
 
-    /// The identity-color base for a worktree — its own color, else its repo's — routed
-    /// through Core's `identityBaseColor` so the fallback logic is unit-tested. Per-surface
-    /// (tab) overrides layer on top via `Surface.effectiveColor(worktreeColor:)`.
-    private func identityBase(for wt: Worktree) -> RGB? {
-        let repoHex = store.state.repositories.first { $0.id == wt.repoID }?.color
-        return identityBaseColor(worktreeColorHex: wt.color, repoColorHex: repoHex)
+    /// The worktree-level identity value — its own colour, else its repo's — as a
+    /// theme-following `IdentityColorValue`. Legacy stored hexes migrate to hues.
+    /// Per-surface (tab) overrides layer on top via `Surface.effectiveValue(worktreeValue:)`.
+    private func worktreeIdentityValue(_ wt: Worktree) -> IdentityColorValue? {
+        let repoColor = store.state.repositories.first { $0.id == wt.repoID }?.color
+        return IdentityColorValue.migrating(from: wt.color)
+            ?? IdentityColorValue.migrating(from: repoColor)
     }
 
-    /// Repaint the identity bar from the shown worktree + active surface's effective color.
+    /// Repaint the identity bar from the shown worktree + active surface's effective
+    /// colour, resolved through the active theme.
     private func refreshChromeForActiveSurface() {
         guard let wt = selectedWorktree else {
             worktreeBar.update(title: nil, branch: nil, colorHex: nil, agentState: .idle)
             return
         }
-        let base = identityBase(for: wt)
+        let base = worktreeIdentityValue(wt)
         let active = surfaces.existingSurfaces(for: wt.id)?.activeSurface
-        let effective = active?.effectiveColor(worktreeColor: base) ?? base
+        let effective = (active?.effectiveValue(worktreeValue: base) ?? base)?.resolved(activeTheme)
         worktreeBar.update(title: wt.title, branch: wt.branch,
                            colorHex: effective?.hexString,
                            agentState: agentStates[wt.id] ?? .idle)
@@ -1021,8 +1028,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         rename.representedObject = surfaceID
         menu.addItem(rename)
         menu.addItem(ColorMenu.makeSetColorItem(
-            targetID: surfaceID, target: self,
+            targetID: surfaceID, theme: activeTheme, target: self,
             setColor: #selector(setSurfaceColorAction(_:)),
+            customColor: #selector(setSurfaceCustomColorAction(_:)),
             removeColor: #selector(removeSurfaceColorAction(_:))))
         menu.addItem(.separator())
         let close = NSMenuItem(title: "Close Tab", action: #selector(closeSurfaceMenuAction(_:)), keyEquivalent: "")
@@ -1044,12 +1052,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     @objc private func setSurfaceColorAction(_ sender: NSMenuItem) {
         guard let info = sender.representedObject as? [String: String],
-              let id = info["id"], let hex = info["hex"], let rgb = RGB(hex: hex),
+              let id = info["id"], let serialized = info["value"],
+              let value = IdentityColorValue(serialized: serialized),
               let wtID = shownWorktreeID, let list = surfaces.existingSurfaces(for: wtID) else { return }
-        list.setColor(id: id, to: rgb)
+        list.setColor(id: id, to: value)
         refreshTabBar()
         refreshChromeForActiveSurface()
         refreshSidebar(select: selectedWorktree?.id)
+    }
+
+    /// "Custom…" for a surface tab → open the colour panel and pin each pick live.
+    @objc private func setSurfaceCustomColorAction(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String,
+              let wtID = shownWorktreeID, let list = surfaces.existingSurfaces(for: wtID) else { return }
+        let initial = list.entry(for: id)?.surface.colorOverride?.resolved(activeTheme).nsColor
+        PinColorPanel.shared.begin(initial: initial) { [weak self] rgb in
+            guard let self else { return }
+            list.setColor(id: id, to: .pinned(rgb))
+            self.refreshTabBar()
+            self.refreshChromeForActiveSurface()
+            self.refreshSidebar(select: self.selectedWorktree?.id)
+        }
     }
 
     @objc private func removeSurfaceColorAction(_ sender: NSMenuItem) {
@@ -1077,7 +1100,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         applyActiveTheme()
     }
 
-    /// Push the active terminal theme to every live surface and repaint the chrome.
+    /// Push the active terminal theme to every live surface and repaint the chrome,
+    /// then restyle every theme-following identity colour (sidebar rows, accent,
+    /// worktree bar, tab bar) so hue-valued repos/worktrees/tabs follow the theme.
     private func applyActiveTheme() {
         for wtID in surfaces.worktreeIDs {
             surfaces.existingSurfaces(for: wtID)?.handles.forEach { split in
@@ -1085,6 +1110,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
         }
         applyChromeTheme()
+        sidebar.setActiveTheme(activeTheme)
+        sidebar.setAccentColor(AccentColor.resolve(preferences.accentColor, theme: activeTheme).hexString)
+        refreshChromeForActiveSurface()
+        refreshTabBar()
     }
 
     /// The bundled "Symbols Nerd Font Mono", registered for this process for use as a glyph
@@ -1180,10 +1209,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     /// Persist and apply the accent colour. Distinct from `sidebar.setAccentColor`, which is
     /// view-only (used on launch to seed the view without re-saving prefs).
-    private func setAccentColor(_ hex: String) {
-        preferences.accentColor = hex
+    private func setAccentColor(_ value: String) {
+        preferences.accentColor = value
         do { try prefsStore.save(preferences) } catch { presentError(error) }
-        sidebar.setAccentColor(hex)
+        sidebar.setAccentColor(AccentColor.resolve(value, theme: activeTheme).hexString)
     }
 
     /// Persist the chosen app icon and apply it immediately (running Dock icon).
