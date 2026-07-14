@@ -26,7 +26,8 @@ final class SettingsTabController: NSTabViewController {
          onChangeShell: @escaping (ShellChoice) -> Void,
          completionsEnabled: Bool,
          onChangeCompletionsEnabled: @escaping (Bool) -> Void,
-         accentColor: String,
+         accentValue: String,
+         accentTheme: TerminalTheme,
          onChangeAccentColor: @escaping (String) -> Void,
          appIconName: String?,
          onChangeAppIcon: @escaping (String) -> Void) {
@@ -37,7 +38,8 @@ final class SettingsTabController: NSTabViewController {
                                                     notifyOnNeedsYou: notifyOnNeedsYou, notifyOnDone: notifyOnDone,
                                                     showDockBadge: showDockBadge,
                                                     shell: shell, completionsEnabled: completionsEnabled,
-                                                    accentColor: accentColor, appIconName: appIconName)
+                                                    accentValue: accentValue, accentTheme: accentTheme,
+                                                    appIconName: appIconName)
         general.onChangeEditor = onChangeEditor
         general.onChangeFont = onChangeFont
         general.onChangeUIScale = onChangeUIScale

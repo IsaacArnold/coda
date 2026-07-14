@@ -2,19 +2,9 @@ import XCTest
 @testable import CodaCore
 
 final class AccentColorTests: XCTestCase {
-    func testResolveNilGivesDefault() {
-        XCTAssertEqual(AccentColor.resolve(nil), AccentColor.defaultHex)
-    }
-
-    func testResolveKeepsStoredValue() {
-        XCTAssertEqual(AccentColor.resolve("#FF5555"), "#FF5555")
-    }
-
-    func testDefaultIsOneOfTheSwatches() {
-        XCTAssertTrue(AccentColor.swatches.contains(AccentColor.defaultHex))
-    }
-
-    func testDefaultIsDraculaPurple() {
+    func testDefaultHexIsDraculaPurple() {
+        // Kept as the NSColor fallback literal; theme-aware resolution is covered
+        // by IdentityColorResolutionTests.
         XCTAssertEqual(AccentColor.defaultHex, "#BD93F9")
     }
 

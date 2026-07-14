@@ -63,4 +63,34 @@ final class ThemeStoreTests: XCTestCase {
         try store.seedIfEmpty(from: [extra])
         XCTAssertEqual(store.themeNames(), ["Existing"], "must not seed over a populated dir")
     }
+
+    func testInstallMissingPopulatesEmptyDir() throws {
+        let dir = tmpDir()
+        let a = try writeTheme("A", in: tmpDir())
+        let b = try writeTheme("B", in: tmpDir())
+        let store = ThemeStore(directory: dir)
+        try store.installMissing(from: [a, b])
+        XCTAssertEqual(store.themeNames(), ["A", "B"])
+    }
+
+    func testInstallMissingAddsOnlyNewThemesOnUpgrade() throws {
+        let dir = tmpDir()
+        let existing = try writeTheme("Dracula", in: dir)   // already installed
+        let new = try writeTheme("Xcode Dark", in: tmpDir())
+        let store = ThemeStore(directory: dir)
+        try store.installMissing(from: [existing, new])
+        XCTAssertEqual(store.themeNames(), ["Dracula", "Xcode Dark"])
+    }
+
+    func testInstallMissingPreservesUserEditsToExistingTheme() throws {
+        let dir = tmpDir()
+        let installed = try writeTheme("Dracula", in: dir)
+        // The user edited their copy; the bundled source differs.
+        try "user-edited".write(to: installed, atomically: true, encoding: .utf8)
+        let bundledDracula = try writeTheme("Dracula", in: tmpDir())
+        let store = ThemeStore(directory: dir)
+        try store.installMissing(from: [bundledDracula])
+        let contents = try String(contentsOf: dir.appendingPathComponent("Dracula.itermcolors"))
+        XCTAssertEqual(contents, "user-edited", "must not overwrite an existing theme file")
+    }
 }

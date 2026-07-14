@@ -2,18 +2,18 @@ import XCTest
 @testable import CodaCore
 
 final class SurfaceTests: XCTestCase {
-    func testEffectiveColorPrefersOverride() {
-        let s = Surface(id: "s1", colorOverride: RGB(r: 1, g: 0, b: 0))
-        XCTAssertEqual(s.effectiveColor(worktreeColor: RGB(r: 0, g: 0, b: 1)), RGB(r: 1, g: 0, b: 0))
+    func testEffectiveValuePrefersOverride() {
+        let s = Surface(id: "s1", colorOverride: .pinned(RGB(r: 1, g: 0, b: 0)))
+        XCTAssertEqual(s.effectiveValue(worktreeValue: .hue(.blue)), .pinned(RGB(r: 1, g: 0, b: 0)))
     }
 
-    func testEffectiveColorFallsBackToWorktreeColor() {
+    func testEffectiveValueFallsBackToWorktreeValue() {
         let s = Surface(id: "s1")
-        XCTAssertEqual(s.effectiveColor(worktreeColor: RGB(r: 0, g: 0, b: 1)), RGB(r: 0, g: 0, b: 1))
+        XCTAssertEqual(s.effectiveValue(worktreeValue: .hue(.blue)), .hue(.blue))
     }
 
-    func testEffectiveColorNilWhenNeither() {
-        XCTAssertNil(Surface(id: "s1").effectiveColor(worktreeColor: nil))
+    func testEffectiveValueNilWhenNeither() {
+        XCTAssertNil(Surface(id: "s1").effectiveValue(worktreeValue: nil))
     }
 
     func testDefaultKindIsWorktree() {

@@ -37,3 +37,25 @@ _Avoid_: Schema, definition, grammar file
 **Shell integration**:
 The consent-injected shell snippet that emits OSC 133 prompt markers (and OSC 7 cwd), letting Coda locate the editable command on the screen and know when a command is running versus being typed.
 _Avoid_: Shell hook (reserve "hook" for the Claude Code agent-state hook), prompt hook
+
+## Theming
+
+**Theme**:
+The colour scheme the user sets, imported as an `.itermcolors` file (16 ANSI colours + foreground/background/cursor). Drives both the terminal grid and, derived from it, the app chrome. Exactly one is active at a time.
+_Avoid_: Colour scheme, palette (reserve "palette" for the identity palette)
+
+**Identity colour**:
+The colour that visually tags a repo, worktree, or surface tab so the user can tell parallel work apart — resolved down the chain `surface → worktree → repo → default`. The focused-row accent is a separate identity colour of the app itself. Kept visually distinct from the agent-state badge.
+_Avoid_: Tab colour, repo colour (use only for the specific level)
+
+**Identity hue**:
+The theme-independent colour *role* an identity colour is stored as — one of `red, orange, yellow, green, cyan, blue, purple, pink`. Each theme resolves a hue to its own concrete colour, so identity colours restyle live when the theme changes ("my red repo" stays red-ish in every theme).
+_Avoid_: Slot, index (rejected the positional model), swatch (that's the UI affordance)
+
+**Pinned colour**:
+An exact hex an identity colour is fixed to, deliberately ignoring the theme — the escape hatch for "this repo is always bright red". The alternative to storing a hue.
+_Avoid_: Custom colour (that's the menu label), override (overloaded with the resolution chain)
+
+**Curated palette**:
+A hand-authored hue→hex map bundled per theme, so each bundled theme's identity colours look intentional rather than raw. A theme with no curated palette (any imported `.itermcolors`) falls back to deriving each hue from the theme's ANSI colours.
+_Avoid_: Theme palette, colour map

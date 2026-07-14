@@ -35,7 +35,8 @@ final class GeneralSettingsViewController: NSViewController {
     private let completionsCheckbox = NSButton(checkboxWithTitle: "Show command completions in the terminal",
                                                target: nil, action: nil)
 
-    private var accentColor: String
+    private var accentValue: String            // serialized IdentityColorValue
+    private let accentTheme: TerminalTheme      // paints the hue swatches
     private let accentSwatchRow = NSStackView()
     private var accentButtons: [NSButton] = []
 
@@ -59,7 +60,8 @@ final class GeneralSettingsViewController: NSViewController {
 
     init(editor: Editor, terminalFont: NSFont, uiScale: UIScale,
          notifyOnNeedsYou: Bool, notifyOnDone: Bool, showDockBadge: Bool, shell: ShellChoice,
-         completionsEnabled: Bool, accentColor: String, appIconName: String?) {
+         completionsEnabled: Bool, accentValue: String, accentTheme: TerminalTheme,
+         appIconName: String?) {
         self.editor = editor
         self.terminalFont = terminalFont
         self.uiScale = uiScale
@@ -68,7 +70,8 @@ final class GeneralSettingsViewController: NSViewController {
         self.showDockBadge = showDockBadge
         self.shell = shell
         self.completionsEnabled = completionsEnabled
-        self.accentColor = accentColor
+        self.accentValue = accentValue
+        self.accentTheme = accentTheme
         self.appIconName = appIconName
         super.init(nibName: nil, bundle: nil)
     }
@@ -176,16 +179,17 @@ final class GeneralSettingsViewController: NSViewController {
         completionsHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         completionsHint.textColor = .secondaryLabelColor
 
-        // Accent colour — the sidebar's focused-worktree highlight. Curated swatches only.
+        // Accent colour — the sidebar's focused-worktree highlight. The active
+        // theme's hue swatches (they follow the theme), plus a Custom… pin.
         let accentTitle = NSTextField(labelWithString: "Accent Colour")
         accentTitle.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
         accentSwatchRow.orientation = .horizontal
         accentSwatchRow.spacing = 8
-        accentButtons = AccentColor.swatches.enumerated().map { index, hex in
+        accentButtons = IdentityHue.allCases.enumerated().map { index, hue in
             let button = NSButton()
             button.title = ""
             button.isBordered = false
-            button.image = Self.circleImage(NSColor(hex: hex) ?? .gray, diameter: 20)
+            button.image = Self.circleImage(accentTheme.color(for: hue).nsColor, diameter: 20)
             button.imageScaling = .scaleNone
             button.target = self
             button.action = #selector(accentSwatchClicked(_:))
@@ -197,7 +201,10 @@ final class GeneralSettingsViewController: NSViewController {
             accentSwatchRow.addArrangedSubview(button)
             return button
         }
-        let accentHint = NSTextField(labelWithString: "Colour of the selected worktree/branch in the sidebar.")
+        let customButton = NSButton(title: "Custom…", target: self, action: #selector(accentCustomClicked))
+        customButton.bezelStyle = .rounded
+        accentSwatchRow.addArrangedSubview(customButton)
+        let accentHint = NSTextField(labelWithString: "Colour of the selected worktree/branch in the sidebar. Follows the theme.")
         accentHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         accentHint.textColor = .secondaryLabelColor
 
@@ -384,17 +391,31 @@ final class GeneralSettingsViewController: NSViewController {
     }
 
     @objc private func accentSwatchClicked(_ sender: NSButton) {
-        let swatches = AccentColor.swatches
-        guard swatches.indices.contains(sender.tag) else { return }
-        accentColor = swatches[sender.tag]
+        let hues = IdentityHue.allCases
+        guard hues.indices.contains(sender.tag) else { return }
+        accentValue = IdentityColorValue.hue(hues[sender.tag]).serialized
         updateAccentSelection()
-        onChangeAccentColor?(accentColor)
+        onChangeAccentColor?(accentValue)
     }
 
-    /// Ring the button whose swatch matches the active accent.
+    /// "Custom…" → open the colour panel and pin each pick live.
+    @objc private func accentCustomClicked() {
+        let current = IdentityColorValue.migrating(from: accentValue)?.resolved(accentTheme).nsColor
+        PinColorPanel.shared.begin(initial: current) { [weak self] rgb in
+            guard let self else { return }
+            self.accentValue = IdentityColorValue.pinned(rgb).serialized
+            self.updateAccentSelection()
+            self.onChangeAccentColor?(self.accentValue)
+        }
+    }
+
+    /// Ring the button whose hue matches the active accent (none when pinned/custom).
     private func updateAccentSelection() {
+        let selectedHue: IdentityHue?
+        if case .hue(let h) = IdentityColorValue.migrating(from: accentValue) { selectedHue = h }
+        else { selectedHue = nil }
         for (index, button) in accentButtons.enumerated() {
-            let isSelected = AccentColor.swatches[index] == accentColor
+            let isSelected = IdentityHue.allCases[index] == selectedHue
             button.layer?.borderWidth = isSelected ? 2 : 0
             button.layer?.borderColor = isSelected ? NSColor.labelColor.cgColor : nil
         }

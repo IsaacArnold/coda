@@ -33,6 +33,13 @@ public struct RGB: Equatable, Codable {
     /// Black or white, whichever reads better on top of this color.
     public var contrastingText: RGB { luminance < 0.5 ? .white : .black }
 
+    /// Linear interpolation towards `other`: `t = 0` → self, `t = 1` → other.
+    public func blended(with other: RGB, t: Double) -> RGB {
+        RGB(r: r + (other.r - r) * t,
+            g: g + (other.g - g) * t,
+            b: b + (other.b - b) * t)
+    }
+
     public static let black = RGB(r: 0, g: 0, b: 0)
     public static let white = RGB(r: 1, g: 1, b: 1)
 }

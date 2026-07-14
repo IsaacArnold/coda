@@ -75,7 +75,7 @@ public final class WorktreeSurfaces<Handle> {
         entries[i].surface.nameOverride = name
     }
 
-    public func setColor(id: String, to color: RGB?) {
+    public func setColor(id: String, to color: IdentityColorValue?) {
         guard let i = index(of: id) else { return }
         entries[i].surface.colorOverride = color
     }

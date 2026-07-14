@@ -189,6 +189,25 @@ final class SidebarController: NSViewController {
         }
     }
 
+    /// The active terminal theme, used to resolve stored identity values (hues)
+    /// to concrete colours and to paint the "Set Color" swatch menu.
+    private(set) var activeTheme: TerminalTheme?
+
+    /// Adopt a new theme and repaint every row's identity colour (live restyle on
+    /// theme switch — a hue-valued repo/worktree follows the theme).
+    func setActiveTheme(_ theme: TerminalTheme) {
+        activeTheme = theme
+        outline.reloadData()
+    }
+
+    /// Resolve a stored identity string (a serialized `IdentityColorValue`, or a
+    /// legacy bare hex) to a concrete colour under the active theme.
+    private func resolvedColor(_ stored: String?) -> NSColor? {
+        guard let theme = activeTheme, let value = IdentityColorValue.migrating(from: stored)
+        else { return nil }
+        return value.resolved(theme).nsColor
+    }
+
     /// Adopt a new interface scale and restyle live. Row heights and cell fonts are
     /// recomputed on `reloadData()`; `noteHeightOfRows` forces the outline to re-measure.
     func apply(metrics: UIMetrics) {
@@ -250,8 +269,16 @@ final class SidebarController: NSViewController {
 
     @objc private func contextSetColor(_ sender: NSMenuItem) {
         guard let info = sender.representedObject as? [String: String],
-              let id = info["id"], let hex = info["hex"] else { return }
-        onSetWorktreeColor?(id, hex)
+              let id = info["id"], let value = info["value"] else { return }
+        onSetWorktreeColor?(id, value)
+    }
+
+    /// "Custom…" for a worktree → open the colour panel, pin each pick live.
+    @objc private func contextCustomColor(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        PinColorPanel.shared.begin(initial: resolvedColor(clickedWorktree()?.color)) { [weak self] rgb in
+            self?.onSetWorktreeColor?(id, IdentityColorValue.pinned(rgb).serialized)
+        }
     }
 
     @objc private func contextRemoveColor(_ sender: NSMenuItem) {
@@ -273,8 +300,17 @@ final class SidebarController: NSViewController {
 
     @objc private func contextSetRepoColor(_ sender: NSMenuItem) {
         guard let info = sender.representedObject as? [String: String],
-              let id = info["id"], let hex = info["hex"] else { return }
-        onSetRepoColor?(id, hex)
+              let id = info["id"], let value = info["value"] else { return }
+        onSetRepoColor?(id, value)
+    }
+
+    /// "Custom…" for a repo → open the colour panel, pin each pick live.
+    @objc private func contextCustomRepoColor(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        let current = repoNodes.first { $0.repository.id == id }?.repository.color
+        PinColorPanel.shared.begin(initial: resolvedColor(current)) { [weak self] rgb in
+            self?.onSetRepoColor?(id, IdentityColorValue.pinned(rgb).serialized)
+        }
     }
 
     @objc private func contextRemoveRepoColor(_ sender: NSMenuItem) {
@@ -376,10 +412,13 @@ extension SidebarController: NSMenuDelegate {
             rename.representedObject = repoID
             menu.addItem(rename)
 
-            menu.addItem(ColorMenu.makeSetColorItem(
-                targetID: repoID, target: self,
-                setColor: #selector(contextSetRepoColor(_:)),
-                removeColor: #selector(contextRemoveRepoColor(_:))))
+            if let theme = activeTheme {
+                menu.addItem(ColorMenu.makeSetColorItem(
+                    targetID: repoID, theme: theme, target: self,
+                    setColor: #selector(contextSetRepoColor(_:)),
+                    customColor: #selector(contextCustomRepoColor(_:)),
+                    removeColor: #selector(contextRemoveRepoColor(_:))))
+            }
 
             menu.addItem(.separator())
             let remove = NSMenuItem(title: "Remove Repository…",
@@ -389,11 +428,13 @@ extension SidebarController: NSMenuDelegate {
             menu.addItem(remove)
         }
 
-        if let worktreeID = clickedWorktreeID(), clickedWorktree()?.isMain == false {
+        if let worktreeID = clickedWorktreeID(), clickedWorktree()?.isMain == false,
+           let theme = activeTheme {
             menu.addItem(.separator())
             menu.addItem(ColorMenu.makeSetColorItem(
-                targetID: worktreeID, target: self,
+                targetID: worktreeID, theme: theme, target: self,
                 setColor: #selector(contextSetColor(_:)),
+                customColor: #selector(contextCustomColor(_:)),
                 removeColor: #selector(contextRemoveColor(_:))))
         }
     }
@@ -438,7 +479,7 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
             let cell = makeCell(identifier: "repo", symbol: nil)
             cell.textField?.stringValue = repo.repository.sidebarDisplayName
             cell.textField?.font = metrics.sectionHeader
-            let repoColor = repo.repository.color.flatMap { NSColor(hex: $0) }
+            let repoColor = resolvedColor(repo.repository.color)
             cell.textField?.textColor = repoColor
                 ?? (chrome?.color(.secondaryText).nsColor) ?? .secondaryLabelColor
             return cell
@@ -452,9 +493,9 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
             cell.subtitleLabel.font = metrics.footnote
             cell.applyBadge(agentStates[wt.worktree.id] ?? .idle)
             let identity = identityOverrides[wt.worktree.id]
-                ?? wt.worktree.color.flatMap { NSColor(hex: $0) }
+                ?? resolvedColor(wt.worktree.color)
             cell.applyIdentityColor(identity,
-                                    repoColor: wt.repoColorHex.flatMap { NSColor(hex: $0) },
+                                    repoColor: resolvedColor(wt.repoColorHex),
                                     glyphTint: chrome?.color(.glyphTint).nsColor)
             if let s = diffStats[wt.worktree.id], !s.isEmpty {
                 // +N green / −M red, matching the diff pane's file-row counts.

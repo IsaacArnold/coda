@@ -121,7 +121,9 @@ final class WorktreeStoreTests: XCTestCase {
         let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
         let r = try store.addRepository(path: repo)
         let wt = try store.createWorktree(repoID: r.id, title: "First")
-        XCTAssertEqual(wt.color, IdentityPalette.color(at: 0))
+        // Auto-assigned as a theme-following hue (index 0 → purple), stored serialized.
+        XCTAssertEqual(wt.color, IdentityColorValue.hue(IdentityHue.autoAssigned(index: 0)).serialized)
+        XCTAssertEqual(wt.color, "purple")
     }
 
     func testSecondWorktreeGetsNextPaletteColor() throws {
@@ -130,7 +132,8 @@ final class WorktreeStoreTests: XCTestCase {
         let r = try store.addRepository(path: repo)
         _ = try store.createWorktree(repoID: r.id, title: "First")
         let second = try store.createWorktree(repoID: r.id, title: "Second")
-        XCTAssertEqual(second.color, IdentityPalette.color(at: 1))
+        XCTAssertEqual(second.color, IdentityColorValue.hue(IdentityHue.autoAssigned(index: 1)).serialized)
+        XCTAssertEqual(second.color, "green")
     }
 
     func testSetWorktreeColorPersists() throws {
