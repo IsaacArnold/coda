@@ -9,6 +9,7 @@ final class SettingsSplitViewController: NSSplitViewController {
     private let sidebar = SettingsSidebarViewController()
     private let detailContainer = NSViewController()
     private var currentPane: NSViewController?
+    private var panes: [SettingsCategory: NSViewController] = [:]
 
     init(context: SettingsContext) {
         self.context = context
@@ -41,11 +42,20 @@ final class SettingsSplitViewController: NSSplitViewController {
     }
 
     private func show(_ category: SettingsCategory) {
+        // Detach the currently-visible pane's view but keep the VC alive (cached),
+        // so its in-session state — and NSFontManager's non-retaining target — survive
+        // navigation. Recreating panes here would revert displayed values to the
+        // frozen launch-time context and risk clobbering the real value on the next edit.
         currentPane?.view.removeFromSuperview()
-        currentPane?.removeFromParent()
 
-        let pane = category.makePane(context: context)
-        addChild(pane)
+        let pane: NSViewController
+        if let cached = panes[category] {
+            pane = cached
+        } else {
+            pane = category.makePane(context: context)
+            panes[category] = pane
+            addChild(pane)
+        }
         pane.view.translatesAutoresizingMaskIntoConstraints = false
         detailContainer.view.addSubview(pane.view)
         NSLayoutConstraint.activate([

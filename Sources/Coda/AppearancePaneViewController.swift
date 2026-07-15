@@ -1,6 +1,7 @@
 // Sources/Coda/AppearancePaneViewController.swift
 import AppKit
 import CodaCore
+import UniformTypeIdentifiers
 
 /// Settings → Appearance: the installed-theme list (with Import/Apply) and the sidebar
 /// accent-colour swatches. Theme logic is carried over from the former dedicated theme
@@ -118,7 +119,9 @@ final class AppearancePaneViewController: NSViewController {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
-        panel.allowedFileTypes = ["itermcolors"]
+        if let itermColors = UTType(filenameExtension: "itermcolors") {
+            panel.allowedContentTypes = [itermColors]
+        }
         panel.prompt = "Import"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         context.onImportTheme(url)
