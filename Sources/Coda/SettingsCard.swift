@@ -14,7 +14,7 @@ final class SettingsCard: NSView {
         wantsLayer = true
         layer?.cornerRadius = 10
         // Subtle translucent fill so the themed window background shows through.
-        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.05).cgColor
+        applyFillColor()
 
         let stack = NSStackView()
         stack.orientation = .vertical
@@ -42,6 +42,21 @@ final class SettingsCard: NSView {
         ])
     }
     required init?(coder: NSCoder) { fatalError("not used") }
+
+    /// A CALayer background color does not track appearance changes on its own,
+    /// so re-resolve the card fill whenever the effective appearance flips.
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyFillColor()
+    }
+
+    /// A subtle translucent overlay that reads on both dark and light backings.
+    private func applyFillColor() {
+        let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let fill = isDark ? NSColor.white.withAlphaComponent(0.05)
+                          : NSColor.black.withAlphaComponent(0.04)
+        layer?.backgroundColor = fill.cgColor
+    }
 
     /// A 1pt hairline the full width of the card.
     private static func separator() -> NSView {
