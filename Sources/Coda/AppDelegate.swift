@@ -549,40 +549,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     private func openSettings() {
         if settingsWC == nil {
-            let tab = SettingsTabController(
+            let context = SettingsContext(
                 editor: preferences.defaultEditor,
                 onChangeEditor: { [weak self] editor in self?.setDefaultEditor(editor) },
-                keybindings: keybindings,
-                onChange: { [weak self] bindings in self?.applyKeybindings(bindings) },
-                themeNames: themeStore.themeNames(),
-                activeTheme: preferences.activeTheme ?? defaultThemeName,
-                onApplyTheme: { [weak self] name in self?.setActiveTheme(named: name) },
-                onImportTheme: { [weak self] url in _ = try? self?.themeStore.importTheme(from: url) },
-                terminalFont: resolvedTerminalFont(),
-                onChangeFont: { [weak self] pref in self?.setTerminalFont(pref) },
                 uiScale: preferences.uiScale,
                 onChangeUIScale: { [weak self] scale in self?.setUIScale(scale) },
+                appIconName: preferences.appIconName,
+                onChangeAppIcon: { [weak self] id in self?.setAppIcon(id) },
+                themeNames: themeStore.themeNames(),
+                activeThemeName: preferences.activeTheme ?? defaultThemeName,
+                onApplyTheme: { [weak self] name in self?.setActiveTheme(named: name) },
+                onImportTheme: { [weak self] url in _ = try? self?.themeStore.importTheme(from: url) },
+                accentValue: preferences.accentColor ?? AccentColor.defaultValue.serialized,
+                accentTheme: activeTheme,
+                onChangeAccentColor: { [weak self] value in self?.setAccentColor(value) },
+                terminalFont: resolvedTerminalFont(),
+                onChangeFont: { [weak self] pref in self?.setTerminalFont(pref) },
+                shell: preferences.shell,
+                onChangeShell: { [weak self] choice in self?.setShell(choice) },
+                completionsEnabled: preferences.completionsEnabled,
+                onChangeCompletionsEnabled: { [weak self] on in self?.setCompletionsEnabled(on) },
                 notifyOnNeedsYou: preferences.notifyOnNeedsYou,
                 onChangeNotifyOnNeedsYou: { [weak self] on in self?.setNotifyOnNeedsYou(on) },
                 notifyOnDone: preferences.notifyOnDone,
                 onChangeNotifyOnDone: { [weak self] on in self?.setNotifyOnDone(on) },
                 showDockBadge: preferences.showDockBadge,
                 onChangeShowDockBadge: { [weak self] on in self?.setShowDockBadge(on) },
-                shell: preferences.shell,
-                onChangeShell: { [weak self] choice in self?.setShell(choice) },
-                completionsEnabled: preferences.completionsEnabled,
-                onChangeCompletionsEnabled: { [weak self] on in self?.setCompletionsEnabled(on) },
-                accentValue: preferences.accentColor ?? AccentColor.defaultValue.serialized,
-                accentTheme: activeTheme,
-                onChangeAccentColor: { [weak self] value in self?.setAccentColor(value) },
-                appIconName: preferences.appIconName,
-                onChangeAppIcon: { [weak self] id in self?.setAppIcon(id) })
-            let win = NSWindow(contentViewController: tab)
+                keybindings: keybindings,
+                onChangeKeybindings: { [weak self] bindings in self?.applyKeybindings(bindings) })
+
+            let split = SettingsSplitViewController(context: context)
+            let win = NSWindow(contentViewController: split)
             win.title = "Settings"
-            win.styleMask = [.titled, .closable]
-            win.toolbarStyle = .preference
-            win.titlebarAppearsTransparent = true   // let the themed bg flow into the tab strip
+            win.styleMask = [.titled, .closable, .resizable]
+            win.titlebarAppearsTransparent = true
             win.isReleasedWhenClosed = false
+            win.setContentSize(NSSize(width: 760, height: 560))
+            win.contentMinSize = NSSize(width: 720, height: 480)
             settingsWC = NSWindowController(window: win)
         }
         // Match the active theme each time it opens (the window is cached, so re-apply here).

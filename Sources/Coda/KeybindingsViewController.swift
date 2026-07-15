@@ -31,6 +31,10 @@ final class KeybindingsViewController: NSViewController {
         stack.spacing = 6
         stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
 
+        let paneTitle = NSTextField(labelWithString: "Keyboard Shortcuts")
+        paneTitle.font = .systemFont(ofSize: 22, weight: .bold)
+        stack.addArrangedSubview(paneTitle)
+
         for category in ShortcutCategory.allCases.sorted(by: { $0.order < $1.order }) {
             let commands = ShortcutCommand.allCases.filter { $0.category == category }
             guard !commands.isEmpty else { continue }

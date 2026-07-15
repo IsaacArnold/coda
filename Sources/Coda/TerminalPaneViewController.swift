@@ -3,7 +3,7 @@ import AppKit
 import CodaCore
 
 /// Settings → Terminal: font & size, shell, and command completions. Font/shell logic is
-/// carried over verbatim from the former GeneralSettingsViewController; the completions
+/// carried over verbatim from the former general pane; the completions
 /// control is now an NSSwitch. Edits report via the context.
 final class TerminalPaneViewController: NSViewController {
     private let context: SettingsContext
@@ -75,7 +75,7 @@ final class TerminalPaneViewController: NSViewController {
         view = SettingsPane.makeScrollView(title: "Terminal", cards: [card])
     }
 
-    // MARK: Font (carried over from GeneralSettingsViewController)
+    // MARK: Font (carried over from the former general pane)
 
     private func updateFontLabel() {
         let name = terminalFont.displayName ?? terminalFont.fontName

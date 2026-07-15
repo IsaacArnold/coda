@@ -3,8 +3,8 @@ import AppKit
 import CodaCore
 
 /// Settings → Appearance: the installed-theme list (with Import/Apply) and the sidebar
-/// accent-colour swatches. Theme logic is carried over from ThemeSettingsViewController;
-/// accent logic from the former GeneralSettingsViewController.
+/// accent-colour swatches. Theme logic is carried over from the former dedicated theme
+/// pane; accent logic from the former general pane.
 final class AppearancePaneViewController: NSViewController {
     private let context: SettingsContext
     private var themeNames: [String]
@@ -99,7 +99,7 @@ final class AppearancePaneViewController: NSViewController {
         updateAccentSelection()
     }
 
-    // MARK: Theme (carried over from ThemeSettingsViewController)
+    // MARK: Theme (carried over from the former dedicated theme pane)
 
     private func selectActiveThemeRow() {
         if let activeTheme, let idx = themeNames.firstIndex(of: activeTheme) {
@@ -130,7 +130,7 @@ final class AppearancePaneViewController: NSViewController {
         }
     }
 
-    // MARK: Accent (carried over from GeneralSettingsViewController)
+    // MARK: Accent (carried over from the former general pane)
 
     @objc private func accentSwatchClicked(_ sender: NSButton) {
         let hues = IdentityHue.allCases

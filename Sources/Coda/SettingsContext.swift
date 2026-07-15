@@ -4,7 +4,7 @@ import CodaCore
 
 /// All values + change callbacks the Settings panes need, bundled so panes and the split
 /// controller take a single parameter instead of 20+. AppDelegate builds one of these; each
-/// pane reads only the fields it uses. This replaces SettingsTabController's giant init.
+/// pane reads only the fields it uses. This replaces the former toolbar-tab controller's giant init.
 struct SettingsContext {
     // General
     let editor: Editor

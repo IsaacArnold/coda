@@ -3,7 +3,7 @@ import AppKit
 import CodaCore
 
 /// Settings → General: default editor, interface size, and the app-icon gallery. Editor and
-/// app-icon logic are carried over from the former GeneralSettingsViewController.
+/// app-icon logic are carried over from the former single-tab general pane.
 final class GeneralPaneViewController: NSViewController {
     private let context: SettingsContext
     private var editor: Editor
