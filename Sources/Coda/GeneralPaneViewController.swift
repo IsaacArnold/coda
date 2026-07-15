@@ -31,7 +31,7 @@ final class GeneralPaneViewController: NSViewController {
         editorPopup.action = #selector(editorChanged)
         rebuildPopup()
         let editorRow = SettingsRow.make(title: "Default Editor",
-                                         subtitle: "Used by \"Open in…\" and ⌘-click in the terminal.",
+                                         subtitle: "Used by “Open in…” and ⌘-click in the terminal.",
                                          control: editorPopup)
 
         // --- Interface size ---
