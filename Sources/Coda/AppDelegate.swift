@@ -450,6 +450,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         sidebar.onSetRepoColor = { [weak self] repoID, hex in self?.setRepoColor(repoID, hex) }
         sidebar.onRemoveRepoColor = { [weak self] repoID in self?.setRepoColor(repoID, nil) }
         sidebar.onRemoveRepo = { [weak self] repoID in self?.removeRepo(repoID) }
+        sidebar.onReorderRepos = { [weak self] id, idx in self?.reorderRepo(id, toIndex: idx) }
     }
 
     /// Override a worktree's identity color and repaint its bar + sidebar row.
@@ -484,6 +485,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             // Repo color now feeds the identity chain, so repaint the active worktree's
             // bar/tabs/pane border when it belongs to this repo (mirrors setWorktreeColor).
             if selectedWorktree?.repoID == repoID { refreshChromeForActiveSurface() }
+        } catch { presentError(error) }
+    }
+
+    /// Reorder a repository in the sidebar list and persist, keeping the current
+    /// selection highlighted so the focused row doesn't jump. Display order only —
+    /// nothing on disk changes.
+    private func reorderRepo(_ repoID: String, toIndex: Int) {
+        do {
+            _ = try store.moveRepository(id: repoID, toIndex: toIndex)
+            refreshSidebar(select: selectedWorktree?.id)
         } catch { presentError(error) }
     }
 

@@ -175,6 +175,25 @@ public final class WorktreeStore {
         return state.repositories[idx]
     }
 
+    /// Reorder a repository within the sidebar list. `toIndex` is the `NSOutlineView`
+    /// drop child index — the insertion slot computed BEFORE the dragged item is removed —
+    /// so it's adjusted for the removal and clamped to valid bounds. A no-op move still saves.
+    /// NEVER touches the repo on disk; this is purely the sidebar's display order.
+    @discardableResult
+    public func moveRepository(id: String, toIndex: Int) throws -> [Repository] {
+        guard let current = state.repositories.firstIndex(where: { $0.id == id }) else {
+            throw WorktreeStoreError.repoNotFound(id)
+        }
+        let repo = state.repositories.remove(at: current)
+        // Drop index counts the pre-removal array; if the item came from before the
+        // target slot, everything after it shifts down by one.
+        var dest = current < toIndex ? toIndex - 1 : toIndex
+        dest = max(0, min(dest, state.repositories.count))
+        state.repositories.insert(repo, at: dest)
+        try config.save(state)
+        return state.repositories
+    }
+
     private func uniqueBranch(base: String, repo: Repository) -> String {
         let taken = Set(state.worktrees.filter { $0.repoID == repo.id }.map { $0.branch })
         if !taken.contains(base) { return base }

@@ -161,6 +161,9 @@ final class SidebarController: NSViewController {
     var onRemoveRepoColor: ((String) -> Void)?
     /// Right-click a repo header → "Remove Repository…" — forget the repo (no disk changes).
     var onRemoveRepo: ((String) -> Void)?
+    /// Drag a repo header row to a new position → reorder the top-level repo list.
+    /// Args: the dragged repo's id, and the drop child index (NSOutlineView convention).
+    var onReorderRepos: ((_ id: String, _ toIndex: Int) -> Void)?
 
     /// An optional per-worktree identity-color override (active surface's effective color),
     /// keyed by worktree id; falls back to the worktree's own color when absent.
@@ -229,6 +232,8 @@ final class SidebarController: NSViewController {
         outline.indentationPerLevel = 14
         outline.dataSource = self
         outline.delegate = self
+        outline.registerForDraggedTypes([.codaRepoRow])
+        outline.setDraggingSourceOperationMask(.move, forLocal: true)
         rowMenu.delegate = self
         outline.menu = rowMenu
         scroll.documentView = outline
@@ -454,6 +459,50 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         return repoNodes[index]
     }
 
+    // MARK: - Drag to reorder repo header rows (repos only; worktrees not draggable)
+
+    func outlineView(_ outlineView: NSOutlineView,
+                     pasteboardWriterForItem item: Any) -> NSPasteboardWriting? {
+        guard let repo = item as? RepoNode else { return nil }   // worktrees: nil → not draggable
+        let pbItem = NSPasteboardItem()
+        pbItem.setString(repo.repository.id, forType: .codaRepoRow)
+        return pbItem
+    }
+
+    func outlineView(_ outlineView: NSOutlineView,
+                     validateDrop info: NSDraggingInfo,
+                     proposedItem item: Any?,
+                     proposedChildIndex index: Int) -> NSDragOperation {
+        // Only our repo-row drags are eligible.
+        guard info.draggingPasteboard.availableType(from: [.codaRepoRow]) != nil else { return [] }
+        // A between-rows drop at the top level is already valid.
+        if item == nil && index != NSOutlineViewDropOnItemIndex { return .move }
+        // Anything else (onto a repo, or inside a repo's children) retargets to a
+        // top-level slot so the user always sees valid between-rows feedback.
+        let target: Int
+        if let repo = item as? RepoNode {
+            target = repoNodes.firstIndex { $0.repository.id == repo.repository.id } ?? repoNodes.count
+        } else if let wt = item as? WorktreeNode {
+            target = repoNodes.firstIndex { $0.repository.id == wt.worktree.repoID } ?? repoNodes.count
+        } else {
+            target = repoNodes.count
+        }
+        outlineView.setDropItem(nil, dropChildIndex: target)
+        return .move
+    }
+
+    func outlineView(_ outlineView: NSOutlineView,
+                     acceptDrop info: NSDraggingInfo,
+                     item: Any?,
+                     childIndex index: Int) -> Bool {
+        guard let id = info.draggingPasteboard.string(forType: .codaRepoRow) else { return false }
+        // On-item drops (index == NSOutlineViewDropOnItemIndex, -1) shouldn't reach here after
+        // validateDrop retargets, but guard anyway: treat as append.
+        let dropIndex = index == NSOutlineViewDropOnItemIndex ? repoNodes.count : index
+        onReorderRepos?(id, dropIndex)
+        return true
+    }
+
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
         (item as? RepoNode).map { !$0.children.isEmpty } ?? false
     }
@@ -653,4 +702,9 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         cell.identifier = id
         return cell
     }
+}
+
+private extension NSPasteboard.PasteboardType {
+    /// Private drag type carrying a dragged repo header row's repository id.
+    static let codaRepoRow = NSPasteboard.PasteboardType("com.coda.sidebar.repo-row")
 }
