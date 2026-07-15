@@ -9,13 +9,17 @@ final class SettingsSidebarViewController: NSViewController {
     private let tableView = NSTableView()
     var onSelect: ((SettingsCategory) -> Void)?
 
+    /// Suppresses the selection-changed callback during programmatic selection, so
+    /// selectFirst() reports exactly once (selectRowIndexes fires the delegate synchronously).
+    private var suppressSelectionCallback = false
+
     override func loadView() {
         let column = NSTableColumn(identifier: .init("category"))
         tableView.addTableColumn(column)
         tableView.headerView = nil
         tableView.dataSource = self
         tableView.delegate = self
-        tableView.selectionHighlightStyle = .sourceList
+        tableView.style = .sourceList
         tableView.backgroundColor = .clear
         tableView.rowHeight = 30
         tableView.rowSizeStyle = .medium
@@ -29,7 +33,9 @@ final class SettingsSidebarViewController: NSViewController {
 
     /// Select the first category and notify. Call once after the view loads.
     func selectFirst() {
+        suppressSelectionCallback = true
         tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        suppressSelectionCallback = false
         onSelect?(categories[0])
     }
 }
@@ -66,6 +72,7 @@ extension SettingsSidebarViewController: NSTableViewDataSource, NSTableViewDeleg
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
+        guard !suppressSelectionCallback else { return }
         let row = tableView.selectedRow
         guard categories.indices.contains(row) else { return }
         onSelect?(categories[row])
