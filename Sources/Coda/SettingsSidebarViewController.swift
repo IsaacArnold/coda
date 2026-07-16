@@ -28,6 +28,7 @@ final class SettingsSidebarViewController: NSViewController {
         scroll.documentView = tableView
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
         view = scroll
     }
 

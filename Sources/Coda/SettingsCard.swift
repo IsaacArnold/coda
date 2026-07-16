@@ -70,34 +70,49 @@ final class SettingsCard: NSView {
 
 /// Row builders for the content inside a SettingsCard.
 enum SettingsRow {
-    /// A standard row: leading title (+ optional grey subtitle), trailing control.
+    /// A standard row, System Settings style: the title is pinned to the leading edge and
+    /// its control to the trailing edge of the same line, and any description wraps as a
+    /// full-width grey footnote beneath — so long descriptions get the whole card width
+    /// instead of a cramped side column.
     static func make(title: String, subtitle: String? = nil, control: NSView) -> NSView {
+        let hInset: CGFloat = 14, vPad: CGFloat = 10, gap: CGFloat = 12
+
+        let row = NSView()
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .systemFont(ofSize: NSFont.systemFontSize)
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        control.translatesAutoresizingMaskIntoConstraints = false
+        // The control keeps its natural width; the title yields if space is tight.
+        control.setContentHuggingPriority(.required, for: .horizontal)
+        control.setContentCompressionResistancePriority(.required, for: .horizontal)
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let textStack = NSStackView(views: [titleLabel])
-        textStack.orientation = .vertical
-        textStack.alignment = .leading
-        textStack.spacing = 2
+        row.addSubview(titleLabel)
+        row.addSubview(control)
+        NSLayoutConstraint.activate([
+            titleLabel.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: hInset),
+            titleLabel.topAnchor.constraint(equalTo: row.topAnchor, constant: vPad),
+            control.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -hInset),
+            control.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+            control.leadingAnchor.constraint(greaterThanOrEqualTo: titleLabel.trailingAnchor, constant: gap),
+        ])
+
         if let subtitle {
             let sub = NSTextField(wrappingLabelWithString: subtitle)
             sub.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
             sub.textColor = .secondaryLabelColor
             sub.isSelectable = false
-            textStack.addArrangedSubview(sub)
+            sub.translatesAutoresizingMaskIntoConstraints = false
+            row.addSubview(sub)
+            NSLayoutConstraint.activate([
+                sub.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: hInset),
+                sub.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -hInset),
+                sub.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
+                sub.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: -vPad),
+            ])
+        } else {
+            titleLabel.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: -vPad).isActive = true
         }
-
-        control.translatesAutoresizingMaskIntoConstraints = false
-        textStack.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        control.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-        control.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        let row = NSStackView(views: [textStack, control])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.distribution = .fill
-        row.spacing = 12
-        row.edgeInsets = NSEdgeInsets(top: 10, left: 14, bottom: 10, right: 14)
         return row
     }
 

@@ -54,7 +54,10 @@ final class SettingsSplitViewController: NSSplitViewController {
         } else {
             pane = category.makePane(context: context)
             panes[category] = pane
-            addChild(pane)
+            // Parent the pane under the detail container, NOT self: NSSplitViewController
+            // overrides addChild(_:) to wrap each child in a new split-view item, which
+            // would spawn a phantom trailing pane + divider for every pane opened.
+            detailContainer.addChild(pane)
         }
         pane.view.translatesAutoresizingMaskIntoConstraints = false
         detailContainer.view.addSubview(pane.view)

@@ -23,6 +23,10 @@ enum SettingsPane {
 
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
+        // Only show the scroller when a pane actually overflows. Without this, a system
+        // "Show scroll bars: Always" setting draws a full-height legacy scrollbar track
+        // even when the content fits, which reads as a stray vertical rule in the pane.
+        scroll.autohidesScrollers = true
         scroll.scrollerStyle = .overlay
         scroll.drawsBackground = false
         scroll.documentView = content
