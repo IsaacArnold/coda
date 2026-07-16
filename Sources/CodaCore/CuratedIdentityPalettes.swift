@@ -18,6 +18,7 @@ public enum CuratedIdentityPalettes {
     /// Themes shipped in the app bundle. Every one must be fully curated below.
     public static let bundledThemeNames = [
         "Dracula", "Nord", "Solarized Light", "IsaacTheme", "Xcode Dark", "Rider Darcula",
+        "Islands Dark",
     ]
 
     public static let map: [String: [IdentityHue: RGB]] = [
@@ -60,6 +61,14 @@ public enum CuratedIdentityPalettes {
             .red: rgb("#FF6B68"), .orange: rgb("#CC7832"), .yellow: rgb("#FFC66D"),
             .green: rgb("#6A8759"), .cyan: rgb("#299999"), .blue: rgb("#6897BB"),
             .purple: rgb("#9876AA"), .pink: rgb("#C0669E"),
+        ],
+        // JetBrains Islands Dark — New UI syntax palette: keyword orange, string
+        // green, number teal, function blue, constant purple; red/yellow/pink from
+        // the JetBrains console accents. [verify]
+        "Islands Dark": [
+            .red: rgb("#F0524F"), .orange: rgb("#CF8E6D"), .yellow: rgb("#E5BF00"),
+            .green: rgb("#6AAB73"), .cyan: rgb("#2AACB8"), .blue: rgb("#56A8F5"),
+            .purple: rgb("#C77DBB"), .pink: rgb("#ED7EED"),
         ],
     ]
 
