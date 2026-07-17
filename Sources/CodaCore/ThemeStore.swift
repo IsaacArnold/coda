@@ -40,6 +40,16 @@ public final class ThemeStore {
         for source in sources { try importTheme(from: source) }
     }
 
+    /// Delete the named themes from the dir if present (no-op for absent ones).
+    /// Used to retire bundled themes on upgrade — pass only names the app itself
+    /// shipped, since this can't tell an app-installed theme from a user's own.
+    public func removeThemes(named names: [String]) {
+        for name in names {
+            let url = directory.appendingPathComponent("\(name).itermcolors")
+            if fm.fileExists(atPath: url.path) { try? fm.removeItem(at: url) }
+        }
+    }
+
     /// Copy in each source whose destination doesn't already exist. Unlike
     /// `seedIfEmpty`, this runs on every launch so upgraders receive newly-bundled
     /// themes — while never overwriting a theme the user already has (or edited).

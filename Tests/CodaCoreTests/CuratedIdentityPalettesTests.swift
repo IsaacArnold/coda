@@ -39,6 +39,6 @@ final class CuratedIdentityPalettesTests: XCTestCase {
     func testSevenBundledThemes() {
         XCTAssertEqual(Set(CuratedIdentityPalettes.bundledThemeNames),
                        ["Dracula", "Nord", "Solarized Light", "IsaacTheme",
-                        "Xcode Dark", "Rider Darcula", "Islands Dark"])
+                        "JetBrains Islands Dark", "Atom One Dark", "Brogrammer"])
     }
 }
