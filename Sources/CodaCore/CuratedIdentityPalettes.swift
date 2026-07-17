@@ -17,8 +17,8 @@ import Foundation
 public enum CuratedIdentityPalettes {
     /// Themes shipped in the app bundle. Every one must be fully curated below.
     public static let bundledThemeNames = [
-        "Dracula", "Nord", "Solarized Light", "IsaacTheme", "Xcode Dark", "Rider Darcula",
-        "Islands Dark",
+        "Dracula", "Nord", "Solarized Light", "IsaacTheme", "JetBrains Islands Dark",
+        "Atom One Dark", "Brogrammer",
     ]
 
     public static let map: [String: [IdentityHue: RGB]] = [
@@ -49,26 +49,26 @@ public enum CuratedIdentityPalettes {
             .green: rgb("#89F398"), .cyan: rgb("#ADEBFB"), .blue: rgb("#7A88C0"),
             .purple: rgb("#C4AAF5"), .pink: rgb("#F298CE"),
         ],
-        // Xcode Default Dark — from its syntax palette (pink keywords, salmon
-        // strings, purple types, teal). [verify]
-        "Xcode Dark": [
-            .red: rgb("#FF8170"), .orange: rgb("#FFA14F"), .yellow: rgb("#D9C97C"),
-            .green: rgb("#78C2B3"), .cyan: rgb("#6BDFFF"), .blue: rgb("#4EB0CC"),
-            .purple: rgb("#DABAFF"), .pink: rgb("#FF7AB2"),
+        // JetBrains Islands Dark (canonical iTerm2 scheme) — ANSI red/green/blue/
+        // magenta/cyan, plus the Islands keyword-orange and a lightened rose pink. [verify]
+        "JetBrains Islands Dark": [
+            .red: rgb("#E4656E"), .orange: rgb("#CF8E6D"), .yellow: rgb("#D59637"),
+            .green: rgb("#6DB083"), .cyan: rgb("#6AAEA6"), .blue: rgb("#538AF9"),
+            .purple: rgb("#967BEF"), .pink: rgb("#C77DBB"),
         ],
-        // JetBrains Darcula — keyword orange, method yellow, string green, etc. [verify]
-        "Rider Darcula": [
-            .red: rgb("#FF6B68"), .orange: rgb("#CC7832"), .yellow: rgb("#FFC66D"),
-            .green: rgb("#6A8759"), .cyan: rgb("#299999"), .blue: rgb("#6897BB"),
-            .purple: rgb("#9876AA"), .pink: rgb("#C0669E"),
+        // Atom One Dark — its recognisable syntax set: ANSI accents plus the
+        // #D19A66 constant-orange and a lightened purple-rose for pink. [verify]
+        "Atom One Dark": [
+            .red: rgb("#E06C75"), .orange: rgb("#D19A66"), .yellow: rgb("#E5C07B"),
+            .green: rgb("#98C379"), .cyan: rgb("#56B6C2"), .blue: rgb("#61AFEF"),
+            .purple: rgb("#C678DD"), .pink: rgb("#D782BA"),
         ],
-        // JetBrains Islands Dark — New UI syntax palette: keyword orange, string
-        // green, number teal, function blue, constant purple; red/yellow/pink from
-        // the JetBrains console accents. [verify]
-        "Islands Dark": [
-            .red: rgb("#F0524F"), .orange: rgb("#CF8E6D"), .yellow: rgb("#E5BF00"),
-            .green: rgb("#6AAB73"), .cyan: rgb("#2AACB8"), .blue: rgb("#56A8F5"),
-            .purple: rgb("#C77DBB"), .pink: rgb("#ED7EED"),
+        // Brogrammer — vivid ANSI red/green/yellow/blue/indigo; orange blended from
+        // red⊕yellow, cyan nudged teal, pink a lightened red-magenta. [verify]
+        "Brogrammer": [
+            .red: rgb("#F81118"), .orange: rgb("#F26311"), .yellow: rgb("#ECBA0F"),
+            .green: rgb("#2DC55E"), .cyan: rgb("#17A0B8"), .blue: rgb("#2A84D2"),
+            .purple: rgb("#4E5AB7"), .pink: rgb("#B45C9E"),
         ],
     ]
 

@@ -58,6 +58,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var themeStore: ThemeStore!
     private var activeTheme: TerminalTheme!
     private let defaultThemeName = "Dracula"
+    /// Themes once bundled but since dropped — deleted from upgraders' themes dir on
+    /// launch. Only ever list names the app itself shipped (never user imports).
+    private let retiredThemeNames = ["Islands Dark", "Rider Darcula", "Xcode Dark"]
     private var kbStore: KeybindingsStore!
     private var keybindings = Keybindings()
     private var clickMonitor: Any?
@@ -87,8 +90,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         preferences = prefsStore.load()
         applyAppIcon()
         themeStore = ThemeStore(directory: home.appendingPathComponent(".coda/themes"))
+        // Retire themes dropped from the bundle so upgraders don't keep stale copies.
+        themeStore.removeThemes(named: retiredThemeNames)
+        if let active = preferences.activeTheme, retiredThemeNames.contains(active) {
+            preferences.activeTheme = defaultThemeName
+        }
         // installMissing (not seedIfEmpty) so upgraders get newly-bundled themes
-        // (e.g. Xcode Dark, Rider Darcula) without clobbering their existing files.
+        // (e.g. Atom One Dark, Brogrammer) without clobbering their existing files.
         try? themeStore.installMissing(from: bundledThemeURLs())
         activeTheme = loadActiveTheme()
         kbStore = KeybindingsStore(url: home.appendingPathComponent(".coda/keybindings.json"))

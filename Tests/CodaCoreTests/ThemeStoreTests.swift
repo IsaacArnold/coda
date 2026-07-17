@@ -82,6 +82,17 @@ final class ThemeStoreTests: XCTestCase {
         XCTAssertEqual(store.themeNames(), ["Dracula", "Xcode Dark"])
     }
 
+    func testRemoveThemesDeletesNamedFilesAndIgnoresAbsentOnes() throws {
+        let dir = tmpDir()
+        _ = try writeTheme("Dracula", in: dir)
+        _ = try writeTheme("Xcode Dark", in: dir)
+        _ = try writeTheme("Islands Dark", in: dir)
+        let store = ThemeStore(directory: dir)
+        // "Rider Darcula" is absent — removing it must not throw.
+        store.removeThemes(named: ["Xcode Dark", "Islands Dark", "Rider Darcula"])
+        XCTAssertEqual(store.themeNames(), ["Dracula"])
+    }
+
     func testInstallMissingPreservesUserEditsToExistingTheme() throws {
         let dir = tmpDir()
         let installed = try writeTheme("Dracula", in: dir)
