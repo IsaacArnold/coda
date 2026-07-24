@@ -156,6 +156,14 @@ final class SidebarController: NSViewController {
     /// app doesn't steal terminal focus on a background branch/HEAD refresh.
     private var isReloading = false
 
+    /// True while an expand/collapse is in flight, bracketed by AppKit's Will/Did
+    /// expand/collapse notifications. AppKit fires `outlineViewSelectionDidChange`
+    /// mid-collapse when the selected row is a now-hidden descendant (reselecting a
+    /// non-worktree item, or none at all); suppressing selection propagation during
+    /// that window keeps collapse purely visual and never tears down the running
+    /// terminal for the active worktree.
+    private var isTogglingCollapse = false
+
     /// Selection drives the detail surface; the primary actions (add, new, launch,
     /// archive, settings) now live in the native menu bar and toolbar.
     var onSelect: ((Worktree?, _ userInitiated: Bool) -> Void)?
@@ -759,8 +767,8 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
             // agent-state poll reloads rows frequently, and a fresh cell here must not clobber
             // the user's in-progress typed text or force the field out of edit mode.
             if editingSectionID != section.section.id {
-                cell.textField?.stringValue = section.section.name
                 cell.textField?.isEditable = false      // enabled on demand for inline rename (Task 9)
+                cell.textField?.stringValue = section.section.name
             }
             cell.textField?.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
             cell.textField?.textColor = (chrome?.color(.secondaryText).nsColor) ?? .secondaryLabelColor
@@ -839,6 +847,12 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
+        // Collapsing a section/repo that contains the selected worktree makes AppKit remove
+        // that row and fire this mid-collapse with a non-worktree item (or none at all). That
+        // must NOT propagate to `onSelect?(nil, ...)` — it would tear down the active terminal
+        // for a purely-visual collapse. The Will/Did bracket (see outlineViewItemWill/DidExpand
+        // /Collapse) suppresses selection changes for the duration of the toggle.
+        guard !isTogglingCollapse else { return }
         let userInitiated = !isReloading
         switch outline.item(atRow: outline.selectedRow) {
         case let wt as WorktreeNode: onSelect?(wt.worktree, userInitiated)
@@ -852,13 +866,18 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         !(item is SectionNode)
     }
 
+    func outlineViewItemWillExpand(_ notification: Notification) { isTogglingCollapse = true }
+    func outlineViewItemWillCollapse(_ notification: Notification) { isTogglingCollapse = true }
+
     func outlineViewItemDidExpand(_ notification: Notification) {
+        defer { isTogglingCollapse = false }
         guard !isReloading, let item = notification.userInfo?["NSObject"] else { return }
         if let s = item as? SectionNode { onToggleSectionCollapsed?(s.section.id, false) }
         else if let r = item as? RepoNode { onToggleRepoCollapsed?(r.repository.id, false) }
     }
 
     func outlineViewItemDidCollapse(_ notification: Notification) {
+        defer { isTogglingCollapse = false }
         guard !isReloading, let item = notification.userInfo?["NSObject"] else { return }
         if let s = item as? SectionNode { onToggleSectionCollapsed?(s.section.id, true) }
         else if let r = item as? RepoNode { onToggleRepoCollapsed?(r.repository.id, true) }

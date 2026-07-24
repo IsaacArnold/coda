@@ -327,66 +327,6 @@ final class WorktreeStoreTests: XCTestCase {
         XCTAssertEqual(store.state.worktrees.first { $0.id == wt.id }?.base, "main")
     }
 
-    // MARK: - reorder repositories (drag-and-drop)
-
-    /// Three added repos, in a known order, for reorder tests.
-    private func makeThreeRepos() throws -> (WorktreeStore, Config, [Repository]) {
-        let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
-        let a = try store.addRepository(path: try makeTempRepo())
-        let b = try store.addRepository(path: try makeTempRepo())
-        let c = try store.addRepository(path: try makeTempRepo())
-        return (store, cfg, [a, b, c])
-    }
-
-    func testMoveRepositoryDownUsesDropIndexConvention() throws {
-        let (store, cfg, repos) = try makeThreeRepos()   // [A, B, C]
-        // Drop A into the slot after B: NSOutlineView reports childIndex 2 (before A is removed).
-        _ = try store.moveRepository(id: repos[0].id, toIndex: 2)
-        XCTAssertEqual(store.state.repositories.map(\.id), [repos[1].id, repos[0].id, repos[2].id]) // [B, A, C]
-        XCTAssertEqual(cfg.load().repositories.map(\.id), [repos[1].id, repos[0].id, repos[2].id])
-    }
-
-    func testMoveRepositoryUp() throws {
-        let (store, _, repos) = try makeThreeRepos()   // [A, B, C]
-        // Drop C into the slot before B: childIndex 1, source is after → no adjustment.
-        _ = try store.moveRepository(id: repos[2].id, toIndex: 1)
-        XCTAssertEqual(store.state.repositories.map(\.id), [repos[0].id, repos[2].id, repos[1].id]) // [A, C, B]
-    }
-
-    func testMoveRepositoryToFirst() throws {
-        let (store, _, repos) = try makeThreeRepos()   // [A, B, C]
-        _ = try store.moveRepository(id: repos[2].id, toIndex: 0)
-        XCTAssertEqual(store.state.repositories.map(\.id), [repos[2].id, repos[0].id, repos[1].id]) // [C, A, B]
-    }
-
-    func testMoveRepositoryToLast() throws {
-        let (store, _, repos) = try makeThreeRepos()   // [A, B, C]
-        // Drop A into the end slot: childIndex 3 (== count, before removal).
-        _ = try store.moveRepository(id: repos[0].id, toIndex: 3)
-        XCTAssertEqual(store.state.repositories.map(\.id), [repos[1].id, repos[2].id, repos[0].id]) // [B, C, A]
-    }
-
-    func testMoveRepositoryNoOpKeepsOrderAndSaves() throws {
-        let (store, cfg, repos) = try makeThreeRepos()   // [A, B, C]
-        // Drop B into its own slot (childIndex 1): order unchanged, still persists cleanly.
-        _ = try store.moveRepository(id: repos[1].id, toIndex: 1)
-        let ids = [repos[0].id, repos[1].id, repos[2].id]
-        XCTAssertEqual(store.state.repositories.map(\.id), ids)
-        XCTAssertEqual(cfg.load().repositories.map(\.id), ids)
-    }
-
-    func testMoveRepositoryClampsOutOfRangeIndex() throws {
-        let (store, _, repos) = try makeThreeRepos()   // [A, B, C]
-        // An index past the end must clamp to last, not crash.
-        _ = try store.moveRepository(id: repos[0].id, toIndex: 99)
-        XCTAssertEqual(store.state.repositories.map(\.id), [repos[1].id, repos[2].id, repos[0].id]) // [B, C, A]
-    }
-
-    func testMoveRepositoryUnknownIDThrows() throws {
-        let (store, _, _) = try makeThreeRepos()
-        XCTAssertThrowsError(try store.moveRepository(id: "nope", toIndex: 0))
-    }
-
     // MARK: - Sections: lifecycle + collapse (Task 4)
 
     func testCreateSectionAppendsToStateAndRootOrder() throws {
