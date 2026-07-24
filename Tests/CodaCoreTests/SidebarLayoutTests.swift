@@ -133,6 +133,23 @@ final class SidebarLayoutTests: XCTestCase {
         XCTAssertEqual(rs.worktrees[0].branch, "main")
     }
 
+    func testBuildTreeToleratesDuplicateRepoIDs() {
+        // Two `repositories` entries sharing id "r1" (distinct paths). Must not
+        // trap when buildSidebarTree constructs its repo lookup, and must yield
+        // exactly one `.repo` root item whose repository is the first "r1" entry.
+        let repos = [
+            Repository(id: "r1", path: "/tmp/r1-a", name: "r1-a"),
+            Repository(id: "r1", path: "/tmp/r1-b", name: "r1-b"),
+        ]
+        let tree = buildSidebarTree(repositories: repos, worktrees: [],
+                                    sections: [], rootOrder: [],
+                                    branchForRepo: [:])
+        XCTAssertEqual(tree.count, 1)
+        guard case let .repo(rs) = tree[0] else { return XCTFail("expected a loose repo item") }
+        XCTAssertEqual(rs.repository.id, "r1")
+        XCTAssertEqual(rs.repository.path, "/tmp/r1-a")
+    }
+
     func testTreeReconcilesUnreferencedRepoAsLoose() {
         // r2 exists but is referenced nowhere → appears loose at the end.
         let tree = buildSidebarTree(repositories: [repo("r1"), repo("r2")], worktrees: [],

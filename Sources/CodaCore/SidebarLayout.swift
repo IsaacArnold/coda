@@ -104,7 +104,12 @@ public func buildSidebarTree(repositories: [Repository],
                              branchForRepo: [String: String]) -> [SidebarRootItem] {
     let layout = reconcileSidebarLayout(repositories: repositories,
                                         sections: sections, rootOrder: rootOrder)
-    let repoByID = Dictionary(uniqueKeysWithValues: repositories.map { ($0.id, $0) })
+    // First-wins: duplicate repo ids in the raw `repositories` array must not
+    // trap dict construction (reconciliation dedups downstream, but this lookup
+    // is built from the raw array and is consulted before that dedup helps).
+    let repoByID = repositories.reduce(into: [String: Repository]()) { acc, r in
+        if acc[r.id] == nil { acc[r.id] = r }
+    }
     let sectionByID = Dictionary(uniqueKeysWithValues: layout.sections.map { ($0.id, $0) })
 
     func repoSection(_ repo: Repository) -> RepositorySection {
