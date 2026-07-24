@@ -21,6 +21,16 @@ private final class WorktreeNode: NSObject {
     }
 }
 
+/// Reference-type node for a sidebar section header (stable identity across reloads).
+private final class SectionNode: NSObject {
+    let section: SidebarSection
+    let children: [RepoNode]
+    init(section: SidebarSection, children: [RepoNode]) {
+        self.section = section
+        self.children = children
+    }
+}
+
 /// Supacode's sidebar branch glyph — the GitHub-Octicons `git-branch` mark
 /// (bundled from supacode's asset catalog), as a tintable template image.
 /// Falls back to the SF Symbol on the unlikely chance the asset is missing.
@@ -126,7 +136,14 @@ private final class FocusHighlightRowView: NSTableRowView {
 final class SidebarController: NSViewController {
     private let outline = NSOutlineView()
     private let scroll = NSScrollView()
-    private var repoNodes: [RepoNode] = []
+    /// Ordered top-level nodes: each is a SectionNode or a RepoNode (loose repo).
+    private var rootNodes: [NSObject] = []
+    /// All repo nodes anywhere in the tree, for id lookups (loose + inside sections).
+    private var allRepoNodes: [RepoNode] { rootNodes.flatMap { node -> [RepoNode] in
+        if let s = node as? SectionNode { return s.children }
+        if let r = node as? RepoNode { return [r] }
+        return []
+    } }
     private var agentStates: [String: AgentState] = [:]
     /// Cheap +/- line counts per worktree id (Task 10), fed by the background sweep
     /// and the same live triggers that keep the diff pane current.
@@ -161,9 +178,16 @@ final class SidebarController: NSViewController {
     var onRemoveRepoColor: ((String) -> Void)?
     /// Right-click a repo header → "Remove Repository…" — forget the repo (no disk changes).
     var onRemoveRepo: ((String) -> Void)?
-    /// Drag a repo header row to a new position → reorder the top-level repo list.
-    /// Args: the dragged repo's id, and the drop child index (NSOutlineView convention).
-    var onReorderRepos: ((_ id: String, _ toIndex: Int) -> Void)?
+    /// Drag a repo row → move it into a section (`toSectionID != nil`) or to the
+    /// loose top level (`nil`), at the given index within that container.
+    var onMoveRepo: ((_ repoID: String, _ toSectionID: String?, _ atIndex: Int) -> Void)?
+    /// Drag a section header → reorder it among the top-level items.
+    var onMoveSection: ((_ sectionID: String, _ toIndex: Int) -> Void)?
+
+    /// User expanded/collapsed a section header → persist its state.
+    var onToggleSectionCollapsed: ((_ id: String, _ collapsed: Bool) -> Void)?
+    /// User expanded/collapsed a repo row → persist its state.
+    var onToggleRepoCollapsed: ((_ id: String, _ collapsed: Bool) -> Void)?
 
     /// An optional per-worktree identity-color override (active surface's effective color),
     /// keyed by worktree id; falls back to the worktree's own color when absent.
@@ -232,10 +256,12 @@ final class SidebarController: NSViewController {
         outline.indentationPerLevel = 14
         outline.dataSource = self
         outline.delegate = self
-        outline.registerForDraggedTypes([.codaRepoRow])
+        outline.registerForDraggedTypes([.codaRepoRow, .codaSectionRow])
         outline.setDraggingSourceOperationMask(.move, forLocal: true)
         rowMenu.delegate = self
         outline.menu = rowMenu
+        outline.target = self
+        outline.action = #selector(handleOutlineClick)
         scroll.documentView = outline
         scroll.hasVerticalScroller = true
         scroll.scrollerStyle = .overlay
@@ -250,8 +276,19 @@ final class SidebarController: NSViewController {
         switch outline.item(atRow: row) {
         case let repo as RepoNode: return repo.repository.id
         case let wt as WorktreeNode: return wt.worktree.repoID
-        default: return nil
+        default: return nil   // SectionNode → no repo
         }
+    }
+
+    /// Single-click on a section header row toggles its collapse (big hit target).
+    /// Repo/worktree rows are handled by normal selection. Double-click on a section
+    /// enters rename (Task 9) via `outline.doubleAction`.
+    @objc private func handleOutlineClick() {
+        let row = outline.clickedRow
+        guard row >= 0, let section = outline.item(atRow: row) as? SectionNode else { return }
+        if (NSApp.currentEvent?.clickCount ?? 1) > 1 { return }   // let doubleAction handle rename
+        if outline.isItemExpanded(section) { outline.collapseItem(section) }
+        else { outline.expandItem(section) }
     }
 
     /// The worktree id of the right-clicked row, or nil if a repo header was clicked.
@@ -312,7 +349,7 @@ final class SidebarController: NSViewController {
     /// "Custom…" for a repo → open the colour panel, pin each pick live.
     @objc private func contextCustomRepoColor(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
-        let current = repoNodes.first { $0.repository.id == id }?.repository.color
+        let current = allRepoNodes.first { $0.repository.id == id }?.repository.color
         PinColorPanel.shared.begin(initial: resolvedColor(current)) { [weak self] rgb in
             self?.onSetRepoColor?(id, IdentityColorValue.pinned(rgb).serialized)
         }
@@ -323,33 +360,41 @@ final class SidebarController: NSViewController {
         onRemoveRepoColor?(id)
     }
 
-    func reload(sections: [RepositorySection], selectedWorktreeID: String?,
+    func reload(rootItems: [SidebarRootItem], selectedWorktreeID: String?,
                 selectedRepoID: String? = nil) {
-        repoNodes = sections.map { section in
-            RepoNode(repository: section.repository,
-                     children: section.worktrees.map {
-                         WorktreeNode($0, repoColorHex: section.repository.color)
-                     })
+        // Named distinctly from the private `repoNode(id:)` lookup helper below — a local
+        // function sharing that base name would shadow it for the rest of this scope
+        // (Swift shadows by base name, not by argument label), breaking the `repoNode(id:)`
+        // call a few lines down.
+        func makeRepoNode(_ rs: RepositorySection) -> RepoNode {
+            RepoNode(repository: rs.repository,
+                     children: rs.worktrees.map { WorktreeNode($0, repoColorHex: rs.repository.color) })
+        }
+        rootNodes = rootItems.map { item -> NSObject in
+            switch item {
+            case .repo(let rs): return makeRepoNode(rs)
+            case .section(let sd):
+                return SectionNode(section: sd.section, children: sd.repos.map(makeRepoNode))
+            }
         }
         outline.reloadData()
-        for node in repoNodes { outline.expandItem(node) }
 
-        // Prefer a worktree selection; fall back to highlighting a repo header
-        // (e.g. a freshly added repo that has no worktrees yet).
+        // Honor persisted collapse state. Expand sections first (so nested repo rows
+        // exist), then repos. `isReloading` gates the didExpand/didCollapse handlers
+        // so these programmatic changes don't write back to the store.
+        isReloading = true
+        for node in rootNodes {
+            if let s = node as? SectionNode, !s.section.isCollapsed { outline.expandItem(s) }
+        }
+        for repo in allRepoNodes where !repo.repository.isCollapsed {
+            outline.expandItem(repo)
+        }
+
         let selectedItem: Any? = worktreeNode(id: selectedWorktreeID)
             ?? repoNode(id: selectedRepoID)
         if let selectedItem {
             let row = outline.row(forItem: selectedItem)
             if row >= 0 {
-                // The first `selectRowIndexes` in the same runloop turn as `reloadData()` +
-                // `expandItem(...)` is a silent no-op — the outline hasn't committed its new row
-                // set yet, so a single call (sync OR deferred) leaves `selectedRow` at -1 and the
-                // focused-row highlight never paints on launch (clicking already worked via the
-                // mouse-selection path). Priming with a sync call and re-asserting on the next
-                // turn is what makes the selection actually stick (verified). `isReloading` spans
-                // both so `outlineViewSelectionDidChange` treats it as a reload, not a user click,
-                // and doesn't steal terminal focus.
-                isReloading = true
                 outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
@@ -357,7 +402,11 @@ final class SidebarController: NSViewController {
                     self.isReloading = false
                     self.outline.scrollRowToVisible(row)
                 }
+            } else {
+                isReloading = false
             }
+        } else {
+            DispatchQueue.main.async { [weak self] in self?.isReloading = false }
         }
     }
 
@@ -374,13 +423,13 @@ final class SidebarController: NSViewController {
         switch outline.item(atRow: outline.selectedRow) {
         case let wt as WorktreeNode: return wt.worktree.repoID
         case let repo as RepoNode: return repo.repository.id
-        default: return repoNodes.first?.repository.id
+        default: return allRepoNodes.first?.repository.id
         }
     }
 
     private func worktreeNode(id: String?) -> WorktreeNode? {
         guard let id else { return nil }
-        for repo in repoNodes {
+        for repo in allRepoNodes {
             if let match = repo.children.first(where: { $0.worktree.id == id }) { return match }
         }
         return nil
@@ -388,7 +437,7 @@ final class SidebarController: NSViewController {
 
     private func repoNode(id: String?) -> RepoNode? {
         guard let id else { return nil }
-        return repoNodes.first(where: { $0.repository.id == id })
+        return allRepoNodes.first(where: { $0.repository.id == id })
     }
 
 }
@@ -448,68 +497,133 @@ extension SidebarController: NSMenuDelegate {
 extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
         switch item {
-        case nil: return repoNodes.count
+        case nil: return rootNodes.count
+        case let section as SectionNode: return section.children.count
         case let repo as RepoNode: return repo.children.count
         default: return 0
         }
     }
 
     func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
-        if let repo = item as? RepoNode { return repo.children[index] }
-        return repoNodes[index]
+        switch item {
+        case let section as SectionNode: return section.children[index]
+        case let repo as RepoNode: return repo.children[index]
+        default: return rootNodes[index]
+        }
     }
 
-    // MARK: - Drag to reorder repo header rows (repos only; worktrees not draggable)
+    // MARK: - Drag: repo rows (in/out of sections, reorder), section rows (reorder).
+    // Worktrees are not draggable.
 
     func outlineView(_ outlineView: NSOutlineView,
                      pasteboardWriterForItem item: Any) -> NSPasteboardWriting? {
-        guard let repo = item as? RepoNode else { return nil }   // worktrees: nil → not draggable
-        let pbItem = NSPasteboardItem()
-        pbItem.setString(repo.repository.id, forType: .codaRepoRow)
-        return pbItem
+        let pb = NSPasteboardItem()
+        if let repo = item as? RepoNode {
+            pb.setString(repo.repository.id, forType: .codaRepoRow)
+            return pb
+        }
+        if let section = item as? SectionNode {
+            pb.setString(section.section.id, forType: .codaSectionRow)
+            return pb
+        }
+        return nil   // worktrees are not draggable
     }
 
     func outlineView(_ outlineView: NSOutlineView,
                      validateDrop info: NSDraggingInfo,
                      proposedItem item: Any?,
                      proposedChildIndex index: Int) -> NSDragOperation {
-        // Only our repo-row drags are eligible.
-        guard info.draggingPasteboard.availableType(from: [.codaRepoRow]) != nil else { return [] }
-        // A between-rows drop at the top level is already valid.
-        if item == nil && index != NSOutlineViewDropOnItemIndex { return .move }
-        // Anything else (onto a repo, or inside a repo's children) retargets to a
-        // top-level slot so the user always sees valid between-rows feedback.
-        let target: Int
-        if let repo = item as? RepoNode {
-            target = repoNodes.firstIndex { $0.repository.id == repo.repository.id } ?? repoNodes.count
-        } else if let wt = item as? WorktreeNode {
-            target = repoNodes.firstIndex { $0.repository.id == wt.worktree.repoID } ?? repoNodes.count
-        } else {
-            target = repoNodes.count
+        let pb = info.draggingPasteboard
+
+        // --- Dragging a SECTION: only valid dropped between top-level items. ---
+        if pb.availableType(from: [.codaSectionRow]) != nil {
+            if item == nil {
+                let target = index == NSOutlineViewDropOnItemIndex ? rootNodes.count : index
+                outlineView.setDropItem(nil, dropChildIndex: target)
+                return .move
+            }
+            // Onto/into anything else → retarget to the nearest top-level slot.
+            outlineView.setDropItem(nil, dropChildIndex: rootNodes.count)
+            return .move
         }
+
+        // --- Dragging a REPO. ---
+        guard pb.availableType(from: [.codaRepoRow]) != nil else { return [] }
+
+        // Onto a section header, or between its repos → into that section.
+        if let section = item as? SectionNode {
+            let target = index == NSOutlineViewDropOnItemIndex ? section.children.count : index
+            outlineView.setDropItem(section, dropChildIndex: target)
+            return .move
+        }
+        // Onto/inside a repo that lives in a section → drop into that section after it.
+        if let repo = item as? RepoNode ?? (item as? WorktreeNode).flatMap({ wt in
+            allRepoNodes.first { $0.repository.id == wt.worktree.repoID } }) {
+            if let (section, idx) = enclosingSection(of: repo.repository.id) {
+                outlineView.setDropItem(section, dropChildIndex: idx + 1)
+                return .move
+            }
+            // Loose repo target → top-level slot next to it.
+            let target = rootNodes.firstIndex { ($0 as? RepoNode)?.repository.id == repo.repository.id }
+                ?? rootNodes.count
+            outlineView.setDropItem(nil, dropChildIndex: target)
+            return .move
+        }
+        // Top-level between-items drop (loose).
+        let target = index == NSOutlineViewDropOnItemIndex ? rootNodes.count : index
         outlineView.setDropItem(nil, dropChildIndex: target)
         return .move
+    }
+
+    /// The SectionNode that contains `repoID` and the repo's index within it, if any.
+    private func enclosingSection(of repoID: String) -> (SectionNode, Int)? {
+        for node in rootNodes {
+            if let s = node as? SectionNode,
+               let idx = s.children.firstIndex(where: { $0.repository.id == repoID }) {
+                return (s, idx)
+            }
+        }
+        return nil
     }
 
     func outlineView(_ outlineView: NSOutlineView,
                      acceptDrop info: NSDraggingInfo,
                      item: Any?,
                      childIndex index: Int) -> Bool {
-        guard let id = info.draggingPasteboard.string(forType: .codaRepoRow) else { return false }
-        // On-item drops (index == NSOutlineViewDropOnItemIndex, -1) shouldn't reach here after
-        // validateDrop retargets, but guard anyway: treat as append.
-        let dropIndex = index == NSOutlineViewDropOnItemIndex ? repoNodes.count : index
-        onReorderRepos?(id, dropIndex)
-        return true
+        let pb = info.draggingPasteboard
+
+        if let sectionID = pb.string(forType: .codaSectionRow) {
+            let dropIndex = index == NSOutlineViewDropOnItemIndex ? rootNodes.count : index
+            onMoveSection?(sectionID, dropIndex)
+            return true
+        }
+        if let repoID = pb.string(forType: .codaRepoRow) {
+            if let section = item as? SectionNode {
+                let dropIndex = index == NSOutlineViewDropOnItemIndex ? section.children.count : index
+                onMoveRepo?(repoID, section.section.id, dropIndex)
+            } else {
+                let dropIndex = index == NSOutlineViewDropOnItemIndex ? rootNodes.count : index
+                onMoveRepo?(repoID, nil, dropIndex)
+            }
+            return true
+        }
+        return false
     }
 
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
-        (item as? RepoNode).map { !$0.children.isEmpty } ?? false
+        switch item {
+        case let section as SectionNode: return !section.children.isEmpty
+        case let repo as RepoNode: return !repo.children.isEmpty
+        default: return false
+        }
     }
 
-    /// Worktree rows are two-line (title + subtitle); repo headers stay single-line.
+    /// Worktree rows are two-line (title + subtitle); section headers get a slightly
+    /// taller, distinct row; repo headers stay single-line.
     func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
-        item is WorktreeNode ? metrics.length(38) : metrics.length(24)
+        if item is WorktreeNode { return metrics.length(38) }
+        if item is SectionNode { return metrics.length(28) }
+        return metrics.length(24)   // repo header
     }
 
     /// Use a row view that stays emphasized so the focused worktree keeps its vivid accent fill
@@ -523,6 +637,20 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
     }
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
+        if let section = item as? SectionNode {
+            let cell = makeCell(identifier: "section", symbol: nil)
+            let count = section.children.count
+            cell.textField?.stringValue = section.section.name
+            cell.textField?.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+            cell.textField?.textColor = (chrome?.color(.secondaryText).nsColor) ?? .secondaryLabelColor
+            cell.textField?.lineBreakMode = .byTruncatingTail
+            cell.textField?.isEditable = false      // enabled on demand for inline rename (Task 9)
+            // Dimmed trailing count so a collapsed section shows how much it hides.
+            let badge = sectionCountLabel(for: cell)
+            badge.stringValue = "\(count)"
+            badge.isHidden = false
+            return cell
+        }
         if let repo = item as? RepoNode {
             // Repo rows are plain section headers, à la Supacode; tinted by the repo's color.
             let cell = makeCell(identifier: "repo", symbol: nil)
@@ -599,6 +727,24 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
     }
 
+    func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
+        // Section headers aren't terminal-selectable; clicking one toggles collapse (Task 7),
+        // never clears/steals the detail surface.
+        !(item is SectionNode)
+    }
+
+    func outlineViewItemDidExpand(_ notification: Notification) {
+        guard !isReloading, let item = notification.userInfo?["NSObject"] else { return }
+        if let s = item as? SectionNode { onToggleSectionCollapsed?(s.section.id, false) }
+        else if let r = item as? RepoNode { onToggleRepoCollapsed?(r.repository.id, false) }
+    }
+
+    func outlineViewItemDidCollapse(_ notification: Notification) {
+        guard !isReloading, let item = notification.userInfo?["NSObject"] else { return }
+        if let s = item as? SectionNode { onToggleSectionCollapsed?(s.section.id, true) }
+        else if let r = item as? RepoNode { onToggleRepoCollapsed?(r.repository.id, true) }
+    }
+
     private func makeWorktreeCell() -> WorktreeCellView {
         let id = NSUserInterfaceItemIdentifier("worktree")
         if let reused = outline.makeView(withIdentifier: id, owner: self) as? WorktreeCellView {
@@ -663,6 +809,27 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         return cell
     }
 
+    /// Trailing dimmed count label for a section header cell (added once, reused).
+    private func sectionCountLabel(for cell: NSTableCellView) -> NSTextField {
+        if let existing = cell.viewWithTag(9911) as? NSTextField { return existing }
+        let label = NSTextField(labelWithString: "")
+        label.tag = 9911
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        label.textColor = .tertiaryLabelColor
+        label.alignment = .right
+        label.setContentCompressionResistancePriority(.required, for: .horizontal)
+        cell.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -10),
+            label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+        ])
+        if let tf = cell.textField {
+            tf.trailingAnchor.constraint(lessThanOrEqualTo: label.leadingAnchor, constant: -6).isActive = true
+        }
+        return label
+    }
+
     /// Build (or reuse) a cell. `symbol == nil` yields a text-only row (section
     /// header); otherwise an SF Symbol icon precedes the label.
     private func makeCell(identifier: String, symbol: String?) -> NSTableCellView {
@@ -707,4 +874,6 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
 private extension NSPasteboard.PasteboardType {
     /// Private drag type carrying a dragged repo header row's repository id.
     static let codaRepoRow = NSPasteboard.PasteboardType("com.coda.sidebar.repo-row")
+    /// Private drag type carrying a dragged section header row's section id.
+    static let codaSectionRow = NSPasteboard.PasteboardType("com.coda.sidebar.section-row")
 }
