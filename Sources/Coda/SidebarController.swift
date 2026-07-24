@@ -189,6 +189,11 @@ final class SidebarController: NSViewController {
     /// User expanded/collapsed a repo row → persist its state.
     var onToggleRepoCollapsed: ((_ id: String, _ collapsed: Bool) -> Void)?
 
+    /// Inline-committed section rename (double-click header, or on-create edit).
+    var onRenameSection: ((_ id: String, _ name: String) -> Void)?
+    /// The section id currently being edited inline (so the delegate can route the commit).
+    private var editingSectionID: String?
+
     /// An optional per-worktree identity-color override (active surface's effective color),
     /// keyed by worktree id; falls back to the worktree's own color when absent.
     private var identityOverrides: [String: NSColor] = [:]
@@ -262,6 +267,7 @@ final class SidebarController: NSViewController {
         outline.menu = rowMenu
         outline.target = self
         outline.action = #selector(handleOutlineClick)
+        outline.doubleAction = #selector(handleOutlineDoubleClick)
         scroll.documentView = outline
         scroll.hasVerticalScroller = true
         scroll.scrollerStyle = .overlay
@@ -289,6 +295,32 @@ final class SidebarController: NSViewController {
         if (NSApp.currentEvent?.clickCount ?? 1) > 1 { return }   // let doubleAction handle rename
         if outline.isItemExpanded(section) { outline.collapseItem(section) }
         else { outline.expandItem(section) }
+    }
+
+    @objc private func handleOutlineDoubleClick() {
+        let row = outline.clickedRow
+        guard row >= 0, let section = outline.item(atRow: row) as? SectionNode else { return }
+        beginEditing(section: section, row: row)
+    }
+
+    /// Open a freshly created section's header for inline editing (called by AppDelegate).
+    func beginEditingSection(id: String) {
+        guard let node = rootNodes.compactMap({ $0 as? SectionNode }).first(where: { $0.section.id == id })
+        else { return }
+        let row = outline.row(forItem: node)
+        guard row >= 0 else { return }
+        beginEditing(section: node, row: row)
+    }
+
+    private func beginEditing(section: SectionNode, row: Int) {
+        guard let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: true) as? NSTableCellView,
+              let field = cell.textField else { return }
+        editingSectionID = section.section.id
+        field.isEditable = true
+        field.delegate = self
+        field.isSelectable = true
+        outline.window?.makeFirstResponder(field)
+        field.selectText(nil)
     }
 
     /// The worktree id of the right-clicked row, or nil if a repo header was clicked.
@@ -870,6 +902,18 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
         cell.identifier = id
         return cell
+    }
+}
+
+extension SidebarController: NSTextFieldDelegate {
+    func controlTextDidEndEditing(_ obj: Notification) {
+        guard let field = obj.object as? NSTextField, let id = editingSectionID else { return }
+        editingSectionID = nil
+        field.isEditable = false
+        field.delegate = nil
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Blank reverts (store ignores empty names and refreshSidebar repaints the old name).
+        onRenameSection?(id, name)
     }
 }
 
