@@ -74,4 +74,32 @@ final class SidebarLayoutTests: XCTestCase {
                                        rootOrder: [.repo("r1"), .repo("r1")])
         XCTAssertEqual(r.rootOrder, [.repo("r1")])
     }
+
+    func testDuplicateRepoIDsInInputAppearOnceLoose() {
+        // Two `repositories` entries sharing an id (distinct paths), unreferenced
+        // by any section/rootOrder, must still surface exactly once loose.
+        let repos = [
+            Repository(id: "r1", path: "/tmp/r1-a", name: "r1-a"),
+            Repository(id: "r1", path: "/tmp/r1-b", name: "r1-b"),
+        ]
+        let r = reconcileSidebarLayout(repositories: repos, sections: [], rootOrder: [])
+        XCTAssertEqual(r.rootOrder, [.repo("r1")])
+    }
+
+    func testDuplicateSectionIDsFoldFirstWins() {
+        // Two sections share id "s1"; first-wins folding happens before repos are
+        // claimed, so the second section's repo (r2) is never claimed by the
+        // dropped duplicate and must be appended loose instead of vanishing.
+        let sections = [
+            SidebarSection(id: "s1", name: "First", repoIDs: ["r1"]),
+            SidebarSection(id: "s1", name: "Second", repoIDs: ["r2"]),
+        ]
+        let r = reconcileSidebarLayout(repositories: [repo("r1"), repo("r2")],
+                                       sections: sections,
+                                       rootOrder: [.section("s1")])
+        let matching = r.sections.filter { $0.id == "s1" }
+        XCTAssertEqual(matching.count, 1)
+        XCTAssertEqual(matching.first?.repoIDs, ["r1"])
+        XCTAssertTrue(r.rootOrder.contains(.repo("r2")))
+    }
 }

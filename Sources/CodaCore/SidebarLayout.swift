@@ -14,16 +14,28 @@ public struct ReconciledLayout: Equatable {
 /// in one section), every section appears exactly once at root, and no ref points
 /// at a missing id. Unreferenced repos/sections are appended deterministically
 /// (repos in `repositories` array order), which reproduces today's exact layout
-/// for a pre-sections config (empty sections + empty rootOrder).
+/// for a pre-sections config (empty sections + empty rootOrder). Duplicate ids in
+/// the input `sections` or `repositories` arrays are folded first-wins: the first
+/// occurrence is kept and later duplicates are dropped before any claiming happens.
 public func reconcileSidebarLayout(repositories: [Repository],
                                    sections: [SidebarSection],
                                    rootOrder: [RootRef]) -> ReconciledLayout {
     let existingRepoIDs = Set(repositories.map { $0.id })
 
+    // 0. Fold sections by id, first-wins, BEFORE any claiming happens. Otherwise
+    //    a duplicate section id would still claim its repos even though only one
+    //    `.section(id)` root ref is ever emitted, silently losing those repos.
+    var seenSectionIDsForFold = Set<String>()
+    let foldedSections: [SidebarSection] = sections.filter { section in
+        guard !seenSectionIDsForFold.contains(section.id) else { return false }
+        seenSectionIDsForFold.insert(section.id)
+        return true
+    }
+
     // 1. Clean section membership: keep only existing, not-yet-claimed repo ids
     //    (first section listing a repo wins), preserving each section's order.
     var claimed = Set<String>()
-    let cleanSections: [SidebarSection] = sections.map { section in
+    let cleanSections: [SidebarSection] = foldedSections.map { section in
         var kept: [String] = []
         for id in section.repoIDs where existingRepoIDs.contains(id) && !claimed.contains(id) {
             kept.append(id); claimed.insert(id)
@@ -61,6 +73,7 @@ public func reconcileSidebarLayout(repositories: [Repository],
     //    in repositories array order (deterministic; matches pre-sections order).
     for repo in repositories where !claimed.contains(repo.id) && !seenLoose.contains(repo.id) {
         cleanRoot.append(.repo(repo.id))
+        seenLoose.insert(repo.id)
     }
 
     return ReconciledLayout(sections: cleanSections, rootOrder: cleanRoot)
