@@ -318,7 +318,20 @@ final class SidebarController: NSViewController {
     @objc private func handleOutlineDoubleClick() {
         let row = outline.clickedRow
         guard row >= 0, let section = outline.item(atRow: row) as? SectionNode else { return }
-        beginEditing(section: section, row: row)
+        // Defer to the next runloop tick so the edit starts after AppKit finishes processing
+        // the double-click (row toggle / selection settling) rather than mid-event.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let r = self.rowForSection(id: section.section.id) else { return }
+            self.beginEditing(section: section, row: r)
+        }
+    }
+
+    /// Current outline row for a section id (rows can shift between event and deferred edit).
+    private func rowForSection(id: String) -> Int? {
+        guard let node = rootNodes.compactMap({ $0 as? SectionNode }).first(where: { $0.section.id == id })
+        else { return nil }
+        let r = outline.row(forItem: node)
+        return r >= 0 ? r : nil
     }
 
     /// Open a freshly created section's header for inline editing (called by AppDelegate).
@@ -348,7 +361,12 @@ final class SidebarController: NSViewController {
         field.delegate = self
         field.isSelectable = true
         outline.window?.makeFirstResponder(field)
-        field.selectText(nil)
+        // Select-all via the LIVE field editor, NOT `field.selectText(nil)`: selectText tears the
+        // just-installed field editor back down (first responder collapses to the window before any
+        // keystroke lands), which is what broke section rename. currentEditor() is the active field
+        // editor, so selecting through it preserves the editing session while highlighting the
+        // default name to type over.
+        field.currentEditor()?.selectAll(nil)
     }
 
     /// The worktree id of the right-clicked row, or nil if a repo header was clicked.
@@ -976,7 +994,22 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
             return reused
         }
         let cell = NSTableCellView()
-        let tf = NSTextField(labelWithString: "")
+        // NOT NSTextField(labelWithString:) — that builds a STATIC LABEL cell that cannot
+        // sustain an editing session (flipping isEditable installs a field editor transiently,
+        // but selectText/first interaction collapses it right back out — breaking section
+        // inline rename). A plain NSTextField uses an editable text cell; we just style it to
+        // look like a borderless label. Repo headers reuse this and simply never flip isEditable.
+        let tf = NSTextField()
+        tf.isEditable = false
+        tf.isSelectable = false
+        tf.isBordered = false
+        tf.isBezeled = false
+        tf.drawsBackground = false
+        tf.backgroundColor = .clear
+        tf.focusRingType = .none
+        tf.usesSingleLineMode = true
+        tf.lineBreakMode = .byTruncatingTail
+        tf.cell?.isScrollable = true
         tf.translatesAutoresizingMaskIntoConstraints = false
         cell.addSubview(tf)
         cell.textField = tf
