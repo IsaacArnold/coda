@@ -12,8 +12,8 @@
 # and update later with (no re-trust needed):
 #   brew upgrade --cask coda
 cask "coda" do
-  version "0.1.23"
-  sha256 "390b1b34783323daeef1392d148b7f6a163582239cdd351b00f0e245ae352a7c"
+  version "0.1.24"
+  sha256 "d7916f878c27a9d02effc570ec9b4a252b02a55eddcc173ce23e8ec46fe54905"
 
   url "https://github.com/IsaacArnold/coda/releases/download/v#{version}/Coda-#{version}.dmg",
       verified: "github.com/IsaacArnold/coda/"
