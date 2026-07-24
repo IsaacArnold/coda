@@ -13,18 +13,23 @@ public struct Repository: Codable, Equatable, Identifiable {
     public var displayName: String?
     /// Identity color as a hex string (e.g. "#D97757"); nil → secondary gray.
     public var color: String?
+    /// Sidebar expand/collapse state; persisted so a collapsed repo stays collapsed
+    /// across reloads. Default false (expanded), matching prior always-expanded behavior.
+    public var isCollapsed: Bool
 
     public init(id: String, path: String, name: String,
                 setupScript: String = "", copyAllowlist: [String] = [],
                 autoLaunchClaude: Bool = false,
-                displayName: String? = nil, color: String? = nil) {
+                displayName: String? = nil, color: String? = nil,
+                isCollapsed: Bool = false) {
         self.id = id; self.path = path; self.name = name
         self.setupScript = setupScript; self.copyAllowlist = copyAllowlist
         self.autoLaunchClaude = autoLaunchClaude
         self.displayName = displayName; self.color = color
+        self.isCollapsed = isCollapsed
     }
 
-    private enum CodingKeys: String, CodingKey { case id, path, name, setupScript, copyAllowlist, autoLaunchClaude, displayName, color }
+    private enum CodingKeys: String, CodingKey { case id, path, name, setupScript, copyAllowlist, autoLaunchClaude, displayName, color, isCollapsed }
 
     // Custom decode so older configs without the setup / auto-launch fields still load.
     public init(from decoder: Decoder) throws {
@@ -37,6 +42,7 @@ public struct Repository: Codable, Equatable, Identifiable {
         autoLaunchClaude = try c.decodeIfPresent(Bool.self, forKey: .autoLaunchClaude) ?? false
         displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
         color = try c.decodeIfPresent(String.self, forKey: .color)
+        isCollapsed = try c.decodeIfPresent(Bool.self, forKey: .isCollapsed) ?? false
     }
 
     /// The name to show in the sidebar: a non-blank `displayName`, else the folder `name`.
@@ -96,5 +102,52 @@ extension Worktree {
                           branch: branch, worktreePath: repo.path, color: nil)
         wt.isMain = true
         return wt
+    }
+}
+
+/// A user-created sidebar group holding an ordered list of repo ids. Purely
+/// organizational display metadata — never affects git or on-disk state.
+public struct SidebarSection: Codable, Equatable, Identifiable {
+    public var id: String
+    public var name: String
+    public var isCollapsed: Bool
+    public var repoIDs: [String]
+
+    public init(id: String, name: String, isCollapsed: Bool = false, repoIDs: [String] = []) {
+        self.id = id; self.name = name; self.isCollapsed = isCollapsed; self.repoIDs = repoIDs
+    }
+}
+
+/// One entry in the interleaved top-level sidebar order: either a section or a
+/// loose (ungrouped) repo. Serialized as a tagged string ("section:<id>" /
+/// "repo:<id>") so the pretty-printed local.json stays human-readable.
+public enum RootRef: Codable, Equatable {
+    case section(String)
+    case repo(String)
+
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        if let id = raw.dropPrefixIfPresent("section:") { self = .section(id) }
+        else if let id = raw.dropPrefixIfPresent("repo:") { self = .repo(id) }
+        else {
+            throw DecodingError.dataCorrupted(
+                .init(codingPath: decoder.codingPath,
+                      debugDescription: "Unrecognized RootRef: \(raw)"))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch self {
+        case .section(let id): try c.encode("section:\(id)")
+        case .repo(let id):    try c.encode("repo:\(id)")
+        }
+    }
+}
+
+private extension String {
+    /// Returns the remainder after `prefix` if `self` starts with it, else nil.
+    func dropPrefixIfPresent(_ prefix: String) -> String? {
+        hasPrefix(prefix) ? String(dropFirst(prefix.count)) : nil
     }
 }

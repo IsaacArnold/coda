@@ -40,13 +40,20 @@ final class ShortcutCommandTests: XCTestCase {
     }
 
     func testThereAreTwentyEightBindableCommands() {
-        XCTAssertEqual(ShortcutCommand.allCases.count, 28)
+        XCTAssertEqual(ShortcutCommand.allCases.count, 29)
     }
 
     func testToggleDiffDefault() {
         XCTAssertEqual(ShortcutCommand.toggleDiff.defaultChord,
                        KeyChord("d", command: true, control: true))
         XCTAssertEqual(ShortcutCommand.toggleDiff.category, .view)
+    }
+
+    func testNewSectionCommand() {
+        XCTAssertEqual(ShortcutCommand.newSection.defaultChord,
+                       KeyChord("n", command: true, control: true))
+        XCTAssertEqual(ShortcutCommand.newSection.category, .view)
+        XCTAssertEqual(ShortcutCommand.newSection.displayName, "New Section")
     }
 }
 

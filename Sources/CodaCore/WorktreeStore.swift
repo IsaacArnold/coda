@@ -3,10 +3,12 @@ import Foundation
 public enum WorktreeStoreError: Error, CustomStringConvertible {
     case repoNotFound(String)
     case worktreeNotFound(String)
+    case sectionNotFound(String)
     public var description: String {
         switch self {
         case .repoNotFound(let id): return "Repository not found: \(id)"
         case .worktreeNotFound(let id): return "Worktree not found: \(id)"
+        case .sectionNotFound(let id): return "Section not found: \(id)"
         }
     }
 }
@@ -22,6 +24,7 @@ public final class WorktreeStore {
         self.git = git
         self.worktreeRoot = worktreeRoot
         self.state = config.load()
+        reconcilePersistedLayout()
     }
 
     public func addRepository(path: String) throws -> Repository {
@@ -30,6 +33,7 @@ public final class WorktreeStore {
         let repo = Repository(id: UUID().uuidString, path: path, name: name)
         state.repositories.append(repo)
         try config.save(state)
+        reconcilePersistedLayout()
         return repo
     }
 
@@ -80,6 +84,7 @@ public final class WorktreeStore {
         state.repositories.remove(at: idx)
         state.worktrees.removeAll { $0.repoID == id }
         try config.save(state)
+        reconcilePersistedLayout()
         return removed
     }
 
@@ -175,23 +180,133 @@ public final class WorktreeStore {
         return state.repositories[idx]
     }
 
-    /// Reorder a repository within the sidebar list. `toIndex` is the `NSOutlineView`
-    /// drop child index — the insertion slot computed BEFORE the dragged item is removed —
-    /// so it's adjusted for the removal and clamped to valid bounds. A no-op move still saves.
-    /// NEVER touches the repo on disk; this is purely the sidebar's display order.
+    // MARK: - Sidebar sections (display metadata only; never touches disk)
+
+    /// Create an empty section, appended to the top-level order. Purely display metadata.
     @discardableResult
-    public func moveRepository(id: String, toIndex: Int) throws -> [Repository] {
-        guard let current = state.repositories.firstIndex(where: { $0.id == id }) else {
+    public func createSection(name: String) throws -> SidebarSection {
+        let section = SidebarSection(id: UUID().uuidString, name: name)
+        state.sections.append(section)
+        state.rootOrder.append(.section(section.id))
+        try config.save(state)
+        return section
+    }
+
+    /// Rename a section. A blank/whitespace name is ignored (keeps the previous name).
+    @discardableResult
+    public func renameSection(id: String, name: String) throws -> SidebarSection {
+        guard let idx = state.sections.firstIndex(where: { $0.id == id }) else {
+            throw WorktreeStoreError.sectionNotFound(id)
+        }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { state.sections[idx].name = trimmed }
+        try config.save(state)
+        return state.sections[idx]
+    }
+
+    /// Delete a section, releasing its repos as loose repos at the section's former
+    /// top-level position (preserving their order). Never removes any repo.
+    public func deleteSection(id: String) throws {
+        guard let sIdx = state.sections.firstIndex(where: { $0.id == id }) else {
+            throw WorktreeStoreError.sectionNotFound(id)
+        }
+        let freed = state.sections[sIdx].repoIDs.map { RootRef.repo($0) }
+        state.sections.remove(at: sIdx)
+        if let rIdx = state.rootOrder.firstIndex(of: .section(id)) {
+            state.rootOrder.replaceSubrange(rIdx...rIdx, with: freed)
+        } else {
+            state.rootOrder.append(contentsOf: freed)
+        }
+        try config.save(state)
+    }
+
+    public func setSectionCollapsed(id: String, collapsed: Bool) throws {
+        guard let idx = state.sections.firstIndex(where: { $0.id == id }) else {
+            throw WorktreeStoreError.sectionNotFound(id)
+        }
+        state.sections[idx].isCollapsed = collapsed
+        try config.save(state)
+    }
+
+    public func setRepositoryCollapsed(id: String, collapsed: Bool) throws {
+        guard let idx = state.repositories.firstIndex(where: { $0.id == id }) else {
             throw WorktreeStoreError.repoNotFound(id)
         }
-        let repo = state.repositories.remove(at: current)
-        // Drop index counts the pre-removal array; if the item came from before the
-        // target slot, everything after it shifts down by one.
-        var dest = current < toIndex ? toIndex - 1 : toIndex
-        dest = max(0, min(dest, state.repositories.count))
-        state.repositories.insert(repo, at: dest)
+        state.repositories[idx].isCollapsed = collapsed
         try config.save(state)
-        return state.repositories
+    }
+
+    /// Move a repo into a section (`sectionID != nil`) or to the loose top level
+    /// (`sectionID == nil`). `atIndex` is the final index within the destination
+    /// container. Removes the repo from its current location first. Display only.
+    public func moveRepo(id: String, toSection sectionID: String?, atIndex: Int) throws {
+        guard state.repositories.contains(where: { $0.id == id }) else {
+            throw WorktreeStoreError.repoNotFound(id)
+        }
+        if let sectionID, !state.sections.contains(where: { $0.id == sectionID }) {
+            throw WorktreeStoreError.sectionNotFound(sectionID)
+        }
+
+        // Where is it now? A section's repoIDs, or a loose .repo ref in rootOrder.
+        let sourceSectionIdx = state.sections.firstIndex { $0.repoIDs.contains(id) }
+        let sourceRootIdx = state.rootOrder.firstIndex(of: .repo(id))
+
+        // Adjust the target index if we're removing from the SAME container at a
+        // position before the insertion point (the classic drop-index correction).
+        var dest = atIndex
+        if let sectionID, let sourceSectionIdx,
+           state.sections[sourceSectionIdx].id == sectionID,
+           let from = state.sections[sourceSectionIdx].repoIDs.firstIndex(of: id),
+           from < atIndex {
+            dest -= 1
+        } else if sectionID == nil, let sourceRootIdx, sourceRootIdx < atIndex {
+            dest -= 1
+        }
+
+        // Remove from current location.
+        if let sourceSectionIdx {
+            state.sections[sourceSectionIdx].repoIDs.removeAll { $0 == id }
+        }
+        if let sourceRootIdx {
+            state.rootOrder.remove(at: sourceRootIdx)
+        }
+
+        // Insert into destination.
+        if let sectionID, let dIdx = state.sections.firstIndex(where: { $0.id == sectionID }) {
+            let clamped = max(0, min(dest, state.sections[dIdx].repoIDs.count))
+            state.sections[dIdx].repoIDs.insert(id, at: clamped)
+        } else {
+            let clamped = max(0, min(dest, state.rootOrder.count))
+            state.rootOrder.insert(.repo(id), at: clamped)
+        }
+        try config.save(state)
+    }
+
+    /// Reorder a section among the top-level items. Its repos travel with it (they
+    /// live in the section, not in rootOrder). Display only.
+    public func moveSection(id: String, toIndex: Int) throws {
+        guard let current = state.rootOrder.firstIndex(of: .section(id)) else {
+            throw WorktreeStoreError.sectionNotFound(id)
+        }
+        state.rootOrder.remove(at: current)
+        var dest = current < toIndex ? toIndex - 1 : toIndex
+        dest = max(0, min(dest, state.rootOrder.count))
+        state.rootOrder.insert(.section(id), at: dest)
+        try config.save(state)
+    }
+
+    /// Normalize the persisted sidebar overlay so `rootOrder` always reflects the full,
+    /// canonical top-level order (every repo referenced exactly once, dangling refs dropped,
+    /// unreferenced repos appended loose in array order). Persists only when something
+    /// actually changed, so a launch on already-canonical state does no disk write.
+    private func reconcilePersistedLayout() {
+        let result = reconcileSidebarLayout(repositories: state.repositories,
+                                            sections: state.sections,
+                                            rootOrder: state.rootOrder)
+        guard result.sections != state.sections || result.rootOrder != state.rootOrder else { return }
+        state.sections = result.sections
+        state.rootOrder = result.rootOrder
+        try? config.save(state)
     }
 
     private func uniqueBranch(base: String, repo: Repository) -> String {
