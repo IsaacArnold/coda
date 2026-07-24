@@ -102,4 +102,44 @@ final class SidebarLayoutTests: XCTestCase {
         XCTAssertEqual(matching.first?.repoIDs, ["r1"])
         XCTAssertTrue(r.rootOrder.contains(.repo("r2")))
     }
+
+    // MARK: buildSidebarTree
+
+    private func wt(_ id: String, _ repoID: String) -> Worktree {
+        Worktree(id: id, repoID: repoID, title: id, branch: id, worktreePath: "/tmp/wt/\(id)")
+    }
+
+    func testTreeGroupsReposUnderSectionsAndKeepsLooseReposAtRoot() {
+        let repos = [repo("r1"), repo("r2"), repo("r3")]
+        let sections = [SidebarSection(id: "s1", name: "Work", repoIDs: ["r1", "r2"])]
+        let tree = buildSidebarTree(repositories: repos, worktrees: [],
+                                    sections: sections,
+                                    rootOrder: [.section("s1"), .repo("r3")],
+                                    branchForRepo: ["r1": "main", "r2": "main", "r3": "main"])
+        guard case let .section(sd) = tree[0] else { return XCTFail("expected section first") }
+        XCTAssertEqual(sd.section.name, "Work")
+        XCTAssertEqual(sd.repos.map { $0.repository.id }, ["r1", "r2"])
+        guard case let .repo(rs) = tree[1] else { return XCTFail("expected loose repo second") }
+        XCTAssertEqual(rs.repository.id, "r3")
+    }
+
+    func testTreeReposCarryMainCheckoutFirst() {
+        let tree = buildSidebarTree(repositories: [repo("r1")], worktrees: [wt("w1", "r1")],
+                                    sections: [], rootOrder: [.repo("r1")],
+                                    branchForRepo: ["r1": "main"])
+        guard case let .repo(rs) = tree[0] else { return XCTFail() }
+        XCTAssertEqual(rs.worktrees.map { $0.id }, ["r1#main", "w1"])
+        XCTAssertTrue(rs.worktrees[0].isMain)
+        XCTAssertEqual(rs.worktrees[0].branch, "main")
+    }
+
+    func testTreeReconcilesUnreferencedRepoAsLoose() {
+        // r2 exists but is referenced nowhere → appears loose at the end.
+        let tree = buildSidebarTree(repositories: [repo("r1"), repo("r2")], worktrees: [],
+                                    sections: [], rootOrder: [.repo("r1")],
+                                    branchForRepo: [:])
+        XCTAssertEqual(tree.count, 2)
+        guard case let .repo(rs) = tree[1] else { return XCTFail() }
+        XCTAssertEqual(rs.repository.id, "r2")
+    }
 }

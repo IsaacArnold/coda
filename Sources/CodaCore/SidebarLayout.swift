@@ -78,3 +78,49 @@ public func reconcileSidebarLayout(repositories: [Repository],
 
     return ReconciledLayout(sections: cleanSections, rootOrder: cleanRoot)
 }
+
+/// A section together with the display sections of the repos it contains.
+public struct SectionDisplay: Equatable {
+    public let section: SidebarSection
+    public let repos: [RepositorySection]
+    public init(section: SidebarSection, repos: [RepositorySection]) {
+        self.section = section; self.repos = repos
+    }
+}
+
+/// One top-level row group: a section (with its repos) or a loose repo.
+public enum SidebarRootItem: Equatable {
+    case section(SectionDisplay)
+    case repo(RepositorySection)
+}
+
+/// Build the ordered three-tier sidebar tree (section → repo → worktree). Runs
+/// reconciliation first so the result always satisfies the exactly-once invariant.
+/// Each repo carries its synthesized main-checkout row first, then its real worktrees.
+public func buildSidebarTree(repositories: [Repository],
+                             worktrees: [Worktree],
+                             sections: [SidebarSection],
+                             rootOrder: [RootRef],
+                             branchForRepo: [String: String]) -> [SidebarRootItem] {
+    let layout = reconcileSidebarLayout(repositories: repositories,
+                                        sections: sections, rootOrder: rootOrder)
+    let repoByID = Dictionary(uniqueKeysWithValues: repositories.map { ($0.id, $0) })
+    let sectionByID = Dictionary(uniqueKeysWithValues: layout.sections.map { ($0.id, $0) })
+
+    func repoSection(_ repo: Repository) -> RepositorySection {
+        let main = Worktree.mainCheckout(for: repo, branch: branchForRepo[repo.id] ?? "")
+        let real = worktrees.filter { $0.repoID == repo.id }
+        return RepositorySection(repository: repo, worktrees: [main] + real)
+    }
+
+    return layout.rootOrder.compactMap { ref in
+        switch ref {
+        case .repo(let id):
+            return repoByID[id].map { .repo(repoSection($0)) }
+        case .section(let id):
+            guard let section = sectionByID[id] else { return nil }
+            let repos = section.repoIDs.compactMap { repoByID[$0].map(repoSection) }
+            return .section(SectionDisplay(section: section, repos: repos))
+        }
+    }
+}
