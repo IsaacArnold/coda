@@ -88,7 +88,7 @@ public enum ShortcutCategory: String, CaseIterable, Sendable {
 
 public enum ShortcutCommand: String, Codable, CaseIterable, Sendable {
     case newWorktree, launchClaude, openInEditor, revealInFinder, archiveWorktree
-    case addRepository, toggleSidebar, toggleDiff, openSettings
+    case addRepository, toggleSidebar, toggleDiff, openSettings, newSection
     case newSurface, closeSurface, nextSurface, prevSurface, splitSurface
     case splitDown, focusPaneLeft, focusPaneRight, focusPaneUp, focusPaneDown
     case goToSurface1, goToSurface2, goToSurface3, goToSurface4, goToSurface5
@@ -104,6 +104,7 @@ public enum ShortcutCommand: String, Codable, CaseIterable, Sendable {
         case .addRepository: return "Add Repository"
         case .toggleSidebar: return "Toggle Sidebar"
         case .toggleDiff: return "Toggle Diff"
+        case .newSection: return "New Section"
         case .openSettings: return "Settings"
         case .newSurface: return "New Tab"
         case .closeSurface: return "Close Tab"
@@ -137,7 +138,7 @@ public enum ShortcutCommand: String, Codable, CaseIterable, Sendable {
              .goToSurface6, .goToSurface7, .goToSurface8, .goToSurface9:
             return .surface
         case .addRepository: return .repository
-        case .toggleSidebar, .toggleDiff: return .view
+        case .toggleSidebar, .toggleDiff, .newSection: return .view
         case .openSettings: return .app
         }
     }
@@ -152,6 +153,7 @@ public enum ShortcutCommand: String, Codable, CaseIterable, Sendable {
         case .addRepository:   return KeyChord("n", command: true, shift: true)
         case .toggleSidebar:   return KeyChord("s", command: true, control: true)
         case .toggleDiff:      return KeyChord("d", command: true, control: true)
+        case .newSection:      return KeyChord("n", command: true, control: true)
         case .openSettings:    return KeyChord(",", command: true)
         case .newSurface:      return KeyChord("t", command: true)
         case .closeSurface:    return KeyChord("w", command: true)
