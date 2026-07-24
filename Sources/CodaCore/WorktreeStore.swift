@@ -3,10 +3,12 @@ import Foundation
 public enum WorktreeStoreError: Error, CustomStringConvertible {
     case repoNotFound(String)
     case worktreeNotFound(String)
+    case sectionNotFound(String)
     public var description: String {
         switch self {
         case .repoNotFound(let id): return "Repository not found: \(id)"
         case .worktreeNotFound(let id): return "Worktree not found: \(id)"
+        case .sectionNotFound(let id): return "Section not found: \(id)"
         }
     }
 }
@@ -192,6 +194,62 @@ public final class WorktreeStore {
         state.repositories.insert(repo, at: dest)
         try config.save(state)
         return state.repositories
+    }
+
+    // MARK: - Sidebar sections (display metadata only; never touches disk)
+
+    /// Create an empty section, appended to the top-level order. Purely display metadata.
+    @discardableResult
+    public func createSection(name: String) throws -> SidebarSection {
+        let section = SidebarSection(id: UUID().uuidString, name: name)
+        state.sections.append(section)
+        state.rootOrder.append(.section(section.id))
+        try config.save(state)
+        return section
+    }
+
+    /// Rename a section. A blank/whitespace name is ignored (keeps the previous name).
+    @discardableResult
+    public func renameSection(id: String, name: String) throws -> SidebarSection {
+        guard let idx = state.sections.firstIndex(where: { $0.id == id }) else {
+            throw WorktreeStoreError.sectionNotFound(id)
+        }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { state.sections[idx].name = trimmed }
+        try config.save(state)
+        return state.sections[idx]
+    }
+
+    /// Delete a section, releasing its repos as loose repos at the section's former
+    /// top-level position (preserving their order). Never removes any repo.
+    public func deleteSection(id: String) throws {
+        guard let sIdx = state.sections.firstIndex(where: { $0.id == id }) else {
+            throw WorktreeStoreError.sectionNotFound(id)
+        }
+        let freed = state.sections[sIdx].repoIDs.map { RootRef.repo($0) }
+        state.sections.remove(at: sIdx)
+        if let rIdx = state.rootOrder.firstIndex(of: .section(id)) {
+            state.rootOrder.replaceSubrange(rIdx...rIdx, with: freed)
+        } else {
+            state.rootOrder.append(contentsOf: freed)
+        }
+        try config.save(state)
+    }
+
+    public func setSectionCollapsed(id: String, collapsed: Bool) throws {
+        guard let idx = state.sections.firstIndex(where: { $0.id == id }) else {
+            throw WorktreeStoreError.sectionNotFound(id)
+        }
+        state.sections[idx].isCollapsed = collapsed
+        try config.save(state)
+    }
+
+    public func setRepositoryCollapsed(id: String, collapsed: Bool) throws {
+        guard let idx = state.repositories.firstIndex(where: { $0.id == id }) else {
+            throw WorktreeStoreError.repoNotFound(id)
+        }
+        state.repositories[idx].isCollapsed = collapsed
+        try config.save(state)
     }
 
     private func uniqueBranch(base: String, repo: Repository) -> String {
