@@ -191,6 +191,12 @@ final class SidebarController: NSViewController {
 
     /// Inline-committed section rename (double-click header, or on-create edit).
     var onRenameSection: ((_ id: String, _ name: String) -> Void)?
+    /// Right-click empty space / a section header → "New Section".
+    var onNewSection: (() -> Void)?
+    /// Right-click a section header → "Delete Section".
+    var onDeleteSection: ((_ id: String) -> Void)?
+    /// Ask AppDelegate to begin inline rename of a section (so it can route to `beginEditingSection`).
+    var onBeginRenameSection: ((_ id: String) -> Void)?
     /// The section id currently being edited inline (so the delegate can route the commit).
     private var editingSectionID: String?
     /// The text field currently being edited inline — identity check so a reload's fresh cell
@@ -406,6 +412,24 @@ final class SidebarController: NSViewController {
         onRemoveRepoColor?(id)
     }
 
+    @objc private func contextNewSection(_ sender: NSMenuItem) { onNewSection?() }
+
+    @objc private func contextRenameSection(_ sender: NSMenuItem) {
+        (sender.representedObject as? String).map { onBeginRenameSection?($0) }
+    }
+
+    @objc private func contextDeleteSection(_ sender: NSMenuItem) {
+        (sender.representedObject as? String).map { onDeleteSection?($0) }
+    }
+
+    @objc private func contextMoveRepoToSection(_ sender: NSMenuItem) {
+        guard let info = sender.representedObject as? [String: String?],
+              let repoID = info["repoID"] ?? nil else { return }
+        // sectionID nil-value key means "None (Top Level)".
+        let sectionID = info["sectionID"] ?? nil
+        onMoveRepo?(repoID, sectionID, Int.max)   // append; store clamps to the end
+    }
+
     func reload(rootItems: [SidebarRootItem], selectedWorktreeID: String?,
                 selectedRepoID: String? = nil) {
         // Named distinctly from the private `repoNode(id:)` lookup helper below — a local
@@ -491,27 +515,48 @@ final class SidebarController: NSViewController {
 extension SidebarController: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
+        let row = outline.clickedRow
+        let clicked = row >= 0 ? outline.item(atRow: row) : nil
+
+        // Always offer "New Section".
+        let newSection = NSMenuItem(title: "New Section",
+                                    action: #selector(contextNewSection(_:)), keyEquivalent: "")
+        newSection.target = self
+        menu.addItem(newSection)
+
+        // --- Section header right-click: Rename / Delete. ---
+        if let section = clicked as? SectionNode {
+            menu.addItem(.separator())
+            let rename = NSMenuItem(title: "Rename Section…",
+                                    action: #selector(contextRenameSection(_:)), keyEquivalent: "")
+            rename.target = self; rename.representedObject = section.section.id
+            menu.addItem(rename)
+            let delete = NSMenuItem(title: "Delete Section",
+                                    action: #selector(contextDeleteSection(_:)), keyEquivalent: "")
+            delete.target = self; delete.representedObject = section.section.id
+            menu.addItem(delete)
+            return
+        }
+
+        // --- Repo / worktree right-click: existing repo actions + Move to Section. ---
         guard let repoID = clickedRepoID() else { return }
+        menu.addItem(.separator())
         let settings = NSMenuItem(title: "Repository Settings…",
                                   action: #selector(contextRepoSettings(_:)), keyEquivalent: "")
-        settings.target = self
-        settings.representedObject = repoID
+        settings.target = self; settings.representedObject = repoID
         menu.addItem(settings)
         let newWorktree = NSMenuItem(title: "New Worktree",
                                      action: #selector(contextNewWorktree(_:)), keyEquivalent: "")
-        newWorktree.target = self
-        newWorktree.representedObject = repoID
+        newWorktree.target = self; newWorktree.representedObject = repoID
         menu.addItem(newWorktree)
 
-        // Repo-header right-click (not a worktree row): rename + color the repository.
         if clickedWorktreeID() == nil {
             menu.addItem(.separator())
+            menu.addItem(makeMoveToSectionItem(repoID: repoID))
             let rename = NSMenuItem(title: "Rename…",
                                     action: #selector(contextRenameRepo(_:)), keyEquivalent: "")
-            rename.target = self
-            rename.representedObject = repoID
+            rename.target = self; rename.representedObject = repoID
             menu.addItem(rename)
-
             if let theme = activeTheme {
                 menu.addItem(ColorMenu.makeSetColorItem(
                     targetID: repoID, theme: theme, target: self,
@@ -519,12 +564,10 @@ extension SidebarController: NSMenuDelegate {
                     customColor: #selector(contextCustomRepoColor(_:)),
                     removeColor: #selector(contextRemoveRepoColor(_:))))
             }
-
             menu.addItem(.separator())
             let remove = NSMenuItem(title: "Remove Repository…",
                                     action: #selector(contextRemoveRepo(_:)), keyEquivalent: "")
-            remove.target = self
-            remove.representedObject = repoID
+            remove.target = self; remove.representedObject = repoID
             menu.addItem(remove)
         }
 
@@ -537,6 +580,31 @@ extension SidebarController: NSMenuDelegate {
                 customColor: #selector(contextCustomColor(_:)),
                 removeColor: #selector(contextRemoveColor(_:))))
         }
+    }
+
+    /// A "Move to Section ▸" submenu listing every section plus "None (Top Level)".
+    private func makeMoveToSectionItem(repoID: String) -> NSMenuItem {
+        let parent = NSMenuItem(title: "Move to Section", action: nil, keyEquivalent: "")
+        let sub = NSMenu()
+        let currentSection = enclosingSection(of: repoID)?.0.section.id
+        let none = NSMenuItem(title: "None (Top Level)",
+                              action: #selector(contextMoveRepoToSection(_:)), keyEquivalent: "")
+        none.target = self
+        none.representedObject = ["repoID": repoID, "sectionID": nil] as [String: String?]
+        none.state = (currentSection == nil) ? .on : .off
+        sub.addItem(none)
+        let sections = rootNodes.compactMap { $0 as? SectionNode }
+        if !sections.isEmpty { sub.addItem(.separator()) }
+        for s in sections {
+            let mi = NSMenuItem(title: s.section.name,
+                                action: #selector(contextMoveRepoToSection(_:)), keyEquivalent: "")
+            mi.target = self
+            mi.representedObject = ["repoID": repoID, "sectionID": s.section.id] as [String: String?]
+            mi.state = (currentSection == s.section.id) ? .on : .off
+            sub.addItem(mi)
+        }
+        parent.submenu = sub
+        return parent
     }
 }
 
