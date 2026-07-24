@@ -116,4 +116,53 @@ final class ModelsCodableTests: XCTestCase {
         let wt = try JSONDecoder().decode(Worktree.self, from: Data(json.utf8))
         XCTAssertNil(wt.base)
     }
+
+    // MARK: - Sidebar sections (Task 1)
+
+    func testRepositoryDecodesOldJSONWithoutIsCollapsed() throws {
+        let json = #"{"id":"r1","path":"/tmp/repo","name":"repo"}"#
+        let repo = try JSONDecoder().decode(Repository.self, from: Data(json.utf8))
+        XCTAssertFalse(repo.isCollapsed)
+    }
+
+    func testRepositoryRoundTripsIsCollapsed() throws {
+        var repo = Repository(id: "r1", path: "/tmp/repo", name: "repo")
+        repo.isCollapsed = true
+        let back = try JSONDecoder().decode(Repository.self, from: JSONEncoder().encode(repo))
+        XCTAssertTrue(back.isCollapsed)
+        XCTAssertEqual(back, repo)
+    }
+
+    func testSidebarSectionRoundTrips() throws {
+        let s = SidebarSection(id: "s1", name: "Work", isCollapsed: true, repoIDs: ["r1", "r2"])
+        let back = try JSONDecoder().decode(SidebarSection.self, from: JSONEncoder().encode(s))
+        XCTAssertEqual(back, s)
+    }
+
+    func testRootRefSerializesAsTaggedString() throws {
+        let data = try JSONEncoder().encode([RootRef.section("s1"), RootRef.repo("r9")])
+        let text = String(decoding: data, as: UTF8.self)
+        XCTAssertTrue(text.contains("section:s1"))
+        XCTAssertTrue(text.contains("repo:r9"))
+        let back = try JSONDecoder().decode([RootRef].self, from: data)
+        XCTAssertEqual(back, [.section("s1"), .repo("r9")])
+    }
+
+    func testLocalStateDecodesOldJSONWithoutSections() throws {
+        let json = #"{"repositories":[{"id":"r1","path":"/tmp/r","name":"r"}],"worktrees":[]}"#
+        let state = try JSONDecoder().decode(LocalState.self, from: Data(json.utf8))
+        XCTAssertTrue(state.sections.isEmpty)
+        XCTAssertTrue(state.rootOrder.isEmpty)
+        XCTAssertEqual(state.repositories.count, 1)
+    }
+
+    func testLocalStateRoundTripsSectionsAndRootOrder() throws {
+        var state = LocalState(repositories: [Repository(id: "r1", path: "/tmp/r", name: "r")],
+                               worktrees: [])
+        state.sections = [SidebarSection(id: "s1", name: "Work", isCollapsed: false, repoIDs: ["r1"])]
+        state.rootOrder = [.section("s1")]
+        let back = try JSONDecoder().decode(LocalState.self, from: JSONEncoder().encode(state))
+        XCTAssertEqual(back.sections, state.sections)
+        XCTAssertEqual(back.rootOrder, state.rootOrder)
+    }
 }
