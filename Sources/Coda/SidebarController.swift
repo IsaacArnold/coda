@@ -193,6 +193,10 @@ final class SidebarController: NSViewController {
     var onRenameSection: ((_ id: String, _ name: String) -> Void)?
     /// The section id currently being edited inline (so the delegate can route the commit).
     private var editingSectionID: String?
+    /// The text field currently being edited inline — identity check so a reload's fresh cell
+    /// (a different NSTextField instance) can't be mistaken for the field actually in edit mode,
+    /// and so a re-entrant `beginEditing` can tell whether an edit is already in flight.
+    private weak var editingField: NSTextField?
 
     /// An optional per-worktree identity-color override (active surface's effective color),
     /// keyed by worktree id; falls back to the worktree's own color when absent.
@@ -315,7 +319,17 @@ final class SidebarController: NSViewController {
     private func beginEditing(section: SectionNode, row: Int) {
         guard let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: true) as? NSTableCellView,
               let field = cell.textField else { return }
+        // Re-entrant edit start: an edit is already in flight (double-clicking a second section,
+        // or a scripted `beginEditingSection` while the user is mid-rename elsewhere). Resign the
+        // OLD field's first-responder status first so `controlTextDidEndEditing` fires and commits
+        // it under the OLD `editingSectionID`/`editingField` — BEFORE we overwrite either with the
+        // new section's identity. Ordering matters: reassigning first would commit the old text
+        // under the new id.
+        if editingField != nil {
+            outline.window?.makeFirstResponder(nil)
+        }
         editingSectionID = section.section.id
+        editingField = field
         field.isEditable = true
         field.delegate = self
         field.isSelectable = true
@@ -673,11 +687,16 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         if let section = item as? SectionNode {
             let cell = makeCell(identifier: "section", symbol: nil)
             let count = section.children.count
-            cell.textField?.stringValue = section.section.name
+            // Skip the stringValue/isEditable reset while this row is mid-rename — the 1s
+            // agent-state poll reloads rows frequently, and a fresh cell here must not clobber
+            // the user's in-progress typed text or force the field out of edit mode.
+            if editingSectionID != section.section.id {
+                cell.textField?.stringValue = section.section.name
+                cell.textField?.isEditable = false      // enabled on demand for inline rename (Task 9)
+            }
             cell.textField?.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
             cell.textField?.textColor = (chrome?.color(.secondaryText).nsColor) ?? .secondaryLabelColor
             cell.textField?.lineBreakMode = .byTruncatingTail
-            cell.textField?.isEditable = false      // enabled on demand for inline rename (Task 9)
             // Dimmed trailing count so a collapsed section shows how much it hides.
             let badge = sectionCountLabel(for: cell)
             badge.stringValue = "\(count)"
@@ -907,8 +926,13 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
 
 extension SidebarController: NSTextFieldDelegate {
     func controlTextDidEndEditing(_ obj: Notification) {
-        guard let field = obj.object as? NSTextField, let id = editingSectionID else { return }
+        // Identity-gated, not just presence-gated: a reload mid-edit can swap in a fresh
+        // NSTextField instance for the same row, and re-entrant `beginEditing` resigns the OLD
+        // field to commit it — either way, only the field we're actually tracking should commit.
+        guard let field = obj.object as? NSTextField, field === editingField, let id = editingSectionID
+        else { return }
         editingSectionID = nil
+        editingField = nil
         field.isEditable = false
         field.delegate = nil
         let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
