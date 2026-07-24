@@ -252,6 +252,65 @@ public final class WorktreeStore {
         try config.save(state)
     }
 
+    /// Move a repo into a section (`sectionID != nil`) or to the loose top level
+    /// (`sectionID == nil`). `atIndex` is the final index within the destination
+    /// container. Removes the repo from its current location first. Display only.
+    public func moveRepo(id: String, toSection sectionID: String?, atIndex: Int) throws {
+        guard state.repositories.contains(where: { $0.id == id }) else {
+            throw WorktreeStoreError.repoNotFound(id)
+        }
+        if let sectionID, !state.sections.contains(where: { $0.id == sectionID }) {
+            throw WorktreeStoreError.sectionNotFound(sectionID)
+        }
+
+        // Where is it now? A section's repoIDs, or a loose .repo ref in rootOrder.
+        let sourceSectionIdx = state.sections.firstIndex { $0.repoIDs.contains(id) }
+        let sourceRootIdx = state.rootOrder.firstIndex(of: .repo(id))
+
+        // Adjust the target index if we're removing from the SAME container at a
+        // position before the insertion point (the classic drop-index correction).
+        var dest = atIndex
+        if let sectionID, let sourceSectionIdx,
+           state.sections[sourceSectionIdx].id == sectionID,
+           let from = state.sections[sourceSectionIdx].repoIDs.firstIndex(of: id),
+           from < atIndex {
+            dest -= 1
+        } else if sectionID == nil, let sourceRootIdx, sourceRootIdx < atIndex {
+            dest -= 1
+        }
+
+        // Remove from current location.
+        if let sourceSectionIdx {
+            state.sections[sourceSectionIdx].repoIDs.removeAll { $0 == id }
+        }
+        if let sourceRootIdx {
+            state.rootOrder.remove(at: sourceRootIdx)
+        }
+
+        // Insert into destination.
+        if let sectionID, let dIdx = state.sections.firstIndex(where: { $0.id == sectionID }) {
+            let clamped = max(0, min(dest, state.sections[dIdx].repoIDs.count))
+            state.sections[dIdx].repoIDs.insert(id, at: clamped)
+        } else {
+            let clamped = max(0, min(dest, state.rootOrder.count))
+            state.rootOrder.insert(.repo(id), at: clamped)
+        }
+        try config.save(state)
+    }
+
+    /// Reorder a section among the top-level items. Its repos travel with it (they
+    /// live in the section, not in rootOrder). Display only.
+    public func moveSection(id: String, toIndex: Int) throws {
+        guard let current = state.rootOrder.firstIndex(of: .section(id)) else {
+            throw WorktreeStoreError.sectionNotFound(id)
+        }
+        state.rootOrder.remove(at: current)
+        var dest = current < toIndex ? toIndex - 1 : toIndex
+        dest = max(0, min(dest, state.rootOrder.count))
+        state.rootOrder.insert(.section(id), at: dest)
+        try config.save(state)
+    }
+
     private func uniqueBranch(base: String, repo: Repository) -> String {
         let taken = Set(state.worktrees.filter { $0.repoID == repo.id }.map { $0.branch })
         if !taken.contains(base) { return base }

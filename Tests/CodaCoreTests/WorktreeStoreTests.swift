@@ -414,23 +414,20 @@ final class WorktreeStoreTests: XCTestCase {
         XCTAssertEqual(back.name, "Work")   // blank reverts to previous
     }
 
-    // TODO(Task 5): needs moveRepo(id:toSection:atIndex:), not yet on the branch. Uncomment
-    // once Task 5 lands `moveRepo` on WorktreeStore — this test is otherwise complete and
-    // verbatim from the Task 4 brief.
-    // func testDeleteSectionReleasesReposLooseAtFormerPosition() throws {
-    //     let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
-    //     let r1 = try store.addRepository(path: "/tmp/sec-r1")
-    //     let r2 = try store.addRepository(path: "/tmp/sec-r2")
-    //     let s = try store.createSection(name: "Work")
-    //     try store.moveRepo(id: r1.id, toSection: s.id, atIndex: 0)
-    //     try store.moveRepo(id: r2.id, toSection: s.id, atIndex: 1)
-    //     // rootOrder is now [.section(s)]; r1,r2 live inside it.
-    //     try store.deleteSection(id: s.id)
-    //     let loaded = cfg.load()
-    //     XCTAssertFalse(loaded.sections.contains { $0.id == s.id })
-    //     // Both repos released loose, in the section's slot, preserving their order.
-    //     XCTAssertEqual(loaded.rootOrder, [.repo(r1.id), .repo(r2.id)])
-    // }
+    func testDeleteSectionReleasesReposLooseAtFormerPosition() throws {
+        let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r1 = try store.addRepository(path: "/tmp/sec-r1")
+        let r2 = try store.addRepository(path: "/tmp/sec-r2")
+        let s = try store.createSection(name: "Work")
+        try store.moveRepo(id: r1.id, toSection: s.id, atIndex: 0)
+        try store.moveRepo(id: r2.id, toSection: s.id, atIndex: 1)
+        // rootOrder is now [.section(s)]; r1,r2 live inside it.
+        try store.deleteSection(id: s.id)
+        let loaded = cfg.load()
+        XCTAssertFalse(loaded.sections.contains { $0.id == s.id })
+        // Both repos released loose, in the section's slot, preserving their order.
+        XCTAssertEqual(loaded.rootOrder, [.repo(r1.id), .repo(r2.id)])
+    }
 
     func testSetSectionCollapsedPersists() throws {
         let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
@@ -449,5 +446,77 @@ final class WorktreeStoreTests: XCTestCase {
     func testDeleteMissingSectionThrows() throws {
         let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
         XCTAssertThrowsError(try store.deleteSection(id: "nope"))
+    }
+
+    // MARK: - Sections: movement (Task 5)
+
+    func testMoveRepoIntoSection() throws {
+        let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: "/tmp/mv-r1")
+        let s = try store.createSection(name: "Work")
+        try store.moveRepo(id: r.id, toSection: s.id, atIndex: 0)
+        let loaded = cfg.load()
+        XCTAssertEqual(loaded.sections.first { $0.id == s.id }?.repoIDs, [r.id])
+        // The repo's loose root ref is gone; only the section remains at root.
+        XCTAssertEqual(loaded.rootOrder, [.section(s.id)])
+    }
+
+    func testMoveRepoOutOfSectionToRoot() throws {
+        let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: "/tmp/mv-r1")
+        let s = try store.createSection(name: "Work")
+        try store.moveRepo(id: r.id, toSection: s.id, atIndex: 0)
+        try store.moveRepo(id: r.id, toSection: nil, atIndex: 0)   // back to loose, at root index 0
+        let loaded = cfg.load()
+        XCTAssertEqual(loaded.sections.first { $0.id == s.id }?.repoIDs, [])
+        XCTAssertEqual(loaded.rootOrder, [.repo(r.id), .section(s.id)])
+    }
+
+    func testMoveRepoBetweenSections() throws {
+        let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: "/tmp/mv-r1")
+        let a = try store.createSection(name: "A")
+        let b = try store.createSection(name: "B")
+        try store.moveRepo(id: r.id, toSection: a.id, atIndex: 0)
+        try store.moveRepo(id: r.id, toSection: b.id, atIndex: 0)
+        let loaded = cfg.load()
+        XCTAssertEqual(loaded.sections.first { $0.id == a.id }?.repoIDs, [])
+        XCTAssertEqual(loaded.sections.first { $0.id == b.id }?.repoIDs, [r.id])
+    }
+
+    func testReorderReposWithinSection() throws {
+        let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r1 = try store.addRepository(path: "/tmp/mv-r1")
+        let r2 = try store.addRepository(path: "/tmp/mv-r2")
+        let s = try store.createSection(name: "Work")
+        try store.moveRepo(id: r1.id, toSection: s.id, atIndex: 0)
+        try store.moveRepo(id: r2.id, toSection: s.id, atIndex: 1)   // [r1, r2]
+        try store.moveRepo(id: r1.id, toSection: s.id, atIndex: 2)   // move r1 to the end
+        XCTAssertEqual(cfg.load().sections.first { $0.id == s.id }?.repoIDs, [r2.id, r1.id])
+    }
+
+    func testReorderLooseReposAtRoot() throws {
+        let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r1 = try store.addRepository(path: "/tmp/mv-r1")
+        let r2 = try store.addRepository(path: "/tmp/mv-r2")
+        // Prime rootOrder to [r1, r2] via reconciliation-independent explicit moves.
+        try store.moveRepo(id: r1.id, toSection: nil, atIndex: 0)
+        try store.moveRepo(id: r2.id, toSection: nil, atIndex: 1)
+        try store.moveRepo(id: r1.id, toSection: nil, atIndex: 2)   // r1 to the end
+        XCTAssertEqual(cfg.load().rootOrder, [.repo(r2.id), .repo(r1.id)])
+    }
+
+    func testMoveSectionReordersAmongRootItems() throws {
+        let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r = try store.addRepository(path: "/tmp/mv-r1")
+        try store.moveRepo(id: r.id, toSection: nil, atIndex: 0)     // rootOrder: [repo r]
+        let s = try store.createSection(name: "Work")               // rootOrder: [repo r, section s]
+        try store.moveSection(id: s.id, toIndex: 0)                 // section to the front
+        XCTAssertEqual(cfg.load().rootOrder, [.section(s.id), .repo(r.id)])
+    }
+
+    func testMoveRepoMissingThrows() throws {
+        let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        XCTAssertThrowsError(try store.moveRepo(id: "nope", toSection: nil, atIndex: 0))
     }
 }
