@@ -458,7 +458,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         sidebar.onSetRepoColor = { [weak self] repoID, hex in self?.setRepoColor(repoID, hex) }
         sidebar.onRemoveRepoColor = { [weak self] repoID in self?.setRepoColor(repoID, nil) }
         sidebar.onRemoveRepo = { [weak self] repoID in self?.removeRepo(repoID) }
-        sidebar.onReorderRepos = { [weak self] id, idx in self?.reorderRepo(id, toIndex: idx) }
+        sidebar.onMoveRepo = { [weak self] repoID, sectionID, idx in self?.moveRepo(repoID, toSection: sectionID, atIndex: idx) }
+        sidebar.onMoveSection = { [weak self] id, idx in self?.moveSection(id, toIndex: idx) }
+        sidebar.onToggleSectionCollapsed = { [weak self] id, collapsed in self?.setSectionCollapsed(id, collapsed) }
+        sidebar.onToggleRepoCollapsed = { [weak self] id, collapsed in self?.setRepoCollapsed(id, collapsed) }
+        sidebar.onNewSection = { [weak self] in self?.newSection() }
+        sidebar.onDeleteSection = { [weak self] id in self?.deleteSection(id) }
+        sidebar.onRenameSection = { [weak self] id, name in self?.renameSection(id, name: name) }
+        sidebar.onBeginRenameSection = { [weak self] id in self?.sidebar.beginEditingSection(id: id) }
     }
 
     /// Override a worktree's identity color and repaint its bar + sidebar row.
@@ -496,26 +503,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         } catch { presentError(error) }
     }
 
-    /// Reorder a repository in the sidebar list and persist, keeping the current
-    /// selection highlighted so the focused row doesn't jump. Display order only —
-    /// nothing on disk changes.
-    private func reorderRepo(_ repoID: String, toIndex: Int) {
+    /// Move a repo into a section / to the loose top level and persist. Display only.
+    private func moveRepo(_ repoID: String, toSection sectionID: String?, atIndex: Int) {
         do {
-            _ = try store.moveRepository(id: repoID, toIndex: toIndex)
+            try store.moveRepo(id: repoID, toSection: sectionID, atIndex: atIndex)
             refreshSidebar(select: selectedWorktree?.id)
         } catch { presentError(error) }
     }
 
-    /// Sidebar sections WITH each repo's synthesized main-checkout row prepended.
-    private func displaySections() -> [RepositorySection] {
-        sectionsWithMainCheckouts(repositories: store.state.repositories,
-                                  worktrees: store.state.worktrees,
-                                  branchForRepo: currentBranches)
+    private func moveSection(_ id: String, toIndex: Int) {
+        do {
+            try store.moveSection(id: id, toIndex: toIndex)
+            refreshSidebar(select: selectedWorktree?.id)
+        } catch { presentError(error) }
+    }
+
+    private func setSectionCollapsed(_ id: String, _ collapsed: Bool) {
+        do { try store.setSectionCollapsed(id: id, collapsed: collapsed) }
+        catch { presentError(error) }
+    }
+
+    private func setRepoCollapsed(_ id: String, _ collapsed: Bool) {
+        do { try store.setRepositoryCollapsed(id: id, collapsed: collapsed) }
+        catch { presentError(error) }
+    }
+
+    /// Create a new empty section and open its header for inline naming.
+    private func newSection() {
+        do {
+            let s = try store.createSection(name: "New Section")
+            refreshSidebar(select: selectedWorktree?.id)
+            // Defer so the row exists after reloadData before we begin editing.
+            DispatchQueue.main.async { [weak self] in self?.sidebar.beginEditingSection(id: s.id) }
+        } catch { presentError(error) }
+    }
+
+    private func renameSection(_ id: String, name: String) {
+        do {
+            _ = try store.renameSection(id: id, name: name)
+            refreshSidebar(select: selectedWorktree?.id)
+        } catch { presentError(error) }
+    }
+
+    /// Delete a section (no confirm): its repos fall back to the root. Display only.
+    private func deleteSection(_ id: String) {
+        do {
+            try store.deleteSection(id: id)
+            refreshSidebar(select: selectedWorktree?.id)
+        } catch { presentError(error) }
+    }
+
+    /// The ordered three-tier sidebar tree: sections/loose repos → repos → worktrees.
+    private func displayRootItems() -> [SidebarRootItem] {
+        buildSidebarTree(repositories: store.state.repositories,
+                         worktrees: store.state.worktrees,
+                         sections: store.state.sections,
+                         rootOrder: store.state.rootOrder,
+                         branchForRepo: currentBranches)
     }
 
     /// Every worktree the sidebar shows — synthesized main checkouts + real worktrees.
     private func allDisplayWorktrees() -> [Worktree] {
-        displaySections().flatMap { $0.worktrees }
+        displayRootItems().flatMap { item -> [Worktree] in
+            switch item {
+            case .repo(let rs): return rs.worktrees
+            case .section(let sd): return sd.repos.flatMap { $0.worktrees }
+            }
+        }
     }
 
     /// Look up a display worktree (incl. a synthesized main checkout) by id.
@@ -525,7 +579,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     private func refreshSidebar(select id: String?) {
-        sidebar.reload(sections: displaySections(), selectedWorktreeID: id)
+        sidebar.reload(rootItems: displayRootItems(), selectedWorktreeID: id)
     }
 
     /// Read each repo's current branch and start a HEAD watcher for it (call once at launch).
@@ -1379,6 +1433,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                                   command: .toggleSidebar)
         sidebarItem.target = nil
         addItem(to: viewMenu, "Toggle Diff", #selector(toggleDiffAction), command: .toggleDiff)
+        viewMenu.addItem(.separator())
+        addItem(to: viewMenu, "New Section", #selector(newSectionAction), command: .newSection)
         viewItem.submenu = viewMenu
 
         // Worktree menu — the primary actions, mirroring the toolbar
@@ -1450,6 +1506,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     @objc private func newWorktreeAction() { newWorktree() }
     @objc private func addRepoAction() { addRepo() }
     @objc private func openSettingsAction() { openSettings() }
+    @objc private func newSectionAction() { newSection() }
 
     @objc private func toggleDiffAction() {
         diffPaneItem.animator().isCollapsed.toggle()
