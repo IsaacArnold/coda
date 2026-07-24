@@ -559,13 +559,14 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         // Onto/inside a repo that lives in a section → drop into that section after it.
         if let repo = item as? RepoNode ?? (item as? WorktreeNode).flatMap({ wt in
             allRepoNodes.first { $0.repository.id == wt.worktree.repoID } }) {
+            // Dropping onto a row inserts after it (consistent for loose repos and section members).
             if let (section, idx) = enclosingSection(of: repo.repository.id) {
                 outlineView.setDropItem(section, dropChildIndex: idx + 1)
                 return .move
             }
-            // Loose repo target → top-level slot next to it.
-            let target = rootNodes.firstIndex { ($0 as? RepoNode)?.repository.id == repo.repository.id }
-                ?? rootNodes.count
+            // Loose repo target → top-level slot right after it.
+            let target = (rootNodes.firstIndex { ($0 as? RepoNode)?.repository.id == repo.repository.id })
+                .map { $0 + 1 } ?? rootNodes.count
             outlineView.setDropItem(nil, dropChildIndex: target)
             return .move
         }
@@ -648,7 +649,6 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
             // Dimmed trailing count so a collapsed section shows how much it hides.
             let badge = sectionCountLabel(for: cell)
             badge.stringValue = "\(count)"
-            badge.isHidden = false
             return cell
         }
         if let repo = item as? RepoNode {
@@ -860,9 +860,11 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
                 tf.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             ])
         } else {
+            let tfTrailing = tf.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6)
+            tfTrailing.priority = .init(999)   // breakable: a section count label may add a tighter trailing bound
             NSLayoutConstraint.activate([
                 tf.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
-                tf.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
+                tfTrailing,
                 tf.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             ])
         }
