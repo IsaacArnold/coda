@@ -1,0 +1,67 @@
+import Foundation
+
+/// The cleaned, invariant-satisfying sidebar layout (Task 2).
+public struct ReconciledLayout: Equatable {
+    public var sections: [SidebarSection]
+    public var rootOrder: [RootRef]
+    public init(sections: [SidebarSection], rootOrder: [RootRef]) {
+        self.sections = sections; self.rootOrder = rootOrder
+    }
+}
+
+/// Clean a persisted (sections, rootOrder) overlay against the set of repos that
+/// actually exist, enforcing: every existing repo appears exactly once (loose OR
+/// in one section), every section appears exactly once at root, and no ref points
+/// at a missing id. Unreferenced repos/sections are appended deterministically
+/// (repos in `repositories` array order), which reproduces today's exact layout
+/// for a pre-sections config (empty sections + empty rootOrder).
+public func reconcileSidebarLayout(repositories: [Repository],
+                                   sections: [SidebarSection],
+                                   rootOrder: [RootRef]) -> ReconciledLayout {
+    let existingRepoIDs = Set(repositories.map { $0.id })
+
+    // 1. Clean section membership: keep only existing, not-yet-claimed repo ids
+    //    (first section listing a repo wins), preserving each section's order.
+    var claimed = Set<String>()
+    let cleanSections: [SidebarSection] = sections.map { section in
+        var kept: [String] = []
+        for id in section.repoIDs where existingRepoIDs.contains(id) && !claimed.contains(id) {
+            kept.append(id); claimed.insert(id)
+        }
+        var copy = section
+        copy.repoIDs = kept
+        return copy
+    }
+    let sectionIDs = Set(cleanSections.map { $0.id })
+
+    // 2. Rebuild rootOrder: keep valid, first-seen refs; a repo claimed by a
+    //    section can't also be loose.
+    var seenSections = Set<String>()
+    var seenLoose = Set<String>()
+    var cleanRoot: [RootRef] = []
+    for ref in rootOrder {
+        switch ref {
+        case .section(let id):
+            if sectionIDs.contains(id), !seenSections.contains(id) {
+                cleanRoot.append(ref); seenSections.insert(id)
+            }
+        case .repo(let id):
+            if existingRepoIDs.contains(id), !claimed.contains(id), !seenLoose.contains(id) {
+                cleanRoot.append(ref); seenLoose.insert(id)
+            }
+        }
+    }
+
+    // 3. Append any section not referenced at root (in sections array order).
+    for section in cleanSections where !seenSections.contains(section.id) {
+        cleanRoot.append(.section(section.id))
+    }
+
+    // 4. Append any repo neither claimed by a section nor already loose,
+    //    in repositories array order (deterministic; matches pre-sections order).
+    for repo in repositories where !claimed.contains(repo.id) && !seenLoose.contains(repo.id) {
+        cleanRoot.append(.repo(repo.id))
+    }
+
+    return ReconciledLayout(sections: cleanSections, rootOrder: cleanRoot)
+}
