@@ -519,4 +519,60 @@ final class WorktreeStoreTests: XCTestCase {
         let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
         XCTAssertThrowsError(try store.moveRepo(id: "nope", toSection: nil, atIndex: 0))
     }
+
+    // MARK: - Reconcile-and-persist (Task 5b)
+
+    func testAddRepositoryAppendsLooseRootRef() throws {
+        let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r1 = try store.addRepository(path: "/tmp/rp-r1")
+        let r2 = try store.addRepository(path: "/tmp/rp-r2")
+        XCTAssertEqual(store.state.rootOrder, [.repo(r1.id), .repo(r2.id)])
+        XCTAssertEqual(cfg.load().rootOrder, [.repo(r1.id), .repo(r2.id)])   // persisted
+    }
+
+    func testInitReconcilesLegacyStateWithEmptyRootOrder() throws {
+        // Simulate a pre-sections local.json: repositories present, no rootOrder/sections.
+        let cfgURL = URL(fileURLWithPath: NSTemporaryDirectory() + "legacy-" + UUID().uuidString + ".json")
+        let seed = LocalState(repositories: [Repository(id: "r1", path: "/tmp/l1", name: "l1"),
+                                             Repository(id: "r2", path: "/tmp/l2", name: "l2")],
+                              worktrees: [])
+        try Config(url: cfgURL).save(seed)
+        // Fresh store over that file reconciles on init and persists the full rootOrder.
+        let store = WorktreeStore(config: Config(url: cfgURL),
+                                  git: GitWorktree(gitPath: "/usr/bin/git"),
+                                  worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        XCTAssertEqual(store.state.rootOrder, [.repo("r1"), .repo("r2")])
+        XCTAssertEqual(Config(url: cfgURL).load().rootOrder, [.repo("r1"), .repo("r2")])
+    }
+
+    func testRemoveRepositoryDropsRootRef() throws {
+        let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r1 = try store.addRepository(path: "/tmp/rr-r1")
+        let r2 = try store.addRepository(path: "/tmp/rr-r2")
+        _ = try store.removeRepository(id: r1.id)
+        XCTAssertEqual(store.state.rootOrder, [.repo(r2.id)])
+        XCTAssertEqual(cfg.load().rootOrder, [.repo(r2.id)])
+    }
+
+    func testRemoveRepositoryDropsSectionMembership() throws {
+        let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r1 = try store.addRepository(path: "/tmp/rm-r1")
+        let s = try store.createSection(name: "Work")
+        try store.moveRepo(id: r1.id, toSection: s.id, atIndex: 0)
+        _ = try store.removeRepository(id: r1.id)
+        XCTAssertEqual(store.state.sections.first { $0.id == s.id }?.repoIDs, [])
+    }
+
+    func testInitDoesNotRewriteAlreadyCanonicalState() throws {
+        // Second construction over already-canonical state should be a no-op (idempotent).
+        let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let r1 = try store.addRepository(path: "/tmp/idem-r1")
+        let before = cfg.load().rootOrder
+        // Re-open a store over the same config; rootOrder is already canonical → unchanged.
+        let store2 = WorktreeStore(config: cfg,
+                                   git: GitWorktree(gitPath: "/usr/bin/git"),
+                                   worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        XCTAssertEqual(store2.state.rootOrder, before)
+        XCTAssertEqual(store2.state.rootOrder, [.repo(r1.id)])
+    }
 }

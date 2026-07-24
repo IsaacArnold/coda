@@ -24,6 +24,7 @@ public final class WorktreeStore {
         self.git = git
         self.worktreeRoot = worktreeRoot
         self.state = config.load()
+        reconcilePersistedLayout()
     }
 
     public func addRepository(path: String) throws -> Repository {
@@ -32,6 +33,7 @@ public final class WorktreeStore {
         let repo = Repository(id: UUID().uuidString, path: path, name: name)
         state.repositories.append(repo)
         try config.save(state)
+        reconcilePersistedLayout()
         return repo
     }
 
@@ -82,6 +84,7 @@ public final class WorktreeStore {
         state.repositories.remove(at: idx)
         state.worktrees.removeAll { $0.repoID == id }
         try config.save(state)
+        reconcilePersistedLayout()
         return removed
     }
 
@@ -309,6 +312,20 @@ public final class WorktreeStore {
         dest = max(0, min(dest, state.rootOrder.count))
         state.rootOrder.insert(.section(id), at: dest)
         try config.save(state)
+    }
+
+    /// Normalize the persisted sidebar overlay so `rootOrder` always reflects the full,
+    /// canonical top-level order (every repo referenced exactly once, dangling refs dropped,
+    /// unreferenced repos appended loose in array order). Persists only when something
+    /// actually changed, so a launch on already-canonical state does no disk write.
+    private func reconcilePersistedLayout() {
+        let result = reconcileSidebarLayout(repositories: state.repositories,
+                                            sections: state.sections,
+                                            rootOrder: state.rootOrder)
+        guard result.sections != state.sections || result.rootOrder != state.rootOrder else { return }
+        state.sections = result.sections
+        state.rootOrder = result.rootOrder
+        try? config.save(state)
     }
 
     private func uniqueBranch(base: String, repo: Repository) -> String {
