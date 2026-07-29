@@ -106,6 +106,22 @@ private final class WorktreeCellView: NSTableCellView {
 /// drives the cell's `.emphasized` backgroundStyle for contrast-aware text) and draw the fill
 /// ourselves in the chosen accent colour.
 private final class FocusHighlightRowView: NSTableRowView {
+    /// The hover wash: a neutral fill, deliberately NOT the accent. The accent means
+    /// "this is the active worktree"; reusing it for hover would put two accent-tinted
+    /// rows on screen at once and dilute that meaning. Dark mode needs more alpha than
+    /// light for the same perceived weight over the darker sidebar.
+    private static let hoverWash = NSColor(name: nil) { appearance in
+        let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        return NSColor.labelColor.withAlphaComponent(isDark ? 0.10 : 0.06)
+    }
+
+    /// True while the pointer is over this row. Set by `SidebarController.updateHover(to:)`;
+    /// repaints only on an actual change so the continuous stream of mouseMoved events
+    /// (and the 1s agent-state poll) don't churn `needsDisplay`.
+    var isHovered = false {
+        didSet { if isHovered != oldValue { needsDisplay = true } }
+    }
+
     /// The fill colour for the selected row (the app accent). Set by the sidebar per row.
     var accentColor: NSColor = NSColor(hex: AccentColor.defaultHex) ?? .controlAccentColor
 
@@ -128,6 +144,21 @@ private final class FocusHighlightRowView: NSTableRowView {
         accentColor.withAlphaComponent(0.5).setStroke()
         path.lineWidth = 1
         path.stroke()
+    }
+
+    /// The hover wash, in the same rounded rect as the selection fill so hover and
+    /// selection read as one system. No rim stroke — the selection's stroked edge is what
+    /// makes it read as a defined panel, so omitting it keeps hover subordinate. Skipped
+    /// on the selected row so its accent glass fill is never muddied; because that check
+    /// lives here, selection always wins with no ordering subtlety between the two
+    /// overrides.
+    override func drawBackground(in dirtyRect: NSRect) {
+        super.drawBackground(in: dirtyRect)
+        guard isHovered, !isSelected else { return }
+        let rect = bounds.insetBy(dx: 4, dy: 1)
+        let path = NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5)
+        Self.hoverWash.setFill()
+        path.fill()
     }
 }
 
@@ -225,6 +256,38 @@ final class SidebarController: NSViewController {
     /// to the default; AppDelegate pushes the user's choice via `setAccentColor(_:)`.
     private var accentFill: NSColor = NSColor(hex: AccentColor.defaultHex) ?? .controlAccentColor
 
+    /// Which row the pointer is over, and the bookkeeping for repainting on a change.
+    private var hoverState = SidebarHoverState()
+    /// Read access for `rowViewForItem`, which must seed a recycled row view's hover flag.
+    private var hoveredRow: Int? { hoverState.hoveredRow }
+
+    /// The single funnel for every hover trigger (pointer motion, pointer exit, scroll,
+    /// reload). Repaints only the rows whose highlight changed — never a reload, which
+    /// would drop the outline's selection and erase the focused-worktree highlight.
+    ///
+    /// Bounds validation (negative/out-of-range rows, a shrunk row count) lives in
+    /// `SidebarHoverState.update(to:rowCount:)`, not here — passing `outline.numberOfRows`
+    /// is enough for the pure type to guarantee it never hands back a row index that no
+    /// longer exists, which is what `rowView(atRow:)` below requires to stay crash-safe.
+    private func updateHover(to row: Int?) {
+        for changed in hoverState.update(to: row, rowCount: outline.numberOfRows) {
+            (outline.rowView(atRow: changed, makeIfNecessary: false)
+                as? FocusHighlightRowView)?.isHovered = (changed == hoverState.hoveredRow)
+        }
+    }
+
+    /// The outline row under the pointer right now, or nil if the pointer is outside the
+    /// sidebar. Used by both the motion handler and the scroll/reload recompute, so all
+    /// paths agree on how a screen point maps to a row.
+    private func rowUnderPointer() -> Int? {
+        guard let window = outline.window else { return nil }
+        let inWindow = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+        let inOutline = outline.convert(inWindow, from: nil)
+        guard outline.visibleRect.contains(inOutline) else { return nil }
+        let row = outline.row(at: inOutline)
+        return row >= 0 ? row : nil
+    }
+
     /// Set the accent colour for the focused-row highlight and repaint live. Pushes the colour
     /// onto the visible row views and redraws them in place — deliberately NOT `reloadData()`,
     /// which drops the outline selection and would erase the highlight until the next click.
@@ -286,11 +349,64 @@ final class SidebarController: NSViewController {
         outline.target = self
         outline.action = #selector(handleOutlineClick)
         outline.doubleAction = #selector(handleOutlineDoubleClick)
+        // One tracking area on the outline, not one per row: row views are recycled by
+        // `makeView(withIdentifier:)` and their frames shift as rows are inserted, removed
+        // and re-measured, so per-row areas would need tearing down and re-adding at
+        // exactly the right moments. `.inVisibleRect` has AppKit maintain the rect as the
+        // outline resizes and scrolls, so this is installed once and never rebuilt.
+        // `.mouseMoved` in a tracking area delivers motion to the owner without needing
+        // `window.acceptsMouseMovedEvents`. `.activeInActiveApp` means the area goes
+        // inactive when the app deactivates, which fires mouseExited and clears the wash.
+        // `NSTrackingArea` retains its `owner`, so this is a deliberate, inert retain
+        // cycle (outline → tracking area → self): `AppDelegate` holds exactly one
+        // `SidebarController` for the process lifetime, so it never needs to deallocate.
+        // If the sidebar were ever instantiated per-window/per-document, this would need
+        // a weak-owner proxy (or tearing the area down in `deinit`) to avoid a leak.
+        outline.addTrackingArea(NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect],
+            owner: self))
         scroll.documentView = outline
+        // Scrolling with the pointer held still produces no mouseMoved, so the wash would
+        // stay on a row that has slid out from under the cursor. Recompute from the
+        // pointer's actual position whenever the clip view scrolls.
+        // `postsBoundsChangedNotifications` is true by default, but set it explicitly so
+        // this doesn't silently break if that ever changes.
+        scroll.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(clipViewBoundsChanged),
+            name: NSView.boundsDidChangeNotification,
+            object: scroll.contentView)
         scroll.hasVerticalScroller = true
         scroll.scrollerStyle = .overlay
         scroll.drawsBackground = false
         view = scroll
+    }
+
+    // MARK: - Hover
+    //
+    // Enter/motion/exit come from the tracking area installed in `loadView()`, whose
+    // owner is this controller; `clipViewBoundsChanged()` below responds to scrolling.
+    // Hover is purely visual and must never select, scroll, or take first responder —
+    // clicks are handled separately via `outline.action`/`doubleAction`.
+
+    override func mouseEntered(with event: NSEvent) {
+        updateHover(to: rowUnderPointer())
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        updateHover(to: rowUnderPointer())
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        updateHover(to: nil)
+    }
+
+    /// The sidebar scrolled. The pointer may not have moved, but a different row is now
+    /// under it.
+    @objc private func clipViewBoundsChanged() {
+        updateHover(to: rowUnderPointer())
     }
 
     /// The repo the right-clicked row belongs to (a repo header, or a worktree's parent repo).
@@ -503,6 +619,13 @@ final class SidebarController: NSViewController {
             }
         } else {
             DispatchQueue.main.async { [weak self] in self?.isReloading = false }
+        }
+
+        // Rows may have shifted under a stationary pointer. Deferred so the outline has
+        // finished expanding/selecting and `row(at:)` reflects the settled layout.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.updateHover(to: self.rowUnderPointer())
         }
     }
 
@@ -774,6 +897,14 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         let row = (outline.makeView(withIdentifier: id, owner: self) as? FocusHighlightRowView)
             ?? { let r = FocusHighlightRowView(); r.identifier = id; return r }()
         row.accentColor = accentFill
+        // Load-bearing, not defensive belt-and-braces: `reloadData(forRowIndexes:columnIndexes:)`
+        // — which the 1s agent-state poll (`reloadRowsPreservingSelection()`) calls every
+        // tick — re-vends row views, and `makeView(withIdentifier:)` can hand a row a
+        // *different* recycled instance than it had a moment ago. Without reseeding here,
+        // a poll tick could strand `isHovered == true` on a non-hovered row while the
+        // actually-hovered row went dark.
+        let index = outline.row(forItem: item)
+        row.isHovered = (index >= 0 && index == hoveredRow)
         return row
     }
 
