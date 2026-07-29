@@ -147,17 +147,27 @@ so it can be unit-tested away from AppKit:
 public struct SidebarHoverState: Equatable {
     public private(set) var hoveredRow: Int?
 
-    /// Move hover to `row` (nil = no row). Returns the row indices whose
-    /// highlight changed and therefore need redrawing — empty if nothing moved.
-    public mutating func update(to row: Int?) -> [Int]
+    /// Move hover to `row` (nil = no row) given the outline's current row count.
+    /// Returns the row indices whose highlight changed and therefore need
+    /// redrawing — empty if nothing moved. A row outside `0..<rowCount` counts as
+    /// "no row", and the returned indices are always valid rows.
+    public mutating func update(to row: Int?, rowCount: Int) -> [Int]
 }
 ```
 
-`update(to:)` returns the old and new rows when hover moves, just the vacated row
-when hover leaves, just the entered row when hover arrives, and nothing when the
-row is unchanged. The controller feeds it from `mouseMoved` / `mouseExited` / the
-scroll recompute, then walks the returned indices and sets `isHovered` on each
+`update(to:rowCount:)` returns the old and new rows when hover moves, just the
+vacated row when hover leaves, just the entered row when hover arrives, and nothing
+when the row is unchanged. The controller feeds it from `mouseMoved` /
+`mouseEntered` / `mouseExited` / the scroll recompute, passing
+`outline.numberOfRows`, then walks the returned indices and sets `isHovered` on each
 corresponding row view via `outline.rowView(atRow:makeIfNecessary: false)`.
+
+**`rowCount` is a crash guard, not a convenience.** The vacated index comes from a
+previous event, and the sidebar's row count shrinks whenever a repo, section, or
+worktree goes away. `outline.rowView(atRow:)` range-checks and throws an uncaught
+`NSTableViewException` on a stale index — `makeIfNecessary: false` does not spare
+you. Bounds validation lives in this type, where tests cover it, rather than as a
+guard at the call site that reads as optional.
 
 Repainting only the changed rows — rather than reloading — keeps hover off the
 reload path entirely, so it cannot perturb selection or focus.
