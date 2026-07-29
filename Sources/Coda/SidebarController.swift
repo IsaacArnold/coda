@@ -264,11 +264,13 @@ final class SidebarController: NSViewController {
     /// The single funnel for every hover trigger (pointer motion, pointer exit, scroll,
     /// reload). Repaints only the rows whose highlight changed — never a reload, which
     /// would drop the outline's selection and erase the focused-worktree highlight.
+    ///
+    /// Bounds validation (negative/out-of-range rows, a shrunk row count) lives in
+    /// `SidebarHoverState.update(to:rowCount:)`, not here — passing `outline.numberOfRows`
+    /// is enough for the pure type to guarantee it never hands back a row index that no
+    /// longer exists, which is what `rowView(atRow:)` below requires to stay crash-safe.
     private func updateHover(to row: Int?) {
-        // Only rows that are actually hoverable: a row index of -1 (below the last row,
-        // or in the gap around one) means "no row".
-        let target = (row ?? -1) >= 0 ? row : nil
-        for changed in hoverState.update(to: target) {
+        for changed in hoverState.update(to: row, rowCount: outline.numberOfRows) {
             (outline.rowView(atRow: changed, makeIfNecessary: false)
                 as? FocusHighlightRowView)?.isHovered = (changed == hoverState.hoveredRow)
         }
@@ -355,6 +357,11 @@ final class SidebarController: NSViewController {
         // `.mouseMoved` in a tracking area delivers motion to the owner without needing
         // `window.acceptsMouseMovedEvents`. `.activeInActiveApp` means the area goes
         // inactive when the app deactivates, which fires mouseExited and clears the wash.
+        // `NSTrackingArea` retains its `owner`, so this is a deliberate, inert retain
+        // cycle (outline → tracking area → self): `AppDelegate` holds exactly one
+        // `SidebarController` for the process lifetime, so it never needs to deallocate.
+        // If the sidebar were ever instantiated per-window/per-document, this would need
+        // a weak-owner proxy (or tearing the area down in `deinit`) to avoid a leak.
         outline.addTrackingArea(NSTrackingArea(
             rect: .zero,
             options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect],
@@ -379,9 +386,14 @@ final class SidebarController: NSViewController {
 
     // MARK: - Hover
     //
-    // Motion and exit come from the tracking area installed in `loadView()`, whose owner
-    // is this controller. These are the only mouse events the sidebar handles — hover is
-    // purely visual and must never select, scroll, or take first responder.
+    // Enter/motion/exit come from the tracking area installed in `loadView()`, whose
+    // owner is this controller; `clipViewBoundsChanged()` below responds to scrolling.
+    // Hover is purely visual and must never select, scroll, or take first responder —
+    // clicks are handled separately via `outline.action`/`doubleAction`.
+
+    override func mouseEntered(with event: NSEvent) {
+        updateHover(to: rowUnderPointer())
+    }
 
     override func mouseMoved(with event: NSEvent) {
         updateHover(to: rowUnderPointer())
@@ -885,8 +897,12 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         let row = (outline.makeView(withIdentifier: id, owner: self) as? FocusHighlightRowView)
             ?? { let r = FocusHighlightRowView(); r.identifier = id; return r }()
         row.accentColor = accentFill
-        // Row views are recycled, so a previously-hovered instance must not arrive at a
-        // different row still lit. Seed from the live hover state.
+        // Load-bearing, not defensive belt-and-braces: `reloadData(forRowIndexes:columnIndexes:)`
+        // — which the 1s agent-state poll (`reloadRowsPreservingSelection()`) calls every
+        // tick — re-vends row views, and `makeView(withIdentifier:)` can hand a row a
+        // *different* recycled instance than it had a moment ago. Without reseeding here,
+        // a poll tick could strand `isHovered == true` on a non-hovered row while the
+        // actually-hovered row went dark.
         let index = outline.row(forItem: item)
         row.isHovered = (index >= 0 && index == hoveredRow)
         return row

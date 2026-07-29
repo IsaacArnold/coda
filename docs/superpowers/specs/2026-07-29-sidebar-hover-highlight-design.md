@@ -40,9 +40,13 @@ Two existing behaviours the hover work must not disturb:
 
 - **Background reloads.** The 1s agent-state poll calls
   `reloadRowsPreservingSelection()` → `reloadData(forRowIndexes:columnIndexes:)`.
-  This rebuilds *cell* views but reuses *row* views, so row-view state survives it.
-  A full `reloadData()` drops the outline's selection, which is why the poll path
-  avoids it.
+  Tested directly: this **re-vends row views** — `outlineView(_:rowViewForItem:)`
+  fires again for every reloaded row, and `makeView(withIdentifier:)` can hand a row
+  a *different* recycled `FocusHighlightRowView` instance than it had before. So
+  row-view state does NOT survive a reload on its own; any state that must persist
+  (like `isHovered`) has to be explicitly reseeded from a source of truth inside
+  `rowViewForItem` every time. A full `reloadData()` additionally drops the
+  outline's *selection*, which is why the poll path avoids it.
 - **Focus.** Focus normally lives in the terminal, not the sidebar. Hover must be
   purely visual — it must never select, scroll, or steal first-responder status.
 
