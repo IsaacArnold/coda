@@ -360,6 +360,17 @@ final class SidebarController: NSViewController {
             options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect],
             owner: self))
         scroll.documentView = outline
+        // Scrolling with the pointer held still produces no mouseMoved, so the wash would
+        // stay on a row that has slid out from under the cursor. Recompute from the
+        // pointer's actual position whenever the clip view scrolls.
+        // `postsBoundsChangedNotifications` is true by default, but set it explicitly so
+        // this doesn't silently break if that ever changes.
+        scroll.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(clipViewBoundsChanged),
+            name: NSView.boundsDidChangeNotification,
+            object: scroll.contentView)
         scroll.hasVerticalScroller = true
         scroll.scrollerStyle = .overlay
         scroll.drawsBackground = false
@@ -378,6 +389,12 @@ final class SidebarController: NSViewController {
 
     override func mouseExited(with event: NSEvent) {
         updateHover(to: nil)
+    }
+
+    /// The sidebar scrolled. The pointer may not have moved, but a different row is now
+    /// under it.
+    @objc private func clipViewBoundsChanged() {
+        updateHover(to: rowUnderPointer())
     }
 
     /// The repo the right-clicked row belongs to (a repo header, or a worktree's parent repo).
@@ -590,6 +607,13 @@ final class SidebarController: NSViewController {
             }
         } else {
             DispatchQueue.main.async { [weak self] in self?.isReloading = false }
+        }
+
+        // Rows may have shifted under a stationary pointer. Deferred so the outline has
+        // finished expanding/selecting and `row(at:)` reflects the settled layout.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.updateHover(to: self.rowUnderPointer())
         }
     }
 
