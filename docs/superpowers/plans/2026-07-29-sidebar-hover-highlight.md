@@ -53,7 +53,7 @@ The testable core. Tracks the hovered row index and reports which rows changed a
   - `public private(set) var hoveredRow: Int?`
   - `public mutating func update(to row: Int?) -> [Int]` — moves hover to `row` (`nil` means "no row hovered") and returns the row indices whose highlight changed and therefore need redrawing. Empty when nothing moved. When hover moves between two rows, the vacated row comes first, then the entered row.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `Tests/CodaCoreTests/SidebarHoverStateTests.swift`:
 
@@ -107,7 +107,7 @@ final class SidebarHoverStateTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --build-path .build-xctest --filter SidebarHoverStateTests
@@ -115,7 +115,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --build-path
 
 Expected: FAIL to compile with `cannot find 'SidebarHoverState' in scope`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `Sources/CodaCore/SidebarHoverState.swift`:
 
@@ -146,7 +146,7 @@ public struct SidebarHoverState: Equatable {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --build-path .build-xctest --filter SidebarHoverStateTests
@@ -154,7 +154,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --build-path
 
 Expected: PASS, 6 tests.
 
-- [ ] **Step 5: Run the whole suite to check nothing regressed**
+- [x] **Step 5: Run the whole suite to check nothing regressed**
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --build-path .build-xctest
@@ -162,7 +162,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --build-path
 
 Expected: PASS. The suite was 528 tests before this change, so expect 534.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Sources/CodaCore/SidebarHoverState.swift Tests/CodaCoreTests/SidebarHoverStateTests.swift
@@ -191,7 +191,7 @@ Makes hover actually visible. After this task, moving the pointer over the sideb
   - `SidebarController.updateHover(to row: Int?)` — private; the single funnel every hover trigger goes through.
   - `SidebarController.hoveredRow` — private read access used by `rowViewForItem` to keep recycled row views consistent.
 
-- [ ] **Step 1: Add the hover wash colour**
+- [x] **Step 1: Add the hover wash colour**
 
 `CodaCore` can't hold this (it's an `NSColor`), and it's sidebar-local, so put it as a private static on the row view. Add just above `FocusHighlightRowView`'s existing `accentColor` property (currently line 110):
 
@@ -206,7 +206,7 @@ Makes hover actually visible. After this task, moving the pointer over the sideb
     }
 ```
 
-- [ ] **Step 2: Add the `isHovered` property**
+- [x] **Step 2: Add the `isHovered` property**
 
 Add directly below `hoverWash`, still inside `FocusHighlightRowView`:
 
@@ -219,7 +219,7 @@ Add directly below `hoverWash`, still inside `FocusHighlightRowView`:
     }
 ```
 
-- [ ] **Step 3: Draw the wash**
+- [x] **Step 3: Draw the wash**
 
 Add below the existing `drawSelection(in:)` override (which ends at line 131), inside `FocusHighlightRowView`. Do not modify `drawSelection`:
 
@@ -240,7 +240,7 @@ Add below the existing `drawSelection(in:)` override (which ends at line 131), i
     }
 ```
 
-- [ ] **Step 4: Add the hover state and the update funnel to the controller**
+- [x] **Step 4: Add the hover state and the update funnel to the controller**
 
 Add next to the existing `accentFill` property (currently line 227), inside `SidebarController`:
 
@@ -276,7 +276,7 @@ Add next to the existing `accentFill` property (currently line 227), inside `Sid
     }
 ```
 
-- [ ] **Step 5: Install the tracking area**
+- [x] **Step 5: Install the tracking area**
 
 Add to `loadView()`, just before `scroll.documentView = outline` (currently line 289):
 
@@ -295,7 +295,7 @@ Add to `loadView()`, just before `scroll.documentView = outline` (currently line
             owner: self))
 ```
 
-- [ ] **Step 6: Add the mouse handlers**
+- [x] **Step 6: Add the mouse handlers**
 
 `NSViewController` is an `NSResponder`, so it can be a tracking-area owner directly. Add these right after `loadView()` (i.e. before the `clickedRepoID()` helper at line 297):
 
@@ -315,7 +315,7 @@ Add to `loadView()`, just before `scroll.documentView = outline` (currently line
     }
 ```
 
-- [ ] **Step 7: Keep recycled row views consistent**
+- [x] **Step 7: Keep recycled row views consistent**
 
 `outlineView(_:rowViewForItem:)` vends recycled `FocusHighlightRowView`s, so a view that was hovered can come back for a different row with a stale `isHovered == true`. Seed the flag the same way `accentColor` is already seeded. Replace the body of that method (currently lines 772–778) with:
 
@@ -333,7 +333,7 @@ Add to `loadView()`, just before `scroll.documentView = outline` (currently line
     }
 ```
 
-- [ ] **Step 8: Build**
+- [x] **Step 8: Build**
 
 ```bash
 swift build
@@ -341,7 +341,7 @@ swift build
 
 Expected: builds clean, no warnings from the new code. If SourceKit/your editor reports phantom "cannot find type" errors across the Coda↔CodaCore boundary, ignore them — `swift build` is the authority.
 
-- [ ] **Step 9: Run the suite**
+- [x] **Step 9: Run the suite**
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --build-path .build-xctest
@@ -349,7 +349,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --build-path
 
 Expected: PASS, 534 tests. No test covers the AppKit drawing; this is a regression check.
 
-- [ ] **Step 10: Live-check the basic effect**
+- [x] **Step 10: Live-check the basic effect**
 
 ```bash
 scripts/make-app.sh && open dist/Coda.app
@@ -363,7 +363,7 @@ Confirm, with at least one repo and one worktree in the sidebar:
 
 If the wash is invisible or too heavy, adjust the two alpha values in `hoverWash` and rebuild. Do not proceed until all four hold.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add Sources/Coda/SidebarController.swift
@@ -393,7 +393,7 @@ Scrolling and reordering both slide rows under a stationary pointer. Neither pro
 - Consumes: `updateHover(to:)` and `rowUnderPointer()` from Task 2.
 - Produces: nothing consumed by later tasks.
 
-- [ ] **Step 1: Observe the clip view's bounds changes**
+- [x] **Step 1: Observe the clip view's bounds changes**
 
 `NSScrollView` scrolling moves its clip view's bounds. Add to `loadView()`, immediately after the `scroll.documentView = outline` line and before `scroll.hasVerticalScroller = true`:
 
@@ -411,7 +411,7 @@ Scrolling and reordering both slide rows under a stationary pointer. Neither pro
             object: scroll.contentView)
 ```
 
-- [ ] **Step 2: Add the notification handler**
+- [x] **Step 2: Add the notification handler**
 
 Add directly below the `mouseExited(with:)` handler added in Task 2:
 
@@ -423,7 +423,7 @@ Add directly below the `mouseExited(with:)` handler added in Task 2:
     }
 ```
 
-- [ ] **Step 3: Recompute after a reload**
+- [x] **Step 3: Recompute after a reload**
 
 A reorder, a new worktree, or a collapse can put a different row under a stationary pointer. `reload(rootItems:...)` already defers work to the next runloop tick to let the outline settle; hook the recompute onto the same pattern. Add as the last statement of `reload(rootItems:selectedWorktreeID:selectedRepoID:)`, after the closing brace of the `if let selectedItem { … } else { … }` chain (currently line 506):
 
@@ -436,7 +436,7 @@ A reorder, a new worktree, or a collapse can put a different row under a station
         }
 ```
 
-- [ ] **Step 4: Build**
+- [x] **Step 4: Build**
 
 ```bash
 swift build
@@ -444,7 +444,7 @@ swift build
 
 Expected: builds clean.
 
-- [ ] **Step 5: Run the suite**
+- [x] **Step 5: Run the suite**
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --build-path .build-xctest
@@ -452,7 +452,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --build-path
 
 Expected: PASS, 534 tests.
 
-- [ ] **Step 6: Live-check the moving-rows cases**
+- [x] **Step 6: Live-check the moving-rows cases**
 
 ```bash
 scripts/make-app.sh && open dist/Coda.app
@@ -464,7 +464,7 @@ You need enough repos/worktrees for the sidebar to scroll — collapse nothing, 
 2. Scroll so the pointer ends up past the last row. The wash must clear.
 3. Collapse and expand a section with the pointer resting over a row below it. The wash must land on the row that is now under the pointer.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add Sources/Coda/SidebarController.swift
@@ -490,13 +490,13 @@ The spec's verification list, run end to end on a real build. This sidebar's gen
 - Consumes: everything from Tasks 1–3.
 - Produces: nothing.
 
-- [ ] **Step 1: Build and launch a fresh app**
+- [x] **Step 1: Build and launch a fresh app**
 
 ```bash
 scripts/make-app.sh && open dist/Coda.app
 ```
 
-- [ ] **Step 2: Work the checklist**
+- [x] **Step 2: Work the checklist**
 
 Record the result of each. Every one must hold:
 
@@ -508,11 +508,11 @@ Record the result of each. Every one must hold:
 6. **Clears on leave and on deactivate.** Move the pointer out of the sidebar → wash clears. Switch to another app with the pointer resting on a sidebar row → wash clears.
 7. **Both appearances, and a non-default accent.** Toggle System Settings → Appearance between Light and Dark; then set a non-default accent in Coda's Settings → Appearance. The wash must be clearly visible but clearly weaker than the selection in all four combinations.
 
-- [ ] **Step 3: Tune if needed**
+- [x] **Step 3: Tune if needed**
 
 If the wash is too subtle or too strong in either appearance, adjust the alphas in `FocusHighlightRowView.hoverWash` and repeat the relevant checks. If a check fails structurally (not just visually), fix it, rebuild, and re-run the whole checklist.
 
-- [ ] **Step 4: Commit any tuning**
+- [x] **Step 4: Commit any tuning**
 
 Skip if nothing changed.
 
@@ -523,7 +523,7 @@ git commit -m "style(sidebar): tune hover wash alpha after live verification
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ```
 
-- [ ] **Step 5: Final full-suite run and report**
+- [x] **Step 5: Final full-suite run and report**
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --build-path .build-xctest
