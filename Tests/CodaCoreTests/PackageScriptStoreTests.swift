@@ -36,8 +36,7 @@ final class PackageScriptStoreTests: XCTestCase {
         try write(#"{"scripts":{"dev":"vite"}}"#, to: root.appendingPathComponent("package.json"))
         let nested = try makeDirectory("src/components/deep")
         let found = try XCTUnwrap(findNearestPackageJSON(startingAt: nested))
-        XCTAssertEqual(found.deletingLastPathComponent().standardizedFileURL,
-                       root.standardizedFileURL)
+        XCTAssertEqual(found.deletingLastPathComponent().path, root.path)
     }
 
     func testPrefersTheNearestPackageJSONNotTheHighest() throws {
@@ -45,8 +44,7 @@ final class PackageScriptStoreTests: XCTestCase {
         let inner = try makeDirectory("packages/app")
         try write(#"{"scripts":{"inner":"x"}}"#, to: inner.appendingPathComponent("package.json"))
         let found = try XCTUnwrap(findNearestPackageJSON(startingAt: inner))
-        XCTAssertEqual(found.deletingLastPathComponent().standardizedFileURL,
-                       inner.standardizedFileURL)
+        XCTAssertEqual(found.deletingLastPathComponent().path, inner.path)
     }
 
     func testReturnsNilWhenNoPackageJSONExistsAnywhereAbove() throws {
