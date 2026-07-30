@@ -207,6 +207,39 @@ hdiutil create -volname "$APP_NAME $VERSION" \
   -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
 rm -rf "$STAGE"
 
+# Echo the whole-disk device (/dev/diskN) of the attached image backed by $1, if any.
+# Parses `hdiutil info` block-wise: blocks are separated by a `====` rule, each opens
+# with `image-path : <path>`, and the first `/dev/diskN` line after a matching path is
+# that image's whole-disk device. Paths with spaces come back percent-encoded, hence
+# the %20 fixup. Block-wise matching is essential — several unrelated images are
+# usually attached, so grepping for a bare /dev/disk would detach someone else's.
+attached_device_for() {
+  hdiutil info 2>/dev/null | awk -v target="$1" '
+    /^=+$/ { in_target = 0 }
+    /^image-path/ {
+      p = $0
+      sub(/^image-path[[:space:]]*:[[:space:]]*/, "", p)
+      gsub(/%20/, " ", p)
+      in_target = (p == target)
+    }
+    in_target && /^\/dev\/disk/ { print $1; exit }
+  '
+}
+
+# hdiutil occasionally leaves the dmg it just created ATTACHED, with an orphaned
+# diskimages-helper holding the file open read-write. notarytool's pre-submission
+# format sniff (xar_open_digest_verify -> open()) then blocks in the kernel behind
+# that handle — and because it hangs BEFORE its own --timeout logic starts, the
+# `--timeout 30m` below cannot rescue it. Observed once for ~2h at 0.04s CPU, having
+# never opened a socket or reached Apple. Detaching here makes that self-healing.
+DMG_DEV="$(attached_device_for "$DMG")"
+if [[ -n "$DMG_DEV" ]]; then
+  echo "==> dmg left attached at $DMG_DEV — detaching (would hang notarization)"
+  hdiutil detach "$DMG_DEV" >/dev/null 2>&1 \
+    || hdiutil detach "$DMG_DEV" -force >/dev/null 2>&1 \
+    || echo "    WARNING: could not detach $DMG_DEV — notarization may hang"
+fi
+
 # --- notarize + staple -----------------------------------------------------
 # Upload to Apple's notary service (automated malware scan; not App Review),
 # then staple the ticket onto the dmg so Gatekeeper verifies it offline.
