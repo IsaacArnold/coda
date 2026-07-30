@@ -10,6 +10,10 @@ public enum CandidateKind: Equatable {
     case file
     case directory
     case command
+    /// A script defined by the project (e.g. a `package.json` `scripts` entry). Ranked ahead of
+    /// other kinds by `rankCandidates` — in a project directory the project's own scripts are
+    /// what you're reaching for, not the package manager's built-in subcommands.
+    case script
 }
 
 /// A single thing the user can accept. `name` is what the query matches against and what's shown;
@@ -226,9 +230,10 @@ public func resolveCompletion(
 
 /// Step 2 (pure): keep only candidates whose `name` contains `query` (case-insensitive), with
 /// prefix matches ranked above substring matches. Within each tier the original order is
-/// preserved (stable). An empty query keeps everything, unchanged.
+/// preserved (stable). An empty query keeps everything, unchanged. Within each tier, `.script`
+/// candidates are ranked ahead of other kinds.
 public func rankCandidates(_ all: [Candidate], query: String) -> [Candidate] {
-    guard !query.isEmpty else { return all }
+    guard !query.isEmpty else { return scriptsFirst(all) }
     let needle = query.lowercased()
 
     var prefixMatches: [Candidate] = []
@@ -241,7 +246,16 @@ public func rankCandidates(_ all: [Candidate], query: String) -> [Candidate] {
             substringMatches.append(candidate)
         }
     }
-    return prefixMatches + substringMatches
+    return scriptsFirst(prefixMatches) + scriptsFirst(substringMatches)
+}
+
+/// Stable partition putting `.script` candidates ahead of every other kind.
+///
+/// Applied *within* a match tier, never across one, so a script that merely contains the query
+/// can't jump a prefix match of another kind. Because `.script` is produced only by the
+/// package-script generators, this leaves every pre-existing ordering untouched.
+private func scriptsFirst(_ candidates: [Candidate]) -> [Candidate] {
+    candidates.filter { $0.kind == .script } + candidates.filter { $0.kind != .script }
 }
 
 // MARK: - Spec lookup helpers

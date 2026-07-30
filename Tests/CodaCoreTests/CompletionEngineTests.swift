@@ -202,4 +202,31 @@ final class CompletionEngineTests: XCTestCase {
         let ranked = rankCandidates(all, query: "")
         XCTAssertEqual(ranked.map(\.name), ["clone", "checkout"])
     }
+
+    func testScriptsRankAheadOfOtherKindsWithEmptyQuery() {
+        let all = [candidate("install"), candidate("run dev", kind: .script)]
+        let ranked = rankCandidates(all, query: "")
+        XCTAssertEqual(ranked.map(\.name), ["run dev", "install"])
+    }
+
+    func testScriptsRankAheadWithinTheSameMatchTier() {
+        // Both prefix-match "r"; the script must come first.
+        let all = [candidate("remove"), candidate("run dev", kind: .script)]
+        let ranked = rankCandidates(all, query: "r")
+        XCTAssertEqual(ranked.map(\.name), ["run dev", "remove"])
+    }
+
+    func testPrefixTierStillBeatsAScriptSubstringMatch() {
+        // "dev-server" prefix-matches "dev"; "run dev" only contains it. Scripts are promoted
+        // WITHIN a tier, never across tiers — a substring script must not jump a prefix match.
+        let all = [candidate("dev-server"), candidate("run dev", kind: .script)]
+        let ranked = rankCandidates(all, query: "dev")
+        XCTAssertEqual(ranked.map(\.name), ["dev-server", "run dev"])
+    }
+
+    func testScriptOrderAmongScriptsIsPreserved() {
+        let all = [candidate("run build", kind: .script), candidate("run dev", kind: .script)]
+        let ranked = rankCandidates(all, query: "")
+        XCTAssertEqual(ranked.map(\.name), ["run build", "run dev"])
+    }
 }
