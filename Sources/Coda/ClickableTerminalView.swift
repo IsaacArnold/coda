@@ -97,6 +97,13 @@ final class ClickableTerminalView: LocalProcessTerminalView {
     /// registration below, which is safe to redo but doesn't need to be).
     private var didRegisterOsc133 = false
 
+    /// Whether *any* OSC 133 marker has ever arrived on this terminal — the signal that the shell
+    /// integration actually loaded. Deliberately not derived from `promptPhase`: a `D` marker
+    /// resets that to `.unknown`, so a working integration reads `.unknown` for the whole time a
+    /// command runs. Latches true and never clears. Consumed by `TerminalSurface` to tell "no
+    /// integration" apart from "mid-command" (see `shellIntegrationStatus`).
+    private(set) var didSeeAnyPromptMarker = false
+
     /// Where the editable command line begins, captured at the OSC 133 `B` marker (command
     /// start — the shell is ready for input). `col` is 0-based; `absRow` is an ABSOLUTE buffer
     /// row (scrollback + screen), so it stays valid as the screen scrolls. The `B` sequence is
@@ -114,6 +121,7 @@ final class ClickableTerminalView: LocalProcessTerminalView {
         getTerminal().registerOscHandler(code: 133) { [weak self] data in
             guard let self else { return }
             let payload = String(decoding: data, as: UTF8.self)
+            self.didSeeAnyPromptMarker = true
             let old = self.promptPhase
             self.phaseMachine.consume(payload)
             let new = self.phaseMachine.phase

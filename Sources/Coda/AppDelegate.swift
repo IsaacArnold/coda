@@ -631,6 +631,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 onChangeShell: { [weak self] choice in self?.setShell(choice) },
                 completionsEnabled: preferences.completionsEnabled,
                 onChangeCompletionsEnabled: { [weak self] on in self?.setCompletionsEnabled(on) },
+                shellIntegrationMissing: shellIntegrationMissing,
                 notifyOnNeedsYou: preferences.notifyOnNeedsYou,
                 onChangeNotifyOnNeedsYou: { [weak self] on in self?.setNotifyOnNeedsYou(on) },
                 notifyOnDone: preferences.notifyOnDone,
@@ -939,6 +940,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                                    completionsEnabled: preferences.completionsEnabled)
         pane.onOpenFile = { [weak self] path, line in self?.openInDefaultEditor(path: path, line: line) }
         pane.onTitleChange = { [weak self] _ in self?.refreshTabBar() }
+        pane.onShellIntegrationNotDetected = { [weak self] in self?.noteShellIntegrationMissing() }
         pane.applyTheme(activeTheme)
         pane.applyFont(resolvedTerminalFont())
         return pane
@@ -1322,6 +1324,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private func setCompletionsEnabled(_ on: Bool) {
         preferences.completionsEnabled = on
         do { try prefsStore.save(preferences) } catch { presentError(error) }
+    }
+
+    /// Set once a terminal reports that completions are enabled but the shell integration never
+    /// loaded. Read by Settings → Terminal, which then explains it instead of showing a toggle
+    /// that claims the feature is on.
+    private(set) var shellIntegrationMissing = false
+
+    /// A surface diagnosed a missing shell integration. Records it and logs a line naming the
+    /// usual culprit, so the failure leaves a trace instead of being invisible. Idempotent:
+    /// several surfaces can report the same condition.
+    private func noteShellIntegrationMissing() {
+        guard !shellIntegrationMissing else { return }
+        shellIntegrationMissing = true
+        NSLog("[coda] completions are enabled but no OSC 133 markers arrived — Coda's zsh "
+              + "integration never loaded. A tool that re-execs the shell from your dotfiles "
+              + "(kiro-cli / Amazon Q / Fig) is the usual cause.")
     }
 
     /// Persist a new terminal font and re-apply it to every live surface.
