@@ -245,6 +245,10 @@ final class CompletionController {
                 return generators.gitBranches(cwd: cwd)
             case .generator(.gitRemotes):
                 return generators.gitRemotes(cwd: cwd)
+            case .generator(.packageScripts):
+                return generators.packageScripts(cwd: cwd, runPrefixed: false)
+            case .generator(.packageScriptsWithRun):
+                return generators.packageScripts(cwd: cwd, runPrefixed: true)
             }
         }
     }

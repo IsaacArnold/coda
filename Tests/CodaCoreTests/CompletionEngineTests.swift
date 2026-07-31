@@ -202,4 +202,78 @@ final class CompletionEngineTests: XCTestCase {
         let ranked = rankCandidates(all, query: "")
         XCTAssertEqual(ranked.map(\.name), ["clone", "checkout"])
     }
+
+    func testScriptsRankAheadOfOtherKindsWithEmptyQuery() {
+        let all = [candidate("install"), candidate("run dev", kind: .script)]
+        let ranked = rankCandidates(all, query: "")
+        XCTAssertEqual(ranked.map(\.name), ["run dev", "install"])
+    }
+
+    func testScriptsRankAheadWithinTheSameMatchTier() {
+        // Both prefix-match "r"; the script must come first.
+        let all = [candidate("remove"), candidate("run dev", kind: .script)]
+        let ranked = rankCandidates(all, query: "r")
+        XCTAssertEqual(ranked.map(\.name), ["run dev", "remove"])
+    }
+
+    func testPrefixTierStillBeatsAScriptSubstringMatch() {
+        // "dev-server" prefix-matches "dev"; "run dev" only contains it. Scripts are promoted
+        // WITHIN a tier, never across tiers — a substring script must not jump a prefix match.
+        let all = [candidate("dev-server"), candidate("run dev", kind: .script)]
+        let ranked = rankCandidates(all, query: "dev")
+        XCTAssertEqual(ranked.map(\.name), ["dev-server", "run dev"])
+    }
+
+    func testScriptOrderAmongScriptsIsPreserved() {
+        let all = [candidate("run build", kind: .script), candidate("run dev", kind: .script)]
+        let ranked = rankCandidates(all, query: "")
+        XCTAssertEqual(ranked.map(\.name), ["run build", "run dev"])
+    }
+
+    // MARK: - package script generators
+
+    /// The shape the npm spec relies on: at `npm `, the engine offers the command's own
+    /// subcommands AND the positional arg's generator, so scripts and subcommands coexist.
+    func testTopLevelPositionOffersSubcommandsAndTheScriptGenerator() {
+        let npm = CompletionSpec(
+            name: ["npm"],
+            subcommands: [CompletionSpec(name: ["install"])],
+            args: [SpecArg(name: "script", generator: .packageScriptsWithRun, isOptional: true)]
+        )
+        let context = resolveCompletion(line: "npm ", cursorOffset: 4, specs: ["npm": npm])
+        XCTAssertEqual(context.staticCandidates.map(\.name), ["install"])
+        XCTAssertEqual(context.dynamicSources, [.generator(.packageScriptsWithRun)])
+    }
+
+    func testAfterRunSubcommandTheBareScriptGeneratorIsOffered() {
+        let npm = CompletionSpec(
+            name: ["npm"],
+            subcommands: [
+                CompletionSpec(name: ["run"], args: [SpecArg(generator: .packageScripts)])
+            ],
+            args: [SpecArg(name: "script", generator: .packageScriptsWithRun, isOptional: true)]
+        )
+        let context = resolveCompletion(line: "npm run ", cursorOffset: 8, specs: ["npm": npm])
+        XCTAssertEqual(context.dynamicSources, [.generator(.packageScripts)])
+    }
+
+    func testYarnOffersBareScriptsAtTopLevel() {
+        let yarn = CompletionSpec(
+            name: ["yarn"],
+            args: [SpecArg(generator: .packageScripts, isOptional: true)]
+        )
+        let context = resolveCompletion(line: "yarn ", cursorOffset: 5, specs: ["yarn": yarn])
+        XCTAssertEqual(context.dynamicSources, [.generator(.packageScripts)])
+    }
+
+    /// An arg may carry BOTH a generator and a filesystem template (e.g. `bun run <script-or-file>`).
+    /// Both must be offered, generator first so its candidates rank above the directory listing.
+    func testArgWithBothGeneratorAndTemplateOffersBothSourcesGeneratorFirst() {
+        let bun = CompletionSpec(
+            name: ["bun"],
+            args: [SpecArg(name: "script", template: .filepaths, generator: .packageScriptsWithRun, isOptional: true)]
+        )
+        let context = resolveCompletion(line: "bun ", cursorOffset: 4, specs: ["bun": bun])
+        XCTAssertEqual(context.dynamicSources, [.generator(.packageScriptsWithRun), .filepaths])
+    }
 }
