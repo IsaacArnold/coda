@@ -76,4 +76,35 @@ final class BundledSpecsTests: XCTestCase {
         let npm = try XCTUnwrap(specs["npm"])
         XCTAssertTrue(npm.subcommands?.contains { $0.name.contains("test") } == true)
     }
+
+    /// The spec's "overlap is intentional" rule, asserted where it can actually break: `npm test`
+    /// only aliases `npm run test` when such a script exists, so both belong in the popup — with
+    /// the script first.
+    func testScriptAndBuiltinSubcommandBothSurviveRanking() throws {
+        let npm = try XCTUnwrap(try loadedSpecs()["npm"])
+        let context = resolveCompletion(line: "npm ", cursorOffset: 4, specs: ["npm": npm])
+        let scripts = scriptCandidates([PackageScript(name: "test", command: "vitest run")],
+                                       runPrefixed: true)
+        // `context.query` (not a hardcoded "test") because rankCandidates only promotes a script
+        // ahead of a same-named built-in WITHIN a match tier (see testPrefixTierStillBeatsAScript-
+        // SubstringMatch in CompletionEngineTests): "test" prefix-matches the literal query "test"
+        // while "run test" only substring-matches it, so a hardcoded "test" query would put npm's
+        // built-in *ahead* of the script — the opposite of the invariant this test guards. At
+        // `npm ` the real query is empty, which is the actual popup state the design doc's
+        // "scripts first" example depicts, and where both land in the same (empty-query) tier.
+        let ranked = rankCandidates(context.staticCandidates + scripts, query: context.query)
+        XCTAssertEqual(ranked.filter { $0.name.contains("test") }.map(\.name), ["run test", "test"])
+    }
+
+    /// Regression guard: running a file is bun's primary use (`bun run <script-or-file>`), so its
+    /// positional must offer BOTH the package-script generator and filesystem paths — not one or
+    /// the other — at both the top level and under `run`.
+    func testBunOffersBothScriptGeneratorAndFilepaths() throws {
+        let bun = try XCTUnwrap(try loadedSpecs()["bun"])
+        let topLevel = resolveCompletion(line: "bun ", cursorOffset: 4, specs: ["bun": bun])
+        XCTAssertEqual(topLevel.dynamicSources, [.generator(.packageScriptsWithRun), .filepaths])
+
+        let run = resolveCompletion(line: "bun run ", cursorOffset: 8, specs: ["bun": bun])
+        XCTAssertEqual(run.dynamicSources, [.generator(.packageScripts), .filepaths])
+    }
 }

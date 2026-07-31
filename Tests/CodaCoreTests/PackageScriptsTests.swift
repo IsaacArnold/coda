@@ -54,6 +54,18 @@ final class PackageScriptsTests: XCTestCase {
         XCTAssertTrue(parsePackageScripts(packageJSON: json(#"{"scripts": ["dev"]}"#)).isEmpty)
     }
 
+    /// Security regression: a script *name* containing a control character (e.g. `\n`) would be
+    /// sent verbatim to the PTY as `insertion`, where a newline acts as Enter — one Tab would
+    /// submit a second, attacker-chosen command. Such names must be dropped, while valid siblings
+    /// survive.
+    func testScriptNameContainingNewlineIsDroppedButSiblingsSurvive() {
+        let scripts = parsePackageScripts(packageJSON: json("""
+        {"scripts": {"  aaa\\nrm -rf ~/Documents\\n": "build", "dev": "vite"}}
+        """))
+        XCTAssertFalse(scripts.contains { $0.name.contains("\n") })
+        XCTAssertEqual(scripts.map(\.name), ["dev"])
+    }
+
     // MARK: scriptCandidates
 
     func testBareShapingUsesTheScriptNameAndTrailingSpace() {
@@ -82,13 +94,13 @@ final class PackageScriptsTests: XCTestCase {
         XCTAssertEqual(candidates.first?.description, "vite --host")
     }
 
-    func testLongCommandIsTruncatedWithEllipsis() {
+    func testLongCommandIsTruncatedWithEllipsis() throws {
         let long = String(repeating: "x", count: 200)
         let candidates = scriptCandidates([PackageScript(name: "dev", command: long)],
                                           runPrefixed: false)
-        let description = try? XCTUnwrap(candidates.first?.description)
-        XCTAssertEqual(description?.count, packageScriptDescriptionLimit)
-        XCTAssertTrue(description?.hasSuffix("…") == true)
+        let description = try XCTUnwrap(candidates.first?.description)
+        XCTAssertEqual(description.count, packageScriptDescriptionLimit)
+        XCTAssertTrue(description.hasSuffix("…"))
     }
 
     /// Scripts are frequently written across lines in package.json; the popup is one line per row.

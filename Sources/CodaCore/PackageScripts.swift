@@ -38,10 +38,12 @@ public func parsePackageScripts(packageJSON: Data) -> [PackageScript] {
 
     return scripts
         .compactMap { key, value -> PackageScript? in
-            guard let command = value as? String else { return nil }
+            guard let command = value as? String,
+                  !key.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+            else { return nil }
             return PackageScript(name: key, command: command)
         }
-        .sorted { $0.name.lowercased() < $1.name.lowercased() }
+        .sorted { ($0.name.lowercased(), $0.name) < ($1.name.lowercased(), $1.name) }
 }
 
 /// Shapes parsed scripts into completion candidates.
@@ -103,6 +105,10 @@ public func findNearestPackageJSON(startingAt directory: URL) -> URL? {
 ///
 /// **Threading:** not synchronised. Like `CompletionGenerators`, which owns the only instance,
 /// this is main-thread-confined.
+///
+/// **Unbounded by design:** one entry per distinct `package.json` resolved during this surface's
+/// lifetime — a handful in practice, and strictly fewer keys than the cwd-keyed git caches
+/// alongside it.
 ///
 /// The cache is keyed by resolved file path and invalidated whenever the file's modification date
 /// or size changes, so editing `package.json` is picked up on the next keystroke.

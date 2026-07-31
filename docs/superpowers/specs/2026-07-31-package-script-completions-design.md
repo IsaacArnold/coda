@@ -129,6 +129,10 @@ and shapes, and the pure half carries the tests.
 The walk-up is bounded by the filesystem root, and a failed read at any level is
 skipped rather than aborting the walk.
 
+**Implementation note:** resolution and caching (`PackageScriptStore`) actually
+live in `CodaCore`, not `CompletionGenerators` as planned above — `CodaCoreTests`
+is the only test target, so putting them there is what makes them testable.
+
 ### 4. Scripts rank first
 
 With an empty query `rankCandidates` returns candidates unchanged, and the

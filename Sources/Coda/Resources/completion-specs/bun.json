@@ -2,7 +2,7 @@
   "name": ["bun"],
   "description": "Fast all-in-one JavaScript runtime and toolkit",
   "args": [
-    { "name": "script", "generator": "packageScriptsWithRun", "isOptional": true }
+    { "name": "script", "generator": "packageScriptsWithRun", "template": "filepaths", "isOptional": true }
   ],
   "options": [
     { "name": ["--help", "-h"], "description": "Display help" },
@@ -12,7 +12,7 @@
     {
       "name": ["run"],
       "description": "Run a script or file",
-      "args": [{ "name": "script", "generator": "packageScripts" }]
+      "args": [{ "name": "script", "generator": "packageScripts", "template": "filepaths" }]
     },
     { "name": ["install", "i"], "description": "Install all dependencies" },
     {

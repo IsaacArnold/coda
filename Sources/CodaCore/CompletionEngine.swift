@@ -193,7 +193,7 @@ public func resolveCompletion(
     if let arg = pendingOptionArg {
         return CompletionContext(
             staticCandidates: [],
-            dynamicSources: [dynamicSource(for: arg)].compactMap { $0 },
+            dynamicSources: dynamicSources(for: arg),
             query: query,
             replacementRange: replacementRange
         )
@@ -214,15 +214,12 @@ public func resolveCompletion(
     var staticCandidates = subcommandCandidates(of: spec)
     staticCandidates += optionCandidates(of: spec)
 
-    var dynamicSources: [DynamicSource] = []
-    if let arg = positionalArg(at: positionalsConsumed, in: spec),
-       let source = dynamicSource(for: arg) {
-        dynamicSources.append(source)
-    }
+    let sources: [DynamicSource] = positionalArg(at: positionalsConsumed, in: spec)
+        .map { dynamicSources(for: $0) } ?? []
 
     return CompletionContext(
         staticCandidates: staticCandidates,
-        dynamicSources: dynamicSources,
+        dynamicSources: sources,
         query: query,
         replacementRange: replacementRange
     )
@@ -230,8 +227,9 @@ public func resolveCompletion(
 
 /// Step 2 (pure): keep only candidates whose `name` contains `query` (case-insensitive), with
 /// prefix matches ranked above substring matches. Within each tier the original order is
-/// preserved (stable). An empty query keeps everything, unchanged. Within each tier, `.script`
-/// candidates are ranked ahead of other kinds.
+/// preserved among candidates of the same kind, except that `.script` candidates are partitioned
+/// ahead of every other kind. An empty query keeps every candidate, with that same script-first
+/// partition applied.
 public func rankCandidates(_ all: [Candidate], query: String) -> [Candidate] {
     guard !query.isEmpty else { return scriptsFirst(all) }
     let needle = query.lowercased()
@@ -282,13 +280,18 @@ private func positionalArg(at index: Int, in spec: CompletionSpec) -> SpecArg? {
     return nil
 }
 
-private func dynamicSource(for arg: SpecArg) -> DynamicSource? {
-    if let generator = arg.generator { return .generator(generator) }
+/// The dynamic sources an arg contributes. An arg may carry BOTH a generator and a filesystem
+/// template (e.g. `bun run <script-or-file>`), in which case both are offered — generator first,
+/// so its candidates rank above the directory listing.
+private func dynamicSources(for arg: SpecArg) -> [DynamicSource] {
+    var out: [DynamicSource] = []
+    if let generator = arg.generator { out.append(.generator(generator)) }
     switch arg.template {
-    case .filepaths: return .filepaths
-    case .folders: return .folders
-    case nil: return nil
+    case .filepaths: out.append(.filepaths)
+    case .folders: out.append(.folders)
+    case nil: break
     }
+    return out
 }
 
 private func subcommandCandidates(of spec: CompletionSpec) -> [Candidate] {

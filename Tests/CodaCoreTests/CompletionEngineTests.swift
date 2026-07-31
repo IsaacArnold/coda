@@ -265,4 +265,15 @@ final class CompletionEngineTests: XCTestCase {
         let context = resolveCompletion(line: "yarn ", cursorOffset: 5, specs: ["yarn": yarn])
         XCTAssertEqual(context.dynamicSources, [.generator(.packageScripts)])
     }
+
+    /// An arg may carry BOTH a generator and a filesystem template (e.g. `bun run <script-or-file>`).
+    /// Both must be offered, generator first so its candidates rank above the directory listing.
+    func testArgWithBothGeneratorAndTemplateOffersBothSourcesGeneratorFirst() {
+        let bun = CompletionSpec(
+            name: ["bun"],
+            args: [SpecArg(name: "script", template: .filepaths, generator: .packageScriptsWithRun, isOptional: true)]
+        )
+        let context = resolveCompletion(line: "bun ", cursorOffset: 4, specs: ["bun": bun])
+        XCTAssertEqual(context.dynamicSources, [.generator(.packageScriptsWithRun), .filepaths])
+    }
 }
