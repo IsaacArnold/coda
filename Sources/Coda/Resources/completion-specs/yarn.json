@@ -1,0 +1,36 @@
+{
+  "name": ["yarn"],
+  "description": "Yarn package manager",
+  "args": [
+    { "name": "script", "generator": "packageScripts", "isOptional": true }
+  ],
+  "options": [
+    { "name": ["--help", "-h"], "description": "Display help" },
+    { "name": ["--version", "-v"], "description": "Print the yarn version" }
+  ],
+  "subcommands": [
+    {
+      "name": ["run"],
+      "description": "Run a script from package.json",
+      "args": [{ "name": "script", "generator": "packageScripts" }]
+    },
+    { "name": ["install"], "description": "Install all dependencies" },
+    {
+      "name": ["add"],
+      "description": "Add a package",
+      "args": [{ "name": "package", "isVariadic": true }],
+      "options": [
+        { "name": ["--dev", "-D"], "description": "Save to devDependencies" }
+      ]
+    },
+    {
+      "name": ["remove"],
+      "description": "Remove a package",
+      "args": [{ "name": "package", "isVariadic": true }]
+    },
+    { "name": ["up"], "description": "Upgrade packages" },
+    { "name": ["why"], "description": "Explain why a package is installed" },
+    { "name": ["dlx"], "description": "Run a package without installing it" },
+    { "name": ["init"], "description": "Create a package.json" }
+  ]
+}

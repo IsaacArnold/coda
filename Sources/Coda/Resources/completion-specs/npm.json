@@ -1,0 +1,45 @@
+{
+  "name": ["npm"],
+  "description": "Node package manager",
+  "args": [
+    { "name": "script", "generator": "packageScriptsWithRun", "isOptional": true }
+  ],
+  "options": [
+    { "name": ["--help", "-h"], "description": "Display help" },
+    { "name": ["--version", "-v"], "description": "Print the npm version" }
+  ],
+  "subcommands": [
+    {
+      "name": ["run", "run-script"],
+      "description": "Run a script from package.json",
+      "args": [{ "name": "script", "generator": "packageScripts" }]
+    },
+    {
+      "name": ["install", "i"],
+      "description": "Install a package",
+      "args": [{ "name": "package", "isOptional": true, "isVariadic": true }],
+      "options": [
+        { "name": ["--save-dev", "-D"], "description": "Save to devDependencies" },
+        { "name": ["--global", "-g"], "description": "Install globally" }
+      ]
+    },
+    { "name": ["ci"], "description": "Clean install from the lockfile" },
+    { "name": ["test", "t"], "description": "Run the test script" },
+    { "name": ["start"], "description": "Run the start script" },
+    {
+      "name": ["uninstall", "rm"],
+      "description": "Remove a package",
+      "args": [{ "name": "package", "isVariadic": true }]
+    },
+    {
+      "name": ["update", "up"],
+      "description": "Update packages",
+      "args": [{ "name": "package", "isOptional": true, "isVariadic": true }]
+    },
+    { "name": ["outdated"], "description": "Check for outdated packages" },
+    { "name": ["publish"], "description": "Publish a package" },
+    { "name": ["exec", "x"], "description": "Run a command from a package" },
+    { "name": ["init"], "description": "Create a package.json" },
+    { "name": ["link"], "description": "Symlink a package folder" }
+  ]
+}

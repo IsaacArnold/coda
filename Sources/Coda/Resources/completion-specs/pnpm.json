@@ -1,0 +1,43 @@
+{
+  "name": ["pnpm"],
+  "description": "Fast, disk-space-efficient package manager",
+  "args": [
+    { "name": "script", "generator": "packageScriptsWithRun", "isOptional": true }
+  ],
+  "options": [
+    { "name": ["--help", "-h"], "description": "Display help" },
+    { "name": ["--version", "-v"], "description": "Print the pnpm version" }
+  ],
+  "subcommands": [
+    {
+      "name": ["run"],
+      "description": "Run a script from package.json",
+      "args": [{ "name": "script", "generator": "packageScripts" }]
+    },
+    {
+      "name": ["install", "i"],
+      "description": "Install all dependencies",
+      "options": [
+        { "name": ["--frozen-lockfile"], "description": "Fail if the lockfile is out of date" }
+      ]
+    },
+    {
+      "name": ["add"],
+      "description": "Add a package",
+      "args": [{ "name": "package", "isVariadic": true }],
+      "options": [
+        { "name": ["--save-dev", "-D"], "description": "Save to devDependencies" },
+        { "name": ["--global", "-g"], "description": "Install globally" }
+      ]
+    },
+    {
+      "name": ["remove", "rm"],
+      "description": "Remove a package",
+      "args": [{ "name": "package", "isVariadic": true }]
+    },
+    { "name": ["update", "up"], "description": "Update packages" },
+    { "name": ["dlx"], "description": "Run a package without installing it" },
+    { "name": ["exec"], "description": "Run a shell command from a local dependency" },
+    { "name": ["init"], "description": "Create a package.json" }
+  ]
+}

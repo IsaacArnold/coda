@@ -1,0 +1,37 @@
+{
+  "name": ["bun"],
+  "description": "Fast all-in-one JavaScript runtime and toolkit",
+  "args": [
+    { "name": "script", "generator": "packageScriptsWithRun", "isOptional": true }
+  ],
+  "options": [
+    { "name": ["--help", "-h"], "description": "Display help" },
+    { "name": ["--version", "-v"], "description": "Print the bun version" }
+  ],
+  "subcommands": [
+    {
+      "name": ["run"],
+      "description": "Run a script or file",
+      "args": [{ "name": "script", "generator": "packageScripts" }]
+    },
+    { "name": ["install", "i"], "description": "Install all dependencies" },
+    {
+      "name": ["add", "a"],
+      "description": "Add a package",
+      "args": [{ "name": "package", "isVariadic": true }],
+      "options": [
+        { "name": ["--dev", "-d"], "description": "Save to devDependencies" },
+        { "name": ["--global", "-g"], "description": "Install globally" }
+      ]
+    },
+    {
+      "name": ["remove", "rm"],
+      "description": "Remove a package",
+      "args": [{ "name": "package", "isVariadic": true }]
+    },
+    { "name": ["update"], "description": "Update packages" },
+    { "name": ["x"], "description": "Run a package without installing it" },
+    { "name": ["test"], "description": "Run tests with bun's test runner" },
+    { "name": ["init"], "description": "Create a package.json" }
+  ]
+}
