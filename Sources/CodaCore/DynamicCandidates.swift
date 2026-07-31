@@ -66,9 +66,11 @@ public func filesystemCandidates(
     }
     return sorted.prefix(cap).map { entry in
         // `name` stays unescaped (query-matchable + displayed). `insertion` is sent to the PTY, so
-        // escape the path fragment — `shellEscapeForInsertion` leaves `/` literal, keeping the
-        // separators — then append the unescaped trailing `/` for directories.
-        let insertion = shellEscapeForInsertion(dirPart + entry.name)
+        // it goes through `shellSafeInsertion` — backslash-escaping normally (which leaves `/`
+        // literal, keeping the separators), or single-quoting the whole token if the name contains
+        // a control character, which escaping cannot make safe. The trailing `/` for a directory is
+        // appended outside either form: `'d\nir'/` is one word to zsh, same as `d\ ir/`.
+        let insertion = shellSafeInsertion(dirPart + entry.name)
             + (entry.isDirectory ? "/" : "")
         return Candidate(
             name: dirPart + entry.name,
@@ -100,6 +102,29 @@ public func shellEscapeForInsertion(_ s: String) -> String {
         out.append(ch)
     }
     return out
+}
+
+/// The safe way to put an arbitrary filesystem name into an `insertion`. Prefer this over calling
+/// `shellEscapeForInsertion` directly for anything derived from the filesystem.
+///
+/// **Why backslash-escaping is not enough.** `insertion` is sent verbatim to a live PTY (see
+/// `CompletionController.acceptSelected`), where LF acts as Enter. A filename may legally contain
+/// a newline — and `git clone` will write one to disk, so it takes only a cloned repo to plant one
+/// — and `\<newline>` is a *line continuation* in zsh, not a literal. So escaping cannot neutralise
+/// it: accepting such a candidate would submit whatever followed the newline as a second command.
+///
+/// So when `s` contains any control character, the whole token is single-quoted instead (a newline
+/// inside `'…'` is literal), with embedded `'` written as `'\''` — the standard way to get a
+/// literal quote inside a single-quoted word. The file stays completable, which is why this quotes
+/// rather than dropping the candidate.
+///
+/// Names with no control characters take the unchanged `shellEscapeForInsertion` path, so ordinary
+/// completions are byte-for-byte as before.
+public func shellSafeInsertion(_ s: String) -> String {
+    guard s.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+        return shellEscapeForInsertion(s)
+    }
+    return "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
 }
 
 /// Parse the stdout of a git command that prints one name per line (`git branch

@@ -160,4 +160,51 @@ final class DynamicCandidatesTests: XCTestCase {
         XCTAssertEqual(cands[0].name, "feature/my thing")           // unescaped
         XCTAssertEqual(cands[0].insertion, "feature/my\\ thing ")   // escaped body + unescaped space
     }
+
+    // MARK: - control characters must never reach the PTY unquoted
+    //
+    // A filename may legally contain a newline, and `git clone` will happily write one to disk, so
+    // this is reachable by cloning a repo. Backslash-escaping cannot neutralise it — `\<newline>`
+    // is a LINE CONTINUATION in zsh, not a literal — and the insertion is sent verbatim to a live
+    // PTY where LF acts as Enter. Single-quoting makes it literal while keeping the file
+    // completable.
+
+    func testOrdinaryNameStillUsesBackslashEscaping() {
+        XCTAssertEqual(shellSafeInsertion("src/My File"), "src/My\\ File")
+    }
+
+    func testNameWithNewlineIsSingleQuotedRatherThanBackslashEscaped() {
+        XCTAssertEqual(shellSafeInsertion("notes\nrm -rf DEMO"), "'notes\nrm -rf DEMO'")
+    }
+
+    func testNameWithCarriageReturnIsSingleQuoted() {
+        XCTAssertEqual(shellSafeInsertion("a\rb"), "'a\rb'")
+    }
+
+    /// `'\''` is the standard way to get a literal `'` inside a single-quoted shell word.
+    func testEmbeddedSingleQuoteIsClosedAndReopenedInsideAQuotedName() {
+        XCTAssertEqual(shellSafeInsertion("it's\nx"), "'it'\\''s\nx'")
+    }
+
+    func testFileCandidateWithNewlineInNameIsQuoted() {
+        let entries = [DirectoryEntry(name: "notes\nrm -rf DEMO", isDirectory: false)]
+        let cands = filesystemCandidates(from: entries, dirPart: "", namePrefix: "",
+                                         foldersOnly: false)
+        XCTAssertEqual(cands.first?.insertion, "'notes\nrm -rf DEMO'")
+    }
+
+    func testDirectoryCandidateWithNewlineKeepsTrailingSlashOutsideTheQuotes() {
+        let entries = [DirectoryEntry(name: "d\nir", isDirectory: true)]
+        let cands = filesystemCandidates(from: entries, dirPart: "", namePrefix: "",
+                                         foldersOnly: false)
+        XCTAssertEqual(cands.first?.insertion, "'d\nir'/")
+    }
+
+    /// The displayed/query-matched `name` must stay raw even when the insertion is quoted.
+    func testQuotingDoesNotLeakIntoTheDisplayedName() {
+        let entries = [DirectoryEntry(name: "a\nb", isDirectory: false)]
+        let cands = filesystemCandidates(from: entries, dirPart: "", namePrefix: "",
+                                         foldersOnly: false)
+        XCTAssertEqual(cands.first?.name, "a\nb")
+    }
 }
