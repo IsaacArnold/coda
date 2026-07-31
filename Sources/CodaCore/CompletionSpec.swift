@@ -101,6 +101,14 @@ public enum ArgTemplate: String, Codable, Equatable {
 public enum GeneratorID: String, Codable, Equatable {
     case gitBranches
     case gitRemotes
+    /// The nearest `package.json`'s scripts, as bare names (`dev`). Used after a `run`
+    /// subcommand, and at top level for yarn (which runs scripts without `run`).
+    case packageScripts
+    /// The same scripts rendered `run`-prefixed (`run dev`), for the position *before* `run` has
+    /// been typed — so npm/pnpm/bun users never have to type it. Two ids rather than one plus
+    /// engine-threaded context: the difference is purely cosmetic, and this keeps the pure engine
+    /// untouched and each spec position explicit about the shape it wants.
+    case packageScriptsWithRun
 }
 
 /// Loads every `*.json` completion spec in `directory`, indexing each by its **primary** name

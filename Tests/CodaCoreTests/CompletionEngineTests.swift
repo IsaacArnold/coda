@@ -229,4 +229,40 @@ final class CompletionEngineTests: XCTestCase {
         let ranked = rankCandidates(all, query: "")
         XCTAssertEqual(ranked.map(\.name), ["run build", "run dev"])
     }
+
+    // MARK: - package script generators
+
+    /// The shape the npm spec relies on: at `npm `, the engine offers the command's own
+    /// subcommands AND the positional arg's generator, so scripts and subcommands coexist.
+    func testTopLevelPositionOffersSubcommandsAndTheScriptGenerator() {
+        let npm = CompletionSpec(
+            name: ["npm"],
+            subcommands: [CompletionSpec(name: ["install"])],
+            args: [SpecArg(name: "script", generator: .packageScriptsWithRun, isOptional: true)]
+        )
+        let context = resolveCompletion(line: "npm ", cursorOffset: 4, specs: ["npm": npm])
+        XCTAssertEqual(context.staticCandidates.map(\.name), ["install"])
+        XCTAssertEqual(context.dynamicSources, [.generator(.packageScriptsWithRun)])
+    }
+
+    func testAfterRunSubcommandTheBareScriptGeneratorIsOffered() {
+        let npm = CompletionSpec(
+            name: ["npm"],
+            subcommands: [
+                CompletionSpec(name: ["run"], args: [SpecArg(generator: .packageScripts)])
+            ],
+            args: [SpecArg(name: "script", generator: .packageScriptsWithRun, isOptional: true)]
+        )
+        let context = resolveCompletion(line: "npm run ", cursorOffset: 8, specs: ["npm": npm])
+        XCTAssertEqual(context.dynamicSources, [.generator(.packageScripts)])
+    }
+
+    func testYarnOffersBareScriptsAtTopLevel() {
+        let yarn = CompletionSpec(
+            name: ["yarn"],
+            args: [SpecArg(generator: .packageScripts, isOptional: true)]
+        )
+        let context = resolveCompletion(line: "yarn ", cursorOffset: 5, specs: ["yarn": yarn])
+        XCTAssertEqual(context.dynamicSources, [.generator(.packageScripts)])
+    }
 }

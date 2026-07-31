@@ -144,4 +144,21 @@ final class CompletionSpecTests: XCTestCase {
         // The malformed file must not produce any entry, and must not abort the whole load.
         XCTAssertEqual(specs.count, 1)
     }
+
+    // MARK: - package script generator ids
+
+    func testPackageScriptGeneratorIdsDecodeFromJSON() throws {
+        let json = Data("""
+        {
+          "name": ["npm"],
+          "args": [{ "name": "script", "generator": "packageScriptsWithRun" }],
+          "subcommands": [
+            { "name": ["run"], "args": [{ "generator": "packageScripts" }] }
+          ]
+        }
+        """.utf8)
+        let spec = try JSONDecoder().decode(CompletionSpec.self, from: json)
+        XCTAssertEqual(spec.args?.first?.generator, .packageScriptsWithRun)
+        XCTAssertEqual(spec.subcommands?.first?.args?.first?.generator, .packageScripts)
+    }
 }

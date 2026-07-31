@@ -48,6 +48,10 @@ final class CompletionGenerators {
     /// claim is observable during a manual/live verify.
     private var gitSpawnCount = 0
 
+    /// Resolves `package.json` scripts. Synchronous and self-caching (see `PackageScriptStore`),
+    /// so unlike the git generators it needs no in-flight tracking or `onAsyncUpdate` hop.
+    private let packageScriptStore = PackageScriptStore()
+
     // MARK: - Filesystem (sync, bounded, never throws)
 
     /// Candidates for a path fragment `prefix`, listing one directory:
@@ -113,6 +117,15 @@ final class CompletionGenerators {
             inFlight: \.remoteInFlight,
             gitArgs: ["remote"]
         )
+    }
+
+    // MARK: - package.json scripts (sync, cached by mtime)
+
+    /// Scripts from the nearest `package.json` at or above `cwd`. `runPrefixed` renders them as
+    /// `run dev` rather than `dev`. `[]` when there's no `package.json` — e.g. `npm ` in a Swift
+    /// project offers only npm's own subcommands.
+    func packageScripts(cwd: URL, runPrefixed: Bool) -> [Candidate] {
+        packageScriptStore.candidates(cwd: cwd, runPrefixed: runPrefixed)
     }
 
     /// The shared cached/throttled/deduped git path. Reads the cache for `cwd.path`; if it is cold
