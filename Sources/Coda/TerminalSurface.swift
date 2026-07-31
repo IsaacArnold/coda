@@ -36,6 +36,19 @@ final class TerminalSurface: NSViewController {
     /// controller (a later task).
     var onPromptPhaseChange: ((PromptPhase) -> Void)?
 
+    /// Fired at most once per surface, when this shell has been producing output for a while and
+    /// has never sent an OSC 133 marker — i.e. completions are enabled but structurally cannot
+    /// work. Exists because that state is otherwise completely silent: the popup just never
+    /// appears. AppDelegate surfaces it in Settings → Terminal.
+    var onShellIntegrationNotDetected: (() -> Void)?
+
+    /// When the pty was started, for the grace window in `shellIntegrationStatus`.
+    private var processStartedAt: Date?
+    /// Whether the shell has written anything at all (no output ⇒ no chance to send a marker).
+    private var sawOutput = false
+    /// Latch so `onShellIntegrationNotDetected` fires once, not on every output chunk.
+    private var reportedIntegrationMissing = false
+
     init(workingDirectory: String, command: String, setupScript: String = "",
          hookWorktreeID: String = "", hookSurfaceID: String = "", hookSocketPath: String = "",
          shell: ResolvedShell = ResolvedShell(executablePath: "/bin/zsh"),
@@ -75,7 +88,11 @@ final class TerminalSurface: NSViewController {
         // navigation is Task 10.
         if completionsEnabled {
             completionController = CompletionController(surface: self)
-            terminal.onOutput = { [weak self] in self?.completionController?.refresh() }
+            terminal.onOutput = { [weak self] in
+                self?.completionController?.refresh()
+                self?.sawOutput = true
+                self?.checkShellIntegration()
+            }
             // Task 9: wire the controller's show/hide seams to the popup overlay. The controller
             // has already run the pure engine + visibility gate by the time either fires — this
             // is pure "display what it decided," no further gating here.
@@ -254,6 +271,35 @@ final class TerminalSurface: NSViewController {
                               currentDirectory: workingDirectory)
         if let pendingFont { applyFont(pendingFont) }
         if let pendingTheme { applyTheme(pendingTheme) }
+
+        // Arm the shell-integration check. The output-driven checks alone aren't enough: a shell
+        // that prints its prompt once and then goes quiet would only ever be sampled inside the
+        // grace window, so this one-shot pass just past the window is what actually catches it.
+        guard completionsEnabled else { return }
+        processStartedAt = Date()
+        DispatchQueue.main.asyncAfter(deadline: .now() + shellIntegrationGrace + 0.5) { [weak self] in
+            self?.checkShellIntegration()
+        }
+    }
+
+    /// Grace window before a marker-less shell is called broken. Generous: a slow `.zshrc` (nvm,
+    /// pyenv, a big plugin manager) can take seconds before the first prompt is drawn.
+    private var shellIntegrationGrace: TimeInterval { 5 }
+
+    /// Diagnose the integration and report the bad case upward once. Called on every output chunk
+    /// and once from the armed timer above; all main-thread, matching `CompletionController`.
+    private func checkShellIntegration() {
+        guard completionsEnabled, !reportedIntegrationMissing, let startedAt = processStartedAt
+        else { return }
+        let status = shellIntegrationStatus(
+            sawAnyPromptMarker: terminal?.didSeeAnyPromptMarker ?? false,
+            sawOutput: sawOutput,
+            elapsed: Date().timeIntervalSince(startedAt),
+            grace: shellIntegrationGrace
+        )
+        guard status == .notDetected else { return }
+        reportedIntegrationMissing = true
+        onShellIntegrationNotDetected?()
     }
 
     /// Resolves the env additions that route this surface's shell through Coda's bundled

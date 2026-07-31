@@ -1,3 +1,18 @@
+# Coda shell integration — keep shell history out of the app bundle.
+#
+# Stock macOS /etc/zshrc does `HISTFILE=${ZDOTDIR:-$HOME}/.zsh_history`, and it runs after our
+# .zshenv/.zprofile but before this file. While the wrapper is active ZDOTDIR is Coda's bundle, so
+# an uncorrected shell saves the user's history INSIDE Coda.app — wiped by every update, and a
+# write into a notarized bundle. Point it back at their own dotfile directory, which is where it
+# would have gone without us.
+#
+# Guarded on the exact bundle-relative path so a HISTFILE the user set deliberately (in .zshenv,
+# which ran earlier) is left alone; doing this before chaining .zshrc below means anything they set
+# there still wins.
+if [[ $HISTFILE == $ZDOTDIR/.zsh_history ]]; then
+	HISTFILE=${CODA_USER_ZDOTDIR:-$HOME}/.zsh_history
+fi
+
 # Coda shell integration — chain the user's .zshrc first.
 if [[ -f ${CODA_USER_ZDOTDIR:-$HOME}/.zshrc ]]; then
 	CODA_ZDOTDIR=$ZDOTDIR

@@ -30,6 +30,9 @@ struct SettingsContext {
     let onChangeShell: (ShellChoice) -> Void
     let completionsEnabled: Bool
     let onChangeCompletionsEnabled: (Bool) -> Void
+    /// True when a terminal has reported that completions are on but Coda's zsh integration never
+    /// loaded, so the Terminal pane can say so rather than showing a switch that claims otherwise.
+    let shellIntegrationMissing: Bool
 
     // Notifications
     let notifyOnNeedsYou: Bool

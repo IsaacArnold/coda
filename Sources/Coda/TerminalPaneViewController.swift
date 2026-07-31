@@ -71,7 +71,25 @@ final class TerminalPaneViewController: NSViewController {
                                               subtitle: "Adds an opt-in zsh integration to Coda terminals. Applies to newly-opened terminals.",
                                               control: completionsSwitch)
 
-        let card = SettingsCard(rows: [fontRow, shellRow, completionsRow])
+        // --- Shell-integration warning ---
+        // Only present when a terminal has actually reported the fault. Completions depend on a
+        // zsh wrapper that another tool can `exec` straight over (kiro-cli / Amazon Q / Fig
+        // re-exec the shell from your dotfiles), and when that happens the popup simply never
+        // appears — the toggle above still reads "on". This row is what makes that visible.
+        var rows = [fontRow, shellRow, completionsRow]
+        if context.shellIntegrationMissing {
+            let warning = NSTextField(wrappingLabelWithString:
+                "Completions are on, but Coda's zsh integration didn't load in your terminals, so "
+                + "no completions can appear. This usually means a tool launched from your dotfiles "
+                + "replaced the shell before the integration finished — kiro-cli, Amazon Q and Fig "
+                + "all do this. Open a new terminal after updating Coda; if it persists, check "
+                + "whether ~/.zprofile or ~/.zshrc re-execs your shell.")
+            warning.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            warning.textColor = .systemOrange
+            rows.append(SettingsRow.make(title: "Shell Integration", control: warning))
+        }
+
+        let card = SettingsCard(rows: rows)
         view = SettingsPane.makeScrollView(title: "Terminal", cards: [card])
     }
 

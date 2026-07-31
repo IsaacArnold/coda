@@ -53,6 +53,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     // owned) from there directly, that would be a data race.
     private let surfaceAllowlistLock = NSLock()
     private var surfaceAllowlistSnapshot: Set<String> = []
+    /// This instance's state locations, resolved once in `applicationDidFinishLaunching` before
+    /// anything reads them. Isolated when `CODA_DATA_DIR` is set — see `CodaPaths`.
+    private var paths: CodaPaths!
     private var prefsStore: PreferencesStore!
     private var preferences = Preferences()
     private var themeStore: ThemeStore!
@@ -82,14 +85,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let home = FileManager.default.homeDirectoryForCurrentUser
+        // Resolve this instance's paths first — everything below hangs off them. Normally ~/.coda;
+        // a CODA_DATA_DIR override yields a fully isolated instance (see `CodaPaths`) so a debug
+        // build can run alongside an installed Coda without racing it for state or the hook socket.
+        paths = resolveCodaPaths(home: home,
+                                 applicationSupport: FileManager.default
+                                     .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0],
+                                 environment: ProcessInfo.processInfo.environment)
+        let dataDir = paths.dataDirectory
+        if dataDir != home.appendingPathComponent(".coda") {
+            NSLog("[coda] running isolated: data dir \(dataDir.path), hook socket \(paths.hookSocket.path)")
+        }
         // One-time settings migration from the app's former name (~/.conductor → ~/.coda).
         DataDirMigration.migrateSettings(from: home.appendingPathComponent(".conductor"),
-                                         to: home.appendingPathComponent(".coda"))
+                                         to: dataDir)
         store = makeStore()
-        prefsStore = PreferencesStore(url: home.appendingPathComponent(".coda/preferences.json"))
+        prefsStore = PreferencesStore(url: dataDir.appendingPathComponent("preferences.json"))
         preferences = prefsStore.load()
         applyAppIcon()
-        themeStore = ThemeStore(directory: home.appendingPathComponent(".coda/themes"))
+        themeStore = ThemeStore(directory: dataDir.appendingPathComponent("themes"))
         // Retire themes dropped from the bundle so upgraders don't keep stale copies.
         themeStore.removeThemes(named: retiredThemeNames)
         if let active = preferences.activeTheme, retiredThemeNames.contains(active) {
@@ -99,7 +113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         // (e.g. Atom One Dark, Brogrammer) without clobbering their existing files.
         try? themeStore.installMissing(from: bundledThemeURLs())
         activeTheme = loadActiveTheme()
-        kbStore = KeybindingsStore(url: home.appendingPathComponent(".coda/keybindings.json"))
+        kbStore = KeybindingsStore(url: dataDir.appendingPathComponent("keybindings.json"))
         keybindings = kbStore.load()
         buildMenu()
         buildWindow()
@@ -233,9 +247,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// invoked on a background thread (the server's read queue) — it reads the lock-protected
     /// `surfaceAllowlistSnapshot`, never the main-thread-owned `surfaces` registry.
     private func startHookServer() {
-        let socketURL = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Coda/hooks.sock")
+        let socketURL = paths.hookSocket
+        guard paths.hookSocketFitsInSockaddr else {
+            NSLog("[coda] hook socket path is too long to bind (sockaddr_un caps sun_path at 104 "
+                  + "bytes): \(socketURL.path) — agent badges are off for this instance. Use a "
+                  + "shorter \(codaDataDirEnvKey).")
+            return
+        }
         let server = AgentHookSocketServer(
             socketURL: socketURL,
             isKnownSurface: { [weak self] wt, s in self?.isKnownSurface(wt, s) ?? false },
@@ -366,9 +384,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     private func makeStore() -> WorktreeStore {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let configURL = home.appendingPathComponent(".coda/local.json")
-        let worktreeRoot = home.appendingPathComponent(".coda/worktrees").path
+        let configURL = paths.dataDirectory.appendingPathComponent("local.json")
+        let worktreeRoot = paths.dataDirectory.appendingPathComponent("worktrees").path
         return WorktreeStore(config: Config(url: configURL),
                              git: GitWorktree(gitPath: "/usr/bin/git"),
                              worktreeRoot: worktreeRoot)
@@ -631,6 +648,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 onChangeShell: { [weak self] choice in self?.setShell(choice) },
                 completionsEnabled: preferences.completionsEnabled,
                 onChangeCompletionsEnabled: { [weak self] on in self?.setCompletionsEnabled(on) },
+                shellIntegrationMissing: shellIntegrationMissing,
                 notifyOnNeedsYou: preferences.notifyOnNeedsYou,
                 onChangeNotifyOnNeedsYou: { [weak self] on in self?.setNotifyOnNeedsYou(on) },
                 notifyOnDone: preferences.notifyOnDone,
@@ -939,6 +957,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                                    completionsEnabled: preferences.completionsEnabled)
         pane.onOpenFile = { [weak self] path, line in self?.openInDefaultEditor(path: path, line: line) }
         pane.onTitleChange = { [weak self] _ in self?.refreshTabBar() }
+        pane.onShellIntegrationNotDetected = { [weak self] in self?.noteShellIntegrationMissing() }
         pane.applyTheme(activeTheme)
         pane.applyFont(resolvedTerminalFont())
         return pane
@@ -1322,6 +1341,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private func setCompletionsEnabled(_ on: Bool) {
         preferences.completionsEnabled = on
         do { try prefsStore.save(preferences) } catch { presentError(error) }
+    }
+
+    /// Set once a terminal reports that completions are enabled but the shell integration never
+    /// loaded. Read by Settings → Terminal, which then explains it instead of showing a toggle
+    /// that claims the feature is on.
+    private(set) var shellIntegrationMissing = false
+
+    /// A surface diagnosed a missing shell integration. Records it and logs a line naming the
+    /// usual culprit, so the failure leaves a trace instead of being invisible. Idempotent:
+    /// several surfaces can report the same condition.
+    private func noteShellIntegrationMissing() {
+        guard !shellIntegrationMissing else { return }
+        shellIntegrationMissing = true
+        NSLog("[coda] completions are enabled but no OSC 133 markers arrived — Coda's zsh "
+              + "integration never loaded. A tool that re-execs the shell from your dotfiles "
+              + "(kiro-cli / Amazon Q / Fig) is the usual cause.")
     }
 
     /// Persist a new terminal font and re-apply it to every live surface.
