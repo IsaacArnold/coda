@@ -1615,14 +1615,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     private func handleStashAction(_ action: StashAction, repo: Repository) {
         let git = store.git
+        var touchedWorkingTree = false
         do {
             switch action {
-            case .apply(let index): try git.stashApply(repo: repo.path, index: index)
-            case .pop(let index): try git.stashPop(repo: repo.path, index: index)
-            case .drop(let index): try git.stashDrop(repo: repo.path, index: index)
+            case .apply(let index):
+                try git.stashApply(repo: repo.path, index: index)
+                touchedWorkingTree = true
+            case .pop(let index):
+                try git.stashPop(repo: repo.path, index: index)
+                touchedWorkingTree = true
+            case .drop(let index):
+                try git.stashDrop(repo: repo.path, index: index)
             }
             let stashes = try git.stashList(repo: repo.path)
             branchPickerPanel?.updateStashes(stashes)
+            if touchedWorkingTree { scheduleDiffRefresh() }
         } catch {
             branchPickerPanel?.showError(error.localizedDescription)
         }
