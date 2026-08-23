@@ -11,6 +11,7 @@ final class GeneralPaneViewController: NSViewController {
 
     private let editorPopup = NSPopUpButton()
     private let scalePopup = NSPopUpButton()
+    private let branchPickerSwitch = NSSwitch()
     private let appIconRow = NSStackView()
     private var appIconButtons: [NSButton] = []
     private let appIcons = AppIconCatalog.all()
@@ -43,7 +44,14 @@ final class GeneralPaneViewController: NSViewController {
                                         subtitle: "Scales the sidebar, tabs, and labels. Applies immediately.",
                                         control: scalePopup)
 
-        let editorCard = SettingsCard(rows: [editorRow, scaleRow])
+        branchPickerSwitch.state = context.showBranchPicker ? .on : .off
+        branchPickerSwitch.target = self
+        branchPickerSwitch.action = #selector(branchPickerChanged)
+        let branchPickerRow = SettingsRow.make(title: "Show Branch Picker",
+                                               subtitle: "Shows a branch switcher button in the toolbar.",
+                                               control: branchPickerSwitch)
+
+        let editorCard = SettingsCard(rows: [editorRow, scaleRow, branchPickerRow])
 
         // --- App icon gallery ---
         appIconRow.orientation = .horizontal
@@ -137,6 +145,12 @@ final class GeneralPaneViewController: NSViewController {
         let idx = scalePopup.indexOfSelectedItem
         guard UIScale.allCases.indices.contains(idx) else { return }
         context.onChangeUIScale(UIScale.allCases[idx])
+    }
+
+    // MARK: Branch picker
+
+    @objc private func branchPickerChanged() {
+        context.onChangeShowBranchPicker(branchPickerSwitch.state == .on)
     }
 
     // MARK: App icon (carried over)

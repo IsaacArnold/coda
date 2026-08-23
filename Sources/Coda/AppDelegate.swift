@@ -79,6 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var branchPickerPanel: BranchPickerPanel?
     private weak var branchPickerButton: NSButton?
     private weak var branchLabel: NSTextField?
+    private weak var branchPickerItem: NSToolbarItem?
 
     /// Coming back to the app counts as looking at whatever worktree terminal is on screen, so
     /// clear its badge contribution.
@@ -661,6 +662,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 onChangeNotifyOnDone: { [weak self] on in self?.setNotifyOnDone(on) },
                 showDockBadge: preferences.showDockBadge,
                 onChangeShowDockBadge: { [weak self] on in self?.setShowDockBadge(on) },
+                showBranchPicker: preferences.showBranchPicker,
+                onChangeShowBranchPicker: { [weak self] on in self?.setShowBranchPicker(on) },
                 keybindings: keybindings,
                 onChangeKeybindings: { [weak self] bindings in self?.applyKeybindings(bindings) })
 
@@ -1344,6 +1347,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         preferences.showDockBadge = on
         do { try prefsStore.save(preferences) } catch { presentError(error) }
         recomputeRollupsAndRefreshUI()   // re-evaluates the badge with the new setting
+    }
+
+    private func setShowBranchPicker(_ on: Bool) {
+        preferences.showBranchPicker = on
+        do { try prefsStore.save(preferences) } catch { presentError(error) }
+        branchPickerItem?.view?.isHidden = !on
+        if !on { branchPickerPanel?.dismiss() }
     }
 
     /// Persist the terminal-completions toggle. Applies to newly-opened terminals only —
@@ -2247,12 +2257,14 @@ extension AppDelegate: NSToolbarDelegate {
             label.widthAnchor.constraint(lessThanOrEqualToConstant: 120).isActive = true
             branchLabel = label
             branchPickerButton = icon
+            branchPickerItem = item
             let stack = NSStackView(views: [icon, label])
             stack.orientation = .horizontal
             stack.alignment = .centerY
             stack.spacing = 4
             stack.edgeInsets = NSEdgeInsets(top: 2, left: 8, bottom: 2, right: 8)
             item.view = stack
+            item.view?.isHidden = !preferences.showBranchPicker
             return item
 
         case .rightCluster:
