@@ -7,14 +7,14 @@ enum StashAction {
     case drop(Int)
 }
 
-final class BranchPickerPanel: NSPanel {
+final class BranchPickerPanel: NSPanel, NSTextFieldDelegate {
     var onCheckout: ((Branch) -> Void)?
     var onStashAction: ((StashAction) -> Void)?
 
     private let effectView = NSVisualEffectView()
     private let searchField = NSTextField()
     private let scrollView = NSScrollView()
-    private let tableView = NSTableView()
+    private let tableView = HoverTableView()
     private let stashBar = NSView()
     private let stashDisclosure = NSButton()
     private let stashLabel = NSTextField(labelWithString: "")
@@ -30,6 +30,7 @@ final class BranchPickerPanel: NSPanel {
     private var filteredBranches: [Branch] = []
     private var stashes: [Stash] = []
     private var stashExpanded = false
+    private var keyMonitor: Any?
 
     static let panelWidth: CGFloat = 300
     static let maxPanelHeight: CGFloat = 400
@@ -39,16 +40,19 @@ final class BranchPickerPanel: NSPanel {
     static let stashBarHeight: CGFloat = 32
     static let cornerRadius: CGFloat = 8
 
+    override var canBecomeKey: Bool { true }
+
     override init(contentRect: NSRect, styleMask style: NSWindow.StyleMask,
                   backing bufferingType: NSWindow.BackingStoreType, defer flag: Bool) {
         super.init(contentRect: contentRect, styleMask: [.nonactivatingPanel],
                    backing: .buffered, defer: true)
         isFloatingPanel = true
+        becomesKeyOnlyIfNeeded = false
         level = .floating
         hasShadow = true
         backgroundColor = .clear
         isOpaque = false
-        hidesOnDeactivate = false
+        hidesOnDeactivate = true
 
         let content = NSView(frame: contentRect)
         contentView = content
@@ -80,8 +84,7 @@ final class BranchPickerPanel: NSPanel {
         searchField.drawsBackground = false
         searchField.font = .systemFont(ofSize: NSFont.systemFontSize)
         searchField.translatesAutoresizingMaskIntoConstraints = false
-        searchField.target = self
-        searchField.action = #selector(searchChanged)
+        searchField.delegate = self
         container.addSubview(searchField)
     }
 
@@ -93,11 +96,15 @@ final class BranchPickerPanel: NSPanel {
         tableView.rowHeight = Self.rowHeight
         tableView.style = .plain
         tableView.backgroundColor = .clear
-        tableView.selectionHighlightStyle = .regular
-        tableView.doubleAction = #selector(tableDoubleClicked)
+        tableView.selectionHighlightStyle = .none
         tableView.target = self
+        tableView.action = #selector(tableClicked)
         tableView.delegate = self
         tableView.dataSource = self
+
+        tableView.onHoverChanged = { [weak self] row in
+            self?.updateHover(row: row)
+        }
 
         scrollView.documentView = tableView
         scrollView.drawsBackground = false
@@ -276,10 +283,38 @@ final class BranchPickerPanel: NSPanel {
         setFrameOrigin(clamped)
         makeKeyAndOrderFront(nil)
         makeFirstResponder(searchField)
+        installKeyMonitor()
     }
 
     func dismiss() {
+        removeKeyMonitor()
         orderOut(nil)
+    }
+
+    private func installKeyMonitor() {
+        removeKeyMonitor()
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, self.isVisible else { return event }
+            if event.keyCode == 53 {
+                self.dismiss()
+                return nil
+            }
+            if event.keyCode == 36 {
+                let row = self.tableView.hoveredRow >= 0 ? self.tableView.hoveredRow : -1
+                if let branch = self.branchForRow(row) {
+                    self.onCheckout?(branch)
+                    return nil
+                }
+            }
+            return event
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let monitor = keyMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyMonitor = nil
+        }
     }
 
     func showError(_ message: String) {
@@ -303,6 +338,18 @@ final class BranchPickerPanel: NSPanel {
         updateStashBar()
         if stashExpanded { rebuildStashList() }
         updatePanelSize()
+    }
+
+    // MARK: - NSTextFieldDelegate (live search filtering)
+
+    func controlTextDidChange(_ obj: Notification) {
+        applyFilter()
+    }
+
+    override func resignKey() {
+        super.resignKey()
+        removeKeyMonitor()
+        dismiss()
     }
 
     // MARK: - Internal
@@ -392,11 +439,22 @@ final class BranchPickerPanel: NSPanel {
         setFrame(frame, display: true)
     }
 
+    private func updateHover(row: Int) {
+        for r in 0..<tableView.numberOfRows {
+            guard let rowView = tableView.rowView(atRow: r, makeIfNecessary: false) else { continue }
+            if r == row, branchForRow(r) != nil {
+                rowView.wantsLayer = true
+                rowView.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.08).cgColor
+                rowView.layer?.cornerRadius = 4
+            } else {
+                rowView.layer?.backgroundColor = nil
+            }
+        }
+    }
+
     // MARK: - Actions
 
-    @objc private func searchChanged() { applyFilter() }
-
-    @objc private func tableDoubleClicked() {
+    @objc private func tableClicked() {
         let row = tableView.clickedRow
         guard row >= 0, let branch = branchForRow(row) else { return }
         onCheckout?(branch)
@@ -419,15 +477,6 @@ final class BranchPickerPanel: NSPanel {
     @objc private func cancelClicked() {
         confirmationView.isHidden = true
         pendingConfirmAction = nil
-    }
-
-    override func cancelOperation(_ sender: Any?) {
-        dismiss()
-    }
-
-    override func resignKey() {
-        super.resignKey()
-        dismiss()
     }
 
     // MARK: - Table helpers
@@ -501,14 +550,40 @@ extension BranchPickerPanel: NSTableViewDataSource, NSTableViewDelegate {
     }
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
-        if case .sectionHeader = tableItems[row].kind { return false }
-        return true
+        false
+    }
+}
+
+// MARK: - HoverTableView (mouse tracking for row hover)
+
+private final class HoverTableView: NSTableView {
+    var onHoverChanged: ((Int) -> Void)?
+    private(set) var hoveredRow: Int = -1
+    private var trackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = trackingArea { removeTrackingArea(existing) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow],
+            owner: self, userInfo: nil)
+        addTrackingArea(area)
+        trackingArea = area
     }
 
-    func tableViewSelectionDidChange(_ notification: Notification) {
-        let row = tableView.selectedRow
-        guard row >= 0, let branch = branchForRow(row) else { return }
-        onCheckout?(branch)
+    override func mouseMoved(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let row = self.row(at: point)
+        if row != hoveredRow {
+            hoveredRow = row
+            onHoverChanged?(row)
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hoveredRow = -1
+        onHoverChanged?(-1)
     }
 }
 
