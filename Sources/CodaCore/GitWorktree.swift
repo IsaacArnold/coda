@@ -125,4 +125,48 @@ public struct GitWorktree {
         let (out, _) = try gitAllowingFailure(dir, ["-c", "core.quotePath=false", "diff", "--no-index", "--find-renames", "/dev/null", path])
         return out
     }
+
+    /// All local + remote branches. Remote branches that have an identically-named local branch
+    /// are excluded (they'd be duplicates in a picker). `origin/HEAD` is always excluded.
+    public func branches(repo: String) throws -> [Branch] {
+        let out = try git(repo, ["branch", "-a", "--format=%(refname:short) %(HEAD)"])
+        let localNames = Set(
+            try localBranches(repo: repo)
+        )
+        var result: [Branch] = []
+        for line in out.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+            let isHead = trimmed.hasSuffix(" *")
+            let name = isHead
+                ? String(trimmed.dropLast(2)).trimmingCharacters(in: .whitespaces)
+                : trimmed
+            if name.contains("/HEAD") { continue }
+            let isRemote = name.contains("/")
+                && !localNames.contains(name)
+            if isRemote {
+                let slashIndex = name.firstIndex(of: "/")!
+                let remoteName = String(name[name.startIndex..<slashIndex])
+                let shortName = String(name[name.index(after: slashIndex)...])
+                // Skip if a local branch with this short name already exists
+                if localNames.contains(shortName) { continue }
+                result.append(Branch(name: name, isRemote: true, isHead: false, remoteName: remoteName))
+            } else {
+                result.append(Branch(name: name, isRemote: false, isHead: isHead, remoteName: nil))
+            }
+        }
+        return result
+    }
+
+    /// Check out a branch. For a branch name that only exists as a remote tracking branch,
+    /// git's `checkout` automatically creates a local tracking branch.
+    public func checkout(repo: String, branch: String) throws {
+        try git(repo, ["checkout", branch])
+    }
+
+    /// True if the working tree has any uncommitted changes (staged, unstaged, or untracked).
+    public func hasUncommittedChanges(repo: String) throws -> Bool {
+        let out = try git(repo, ["status", "--porcelain"])
+        return !out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 }
