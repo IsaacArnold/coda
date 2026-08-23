@@ -79,7 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var branchPickerPanel: BranchPickerPanel?
     private weak var branchPickerButton: NSButton?
     private weak var branchLabel: NSTextField?
-    private weak var branchPickerItem: NSToolbarItem?
+    private weak var branchPickerHairline: NSView?
 
     /// Coming back to the app counts as looking at whatever worktree terminal is on screen, so
     /// clear its badge contribution.
@@ -451,6 +451,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
         toolbar.allowsUserCustomization = false
+        toolbar.centeredItemIdentifiers = [.notch]
         window.toolbar = toolbar
         window.toolbarStyle = .unified
 
@@ -1352,8 +1353,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private func setShowBranchPicker(_ on: Bool) {
         preferences.showBranchPicker = on
         do { try prefsStore.save(preferences) } catch { presentError(error) }
-        branchPickerItem?.view?.isHidden = !on
         if !on { branchPickerPanel?.dismiss() }
+        branchPickerButton?.isHidden = !on
+        branchLabel?.isHidden = !on
+        branchPickerHairline?.isHidden = !on
     }
 
     /// Persist the terminal-completions toggle. Applies to newly-opened terminals only —
@@ -2140,8 +2143,7 @@ private extension NSToolbarItem.Identifier {
     // single rounded background the toolbar draws behind a custom view. This is what lets the
     // icons hug the divider; separate items get uncontrollable spacing on both sides.
     static let leftCluster = NSToolbarItem.Identifier("leftCluster")   // sidebar-toggle │ add-repo
-    static let branchPicker = NSToolbarItem.Identifier("branchPicker")
-    static let rightCluster = NSToolbarItem.Identifier("rightCluster") // launch-Claude │ toggle-diff
+    static let rightCluster = NSToolbarItem.Identifier("rightCluster")
 }
 
 extension AppDelegate: NSToolbarDelegate {
@@ -2151,7 +2153,7 @@ extension AppDelegate: NSToolbarDelegate {
         // (toggle+add) and right (launch+open) groups keeps it put in window coordinates.
         [.leftCluster,
          .flexibleSpace, .notch, .flexibleSpace,
-         .branchPicker, .rightCluster, .openIn]
+         .rightCluster, .openIn]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -2240,34 +2242,27 @@ extension AppDelegate: NSToolbarDelegate {
                 target: self, action: #selector(addRepoAction))
             return clusterItem(id, views: [sidebar, clusterHairline(), add])
 
-        case .branchPicker:
-            let item = NSToolbarItem(itemIdentifier: id)
-            item.label = ""
-            let icon = clusterButton(
+        case .rightCluster:
+            let branchIcon = clusterButton(
                 symbolName: "arrow.triangle.branch", tooltip: "Switch Branch",
                 target: self, action: #selector(toggleBranchPicker(_:)))
-            let label = NSTextField(labelWithString: "")
-            label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-            label.textColor = .secondaryLabelColor
-            label.isBordered = false
-            label.isEditable = false
-            label.drawsBackground = false
-            label.lineBreakMode = .byTruncatingTail
-            label.translatesAutoresizingMaskIntoConstraints = false
-            label.widthAnchor.constraint(lessThanOrEqualToConstant: 120).isActive = true
-            branchLabel = label
-            branchPickerButton = icon
-            branchPickerItem = item
-            let stack = NSStackView(views: [icon, label])
-            stack.orientation = .horizontal
-            stack.alignment = .centerY
-            stack.spacing = 4
-            stack.edgeInsets = NSEdgeInsets(top: 2, left: 8, bottom: 2, right: 8)
-            item.view = stack
-            item.view?.isHidden = !preferences.showBranchPicker
-            return item
-
-        case .rightCluster:
+            let branchLbl = NSTextField(labelWithString: "")
+            branchLbl.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            branchLbl.textColor = .secondaryLabelColor
+            branchLbl.isBordered = false
+            branchLbl.isEditable = false
+            branchLbl.drawsBackground = false
+            branchLbl.lineBreakMode = .byTruncatingTail
+            branchLbl.translatesAutoresizingMaskIntoConstraints = false
+            branchLbl.widthAnchor.constraint(lessThanOrEqualToConstant: 120).isActive = true
+            branchPickerButton = branchIcon
+            branchLabel = branchLbl
+            let bpHairline = clusterHairline()
+            branchPickerHairline = bpHairline
+            let showBP = preferences.showBranchPicker
+            branchIcon.isHidden = !showBP
+            branchLbl.isHidden = !showBP
+            bpHairline.isHidden = !showBP
             let claude = clusterButton(
                 image: claudeMarkImage(diameter: 20), tooltip: "Launch Claude (⌘R)",
                 target: self, action: #selector(launchClaudeAction))
@@ -2275,7 +2270,7 @@ extension AppDelegate: NSToolbarDelegate {
                 image: toggleDiffImage(active: !diffPaneItem.isCollapsed), tooltip: "Toggle Diff (⌃⌘D)",
                 target: self, action: #selector(toggleDiffAction))
             toggleDiffButton = diff
-            return clusterItem(id, views: [claude, clusterHairline(), diff])
+            return clusterItem(id, views: [branchIcon, branchLbl, bpHairline, claude, clusterHairline(), diff])
 
         case .notch:
             let item = NSToolbarItem(itemIdentifier: id)
