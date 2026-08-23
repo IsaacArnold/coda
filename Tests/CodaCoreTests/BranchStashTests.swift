@@ -127,3 +127,85 @@ final class GitBranchTests: XCTestCase {
         XCTAssertTrue(try git.hasUncommittedChanges(repo: repo))
     }
 }
+
+final class GitStashTests: XCTestCase {
+    func testStashListEmptyOnCleanRepo() throws {
+        let repo = try makeTempRepo()
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        XCTAssertEqual(try git.stashList(repo: repo), [])
+    }
+
+    func testStashSaveAndListRoundTrip() throws {
+        let repo = try makeTempRepo()
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        try "dirty".write(toFile: repo + "/README.md", atomically: true, encoding: .utf8)
+        try git.stashSave(repo: repo, message: "test stash")
+        let stashes = try git.stashList(repo: repo)
+        XCTAssertEqual(stashes.count, 1)
+        XCTAssertEqual(stashes[0].id, 0)
+        XCTAssertTrue(stashes[0].message.contains("test stash"))
+        XCTAssertFalse(try git.hasUncommittedChanges(repo: repo))
+    }
+
+    func testStashSaveIncludesUntrackedFiles() throws {
+        let repo = try makeTempRepo()
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        try "new file".write(toFile: repo + "/untracked.txt", atomically: true, encoding: .utf8)
+        try git.stashSave(repo: repo, message: "with untracked")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: repo + "/untracked.txt"))
+        XCTAssertEqual(try git.stashList(repo: repo).count, 1)
+    }
+
+    func testStashPopRestoresChanges() throws {
+        let repo = try makeTempRepo()
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        try "dirty".write(toFile: repo + "/README.md", atomically: true, encoding: .utf8)
+        try git.stashSave(repo: repo, message: "pop test")
+        try git.stashPop(repo: repo, index: 0)
+        XCTAssertTrue(try git.hasUncommittedChanges(repo: repo))
+        XCTAssertEqual(try git.stashList(repo: repo).count, 0)
+    }
+
+    func testStashApplyRestoresButKeepsStash() throws {
+        let repo = try makeTempRepo()
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        try "dirty".write(toFile: repo + "/README.md", atomically: true, encoding: .utf8)
+        try git.stashSave(repo: repo, message: "apply test")
+        try git.stashApply(repo: repo, index: 0)
+        XCTAssertTrue(try git.hasUncommittedChanges(repo: repo))
+        XCTAssertEqual(try git.stashList(repo: repo).count, 1)
+    }
+
+    func testStashDropRemovesStash() throws {
+        let repo = try makeTempRepo()
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        try "dirty".write(toFile: repo + "/README.md", atomically: true, encoding: .utf8)
+        try git.stashSave(repo: repo, message: "drop test")
+        try git.stashDrop(repo: repo, index: 0)
+        XCTAssertEqual(try git.stashList(repo: repo).count, 0)
+    }
+
+    func testStashListParsesMultipleStashes() throws {
+        let repo = try makeTempRepo()
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        try "first".write(toFile: repo + "/README.md", atomically: true, encoding: .utf8)
+        try git.stashSave(repo: repo, message: "first stash")
+        try "second".write(toFile: repo + "/README.md", atomically: true, encoding: .utf8)
+        try git.stashSave(repo: repo, message: "second stash")
+        let stashes = try git.stashList(repo: repo)
+        XCTAssertEqual(stashes.count, 2)
+        XCTAssertEqual(stashes[0].id, 0)
+        XCTAssertEqual(stashes[1].id, 1)
+        XCTAssertTrue(stashes[0].message.contains("second stash"))
+        XCTAssertTrue(stashes[1].message.contains("first stash"))
+    }
+
+    func testStashListParsesBranchFromMessage() throws {
+        let repo = try makeTempRepo()
+        let git = GitWorktree(gitPath: "/usr/bin/git")
+        try "dirty".write(toFile: repo + "/README.md", atomically: true, encoding: .utf8)
+        try git.stashSave(repo: repo, message: "my changes")
+        let stashes = try git.stashList(repo: repo)
+        XCTAssertEqual(stashes[0].branch, "main")
+    }
+}

@@ -169,4 +169,46 @@ public struct GitWorktree {
         let out = try git(repo, ["status", "--porcelain"])
         return !out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
+
+    public func stashList(repo: String) throws -> [Stash] {
+        let (out, _) = try gitAllowingFailure(repo, ["stash", "list", "--format=%gd||%gs"])
+        guard !out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+        return out.split(separator: "\n").compactMap { line -> Stash? in
+            let parts = line.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false)
+            guard parts.count >= 3 else { return nil }
+            let refPart = String(parts[0])
+            guard let openBrace = refPart.firstIndex(of: "{"),
+                  let closeBrace = refPart.firstIndex(of: "}"),
+                  let index = Int(refPart[refPart.index(after: openBrace)..<closeBrace]) else { return nil }
+            let messagePart = String(parts[2])
+            let branch: String? = {
+                let patterns = ["On ", "WIP on "]
+                for prefix in patterns {
+                    if messagePart.hasPrefix(prefix),
+                       let colonIndex = messagePart.firstIndex(of: ":") {
+                        let start = messagePart.index(messagePart.startIndex, offsetBy: prefix.count)
+                        return String(messagePart[start..<colonIndex])
+                    }
+                }
+                return nil
+            }()
+            return Stash(id: index, message: messagePart, branch: branch)
+        }
+    }
+
+    public func stashSave(repo: String, message: String) throws {
+        try git(repo, ["stash", "push", "-u", "-m", message])
+    }
+
+    public func stashPop(repo: String, index: Int) throws {
+        try git(repo, ["stash", "pop", "stash@{\(index)}"])
+    }
+
+    public func stashApply(repo: String, index: Int) throws {
+        try git(repo, ["stash", "apply", "stash@{\(index)}"])
+    }
+
+    public func stashDrop(repo: String, index: Int) throws {
+        try git(repo, ["stash", "drop", "stash@{\(index)}"])
+    }
 }
