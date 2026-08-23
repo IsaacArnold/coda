@@ -15,7 +15,7 @@ public enum WorktreeStoreError: Error, CustomStringConvertible {
 
 public final class WorktreeStore {
     private let config: Config
-    private let git: GitWorktree
+    public let git: GitWorktree
     private let worktreeRoot: String
     public private(set) var state: LocalState
 

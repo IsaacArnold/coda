@@ -76,6 +76,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     // state on every toggle path (toolbar click, View menu, ⌃⌘D) — mirrors the openInItem
     // pattern above (store the ref, mutate its appearance from the single state-changing spot).
     private weak var toggleDiffButton: NSButton?
+    private var branchPickerPanel: BranchPickerPanel?
+    private weak var branchPickerButton: NSButton?
+    private weak var branchLabel: NSTextField?
+    private weak var branchPickerHairline: NSView?
 
     /// Coming back to the app counts as looking at whatever worktree terminal is on screen, so
     /// clear its badge contribution.
@@ -447,6 +451,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
         toolbar.allowsUserCustomization = false
+        toolbar.centeredItemIdentifiers = [.notch]
         window.toolbar = toolbar
         window.toolbarStyle = .unified
 
@@ -605,7 +610,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             guard let self else { return }
             self.currentBranches[repoID] = try? self.store.currentBranch(repoID: repoID)
             self.refreshSidebar(select: self.shownWorktreeID)
-            if self.selectedWorktree?.repoID == repoID { self.scheduleDiffRefresh() }
+            if self.selectedWorktree?.repoID == repoID {
+                self.scheduleDiffRefresh()
+                self.branchLabel?.stringValue = self.currentBranches[repoID] ?? ""
+            }
         }
         for repo in store.state.repositories {
             currentBranches[repo.id] = try? store.currentBranch(repoID: repo.id)
@@ -655,6 +663,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 onChangeNotifyOnDone: { [weak self] on in self?.setNotifyOnDone(on) },
                 showDockBadge: preferences.showDockBadge,
                 onChangeShowDockBadge: { [weak self] on in self?.setShowDockBadge(on) },
+                showBranchPicker: preferences.showBranchPicker,
+                onChangeShowBranchPicker: { [weak self] on in self?.setShowBranchPicker(on) },
                 keybindings: keybindings,
                 onChangeKeybindings: { [weak self] bindings in self?.applyKeybindings(bindings) })
 
@@ -870,8 +880,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         guard let s else {
             worktreeBar.update(title: nil, branch: nil, colorHex: nil, agentState: .idle)
             surfaceTabBar.isHidden = true
+            branchLabel?.stringValue = ""
+            branchPickerButton?.isEnabled = false
             return
         }
+        branchLabel?.stringValue = currentBranches[s.repoID] ?? s.branch
+        branchPickerButton?.isEnabled = true
 
         let list = surfaces.surfaces(for: s.id)
         if list.isEmpty {
@@ -1336,6 +1350,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         recomputeRollupsAndRefreshUI()   // re-evaluates the badge with the new setting
     }
 
+    private func setShowBranchPicker(_ on: Bool) {
+        preferences.showBranchPicker = on
+        do { try prefsStore.save(preferences) } catch { presentError(error) }
+        if !on { branchPickerPanel?.dismiss() }
+        branchPickerButton?.isHidden = !on
+        branchLabel?.isHidden = !on
+        branchPickerHairline?.isHidden = !on
+    }
+
     /// Persist the terminal-completions toggle. Applies to newly-opened terminals only —
     /// the ZDOTDIR wrapper is fixed at PTY spawn, so running terminals are unaffected.
     private func setCompletionsEnabled(_ on: Bool) {
@@ -1542,6 +1565,93 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     @objc private func addRepoAction() { addRepo() }
     @objc private func openSettingsAction() { openSettings() }
     @objc private func newSectionAction() { newSection() }
+
+    @objc private func toggleBranchPicker(_ sender: Any?) {
+        if let panel = branchPickerPanel, panel.isVisible {
+            panel.dismiss()
+            return
+        }
+
+        guard let repo = selectedRepo() else { return }
+        let git = store.git
+
+        let branches: [Branch]
+        let stashes: [Stash]
+        do {
+            branches = try git.branches(repo: repo.path)
+            stashes = try git.stashList(repo: repo.path)
+        } catch {
+            return
+        }
+
+        let panel = BranchPickerPanel(
+            contentRect: NSRect(x: 0, y: 0, width: BranchPickerPanel.panelWidth, height: 200),
+            styleMask: [], backing: .buffered, defer: true)
+        self.branchPickerPanel = panel
+
+        panel.onCheckout = { [weak self] branch in
+            self?.handleBranchCheckout(branch, repo: repo)
+        }
+
+        panel.onStashAction = { [weak self] action in
+            self?.handleStashAction(action, repo: repo)
+        }
+
+        guard let button = branchPickerButton else { return }
+        panel.show(relativeTo: button, branches: branches, stashes: stashes)
+    }
+
+    private func handleBranchCheckout(_ branch: Branch, repo: Repository) {
+        let git = store.git
+        do {
+            let dirty = try git.hasUncommittedChanges(repo: repo.path)
+            if dirty {
+                branchPickerPanel?.showConfirmation(
+                    message: "Uncommitted changes. Stash and switch?",
+                    onConfirm: { [weak self] in
+                        do {
+                            try git.stashSave(repo: repo.path, message: "Auto-stash before switching to \(branch.shortName)")
+                            try git.checkout(repo: repo.path, branch: branch.isRemote ? branch.shortName : branch.name)
+                            self?.branchPickerPanel?.dismiss()
+                        } catch let error {
+                            self?.branchPickerPanel?.showError(error.localizedDescription)
+                        }
+                    })
+            } else {
+                try git.checkout(repo: repo.path, branch: branch.isRemote ? branch.shortName : branch.name)
+                branchPickerPanel?.dismiss()
+            }
+        } catch {
+            branchPickerPanel?.showError(error.localizedDescription)
+        }
+    }
+
+    private func handleStashAction(_ action: StashAction, repo: Repository) {
+        let git = store.git
+        var touchedWorkingTree = false
+        do {
+            switch action {
+            case .apply(let index):
+                try git.stashApply(repo: repo.path, index: index)
+                touchedWorkingTree = true
+            case .pop(let index):
+                try git.stashPop(repo: repo.path, index: index)
+                touchedWorkingTree = true
+            case .drop(let index):
+                try git.stashDrop(repo: repo.path, index: index)
+            }
+            let stashes = try git.stashList(repo: repo.path)
+            branchPickerPanel?.updateStashes(stashes)
+            if touchedWorkingTree { scheduleDiffRefresh() }
+        } catch {
+            branchPickerPanel?.showError(error.localizedDescription)
+        }
+    }
+
+    private func selectedRepo() -> Repository? {
+        guard let wt = selectedWorktree else { return nil }
+        return store.state.repositories.first(where: { $0.id == wt.repoID })
+    }
 
     @objc private func toggleDiffAction() {
         diffPaneItem.animator().isCollapsed.toggle()
@@ -2033,7 +2143,7 @@ private extension NSToolbarItem.Identifier {
     // single rounded background the toolbar draws behind a custom view. This is what lets the
     // icons hug the divider; separate items get uncontrollable spacing on both sides.
     static let leftCluster = NSToolbarItem.Identifier("leftCluster")   // sidebar-toggle │ add-repo
-    static let rightCluster = NSToolbarItem.Identifier("rightCluster") // launch-Claude │ toggle-diff
+    static let rightCluster = NSToolbarItem.Identifier("rightCluster")
 }
 
 extension AppDelegate: NSToolbarDelegate {
@@ -2133,6 +2243,26 @@ extension AppDelegate: NSToolbarDelegate {
             return clusterItem(id, views: [sidebar, clusterHairline(), add])
 
         case .rightCluster:
+            let branchIcon = clusterButton(
+                symbolName: "arrow.triangle.branch", tooltip: "Switch Branch",
+                target: self, action: #selector(toggleBranchPicker(_:)))
+            let branchLbl = NSTextField(labelWithString: "")
+            branchLbl.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            branchLbl.textColor = .secondaryLabelColor
+            branchLbl.isBordered = false
+            branchLbl.isEditable = false
+            branchLbl.drawsBackground = false
+            branchLbl.lineBreakMode = .byTruncatingTail
+            branchLbl.translatesAutoresizingMaskIntoConstraints = false
+            branchLbl.widthAnchor.constraint(lessThanOrEqualToConstant: 120).isActive = true
+            branchPickerButton = branchIcon
+            branchLabel = branchLbl
+            let bpHairline = clusterHairline()
+            branchPickerHairline = bpHairline
+            let showBP = preferences.showBranchPicker
+            branchIcon.isHidden = !showBP
+            branchLbl.isHidden = !showBP
+            bpHairline.isHidden = !showBP
             let claude = clusterButton(
                 image: claudeMarkImage(diameter: 20), tooltip: "Launch Claude (⌘R)",
                 target: self, action: #selector(launchClaudeAction))
@@ -2140,7 +2270,7 @@ extension AppDelegate: NSToolbarDelegate {
                 image: toggleDiffImage(active: !diffPaneItem.isCollapsed), tooltip: "Toggle Diff (⌃⌘D)",
                 target: self, action: #selector(toggleDiffAction))
             toggleDiffButton = diff
-            return clusterItem(id, views: [claude, clusterHairline(), diff])
+            return clusterItem(id, views: [branchIcon, branchLbl, bpHairline, claude, clusterHairline(), diff])
 
         case .notch:
             let item = NSToolbarItem(itemIdentifier: id)

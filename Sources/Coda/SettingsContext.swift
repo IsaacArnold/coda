@@ -42,6 +42,10 @@ struct SettingsContext {
     let showDockBadge: Bool
     let onChangeShowDockBadge: (Bool) -> Void
 
+    // General (continued)
+    let showBranchPicker: Bool
+    let onChangeShowBranchPicker: (Bool) -> Void
+
     // Shortcuts
     let keybindings: Keybindings
     let onChangeKeybindings: (Keybindings) -> Void
