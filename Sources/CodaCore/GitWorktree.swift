@@ -5,11 +5,12 @@ public struct WorktreeInfo: Equatable {
     public let branch: String?
 }
 
-public enum GitError: Error, CustomStringConvertible {
+public enum GitError: Error, LocalizedError, CustomStringConvertible {
     case command(String, Int32, String)
     public var description: String {
         switch self { case .command(let c, let code, let err): return "git \(c) failed (\(code)): \(err)" }
     }
+    public var errorDescription: String? { description }
 }
 
 public struct GitWorktree {
