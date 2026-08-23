@@ -145,6 +145,41 @@ public enum RootRef: Codable, Equatable {
     }
 }
 
+/// A git branch (local or remote-tracking), rebuilt from `git branch` output each time.
+public struct Branch: Equatable {
+    public var name: String
+    public var isRemote: Bool
+    public var isHead: Bool
+    public var remoteName: String?
+
+    public var shortName: String {
+        if let remote = remoteName, name.hasPrefix(remote + "/") {
+            return String(name.dropFirst(remote.count + 1))
+        }
+        return name
+    }
+
+    public init(name: String, isRemote: Bool, isHead: Bool, remoteName: String?) {
+        self.name = name
+        self.isRemote = isRemote
+        self.isHead = isHead
+        self.remoteName = remoteName
+    }
+}
+
+/// One entry in `git stash list`, rebuilt from git output each time.
+public struct Stash: Equatable, Identifiable {
+    public var id: Int
+    public var message: String
+    public var branch: String?
+
+    public init(id: Int, message: String, branch: String?) {
+        self.id = id
+        self.message = message
+        self.branch = branch
+    }
+}
+
 private extension String {
     /// Returns the remainder after `prefix` if `self` starts with it, else nil.
     func dropPrefixIfPresent(_ prefix: String) -> String? {
