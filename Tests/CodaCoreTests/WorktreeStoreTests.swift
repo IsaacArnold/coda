@@ -383,6 +383,58 @@ final class WorktreeStoreTests: XCTestCase {
         XCTAssertEqual(cfg.load().repositories.first { $0.id == r.id }?.isCollapsed, true)
     }
 
+    // MARK: - Sections: colour
+
+    func testCreateSectionAutoAssignsAThemeHue() throws {
+        let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let a = try store.createSection(name: "A")
+        let b = try store.createSection(name: "B")
+        XCTAssertEqual(a.color, IdentityColorValue.hue(IdentityHue.assignmentOrder[0]).serialized)
+        XCTAssertEqual(b.color, IdentityColorValue.hue(IdentityHue.assignmentOrder[1]).serialized)
+    }
+
+    func testCreateSectionPrefersAHueNoOtherSectionUses() throws {
+        let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let a = try store.createSection(name: "A")
+        _ = try store.createSection(name: "B")
+        try store.deleteSection(id: a.id)
+        // The first hue is free again, so a new section takes it rather than duplicating B's.
+        let c = try store.createSection(name: "C")
+        XCTAssertEqual(c.color, IdentityColorValue.hue(IdentityHue.assignmentOrder[0]).serialized)
+    }
+
+    func testSetSectionColorPersists() throws {
+        let (store, cfg) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        let s = try store.createSection(name: "Work")
+        let pinned = IdentityColorValue.pinned(RGB(hex: "#123456")!).serialized
+        _ = try store.setSectionColor(id: s.id, color: pinned)
+        XCTAssertEqual(cfg.load().sections.first { $0.id == s.id }?.color, pinned)
+    }
+
+    func testSetMissingSectionColorThrows() throws {
+        let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
+        XCTAssertThrowsError(try store.setSectionColor(id: "nope", color: "red"))
+    }
+
+    func testLegacySectionsWithoutColorAreBackfilledOnLoad() throws {
+        let cfgURL = URL(fileURLWithPath: NSTemporaryDirectory() + "store-" + UUID().uuidString + ".json")
+        // Pre-colour config: sections carry no `color` key at all.
+        let legacy = """
+        {"repositories": [], "worktrees": [],
+         "sections": [{"id": "s1", "name": "One", "isCollapsed": false, "repoIDs": []},
+                      {"id": "s2", "name": "Two", "isCollapsed": false, "repoIDs": []}],
+         "rootOrder": ["section:s1", "section:s2"]}
+        """
+        try legacy.write(to: cfgURL, atomically: true, encoding: .utf8)
+        let cfg = Config(url: cfgURL)
+        XCTAssertNil(cfg.load().sections.first?.color)   // decodes fine without the key
+        let store = WorktreeStore(config: cfg, git: GitWorktree(gitPath: "/usr/bin/git"),
+                                  worktreeRoot: NSTemporaryDirectory())
+        let expected = IdentityHue.assignmentOrder.prefix(2).map { IdentityColorValue.hue($0).serialized }
+        XCTAssertEqual(store.state.sections.map(\.color), expected)
+        XCTAssertEqual(cfg.load().sections.map(\.color), expected)   // persisted, so stable
+    }
+
     func testDeleteMissingSectionThrows() throws {
         let (store, _) = makeStore(worktreeRoot: NSTemporaryDirectory() + "wtr-" + UUID().uuidString)
         XCTAssertThrowsError(try store.deleteSection(id: "nope"))

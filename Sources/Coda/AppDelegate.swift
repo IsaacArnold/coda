@@ -487,6 +487,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         sidebar.onNewSection = { [weak self] in self?.newSection() }
         sidebar.onDeleteSection = { [weak self] id in self?.deleteSection(id) }
         sidebar.onRenameSection = { [weak self] id, name in self?.renameSection(id, name: name) }
+        sidebar.onSetSectionColor = { [weak self] id, color in self?.setSectionColor(id, color) }
         sidebar.onBeginRenameSection = { [weak self] id in self?.sidebar.beginEditingSection(id: id) }
     }
 
@@ -563,6 +564,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private func renameSection(_ id: String, name: String) {
         do {
             _ = try store.renameSection(id: id, name: name)
+            refreshSidebar(select: selectedWorktree?.id)
+        } catch { presentError(error) }
+    }
+
+    private func setSectionColor(_ id: String, _ color: String) {
+        do {
+            _ = try store.setSectionColor(id: id, color: color)
             refreshSidebar(select: selectedWorktree?.id)
         } catch { presentError(error) }
     }

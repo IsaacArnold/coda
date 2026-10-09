@@ -122,6 +122,12 @@ private final class FocusHighlightRowView: NSTableRowView {
         didSet { if isHovered != oldValue { needsDisplay = true } }
     }
 
+    /// A section header's identity colour, drawn as a permanent translucent pill. nil for
+    /// every other row (row views are recycled, so the sidebar sets it on each vend).
+    var sectionTint: NSColor? {
+        didSet { if sectionTint != oldValue { needsDisplay = true } }
+    }
+
     /// The fill colour for the selected row (the app accent). Set by the sidebar per row.
     var accentColor: NSColor = NSColor(hex: AccentColor.defaultHex) ?? .controlAccentColor
 
@@ -152,11 +158,20 @@ private final class FocusHighlightRowView: NSTableRowView {
     /// on the selected row so its accent glass fill is never muddied; because that check
     /// lives here, selection always wins with no ordering subtlety between the two
     /// overrides.
+    ///
+    /// A section header's pill is drawn first, beneath the hover wash, in the same rounded
+    /// rect. Its alpha sits well under the selection's 0.22 and it has no rim, so it reads
+    /// as a quiet group label: softer than the full-strength repo text colours, and never
+    /// mistaken for the focused worktree.
     override func drawBackground(in dirtyRect: NSRect) {
         super.drawBackground(in: dirtyRect)
-        guard isHovered, !isSelected else { return }
         let rect = bounds.insetBy(dx: 4, dy: 1)
         let path = NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5)
+        if let sectionTint {
+            sectionTint.withAlphaComponent(0.14).setFill()
+            path.fill()
+        }
+        guard isHovered, !isSelected else { return }
         Self.hoverWash.setFill()
         path.fill()
     }
@@ -232,6 +247,8 @@ final class SidebarController: NSViewController {
     var onRenameSection: ((_ id: String, _ name: String) -> Void)?
     /// Right-click empty space / a section header → "New Section".
     var onNewSection: (() -> Void)?
+    /// Right-click a section header → "Set Color" swatch / "Custom…" — apply an identity colour.
+    var onSetSectionColor: ((_ id: String, _ color: String) -> Void)?
     /// Right-click a section header → "Delete Section".
     var onDeleteSection: ((_ id: String) -> Void)?
     /// Ask AppDelegate to begin inline rename of a section (so it can route to `beginEditingSection`).
@@ -560,6 +577,22 @@ final class SidebarController: NSViewController {
         (sender.representedObject as? String).map { onBeginRenameSection?($0) }
     }
 
+    @objc private func contextSetSectionColor(_ sender: NSMenuItem) {
+        guard let info = sender.representedObject as? [String: String],
+              let id = info["id"], let value = info["value"] else { return }
+        onSetSectionColor?(id, value)
+    }
+
+    /// "Custom…" for a section → open the colour panel, pin each pick live.
+    @objc private func contextCustomSectionColor(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        let current = (rootNodes.first { ($0 as? SectionNode)?.section.id == id } as? SectionNode)?
+            .section.color
+        PinColorPanel.shared.begin(initial: resolvedColor(current)) { [weak self] rgb in
+            self?.onSetSectionColor?(id, IdentityColorValue.pinned(rgb).serialized)
+        }
+    }
+
     @objc private func contextDeleteSection(_ sender: NSMenuItem) {
         (sender.representedObject as? String).map { onDeleteSection?($0) }
     }
@@ -673,13 +706,21 @@ extension SidebarController: NSMenuDelegate {
         newSection.target = self
         menu.addItem(newSection)
 
-        // --- Section header right-click: Rename / Delete. ---
+        // --- Section header right-click: Rename / Set Color / Delete. ---
         if let section = clicked as? SectionNode {
             menu.addItem(.separator())
             let rename = NSMenuItem(title: "Rename Section…",
                                     action: #selector(contextRenameSection(_:)), keyEquivalent: "")
             rename.target = self; rename.representedObject = section.section.id
             menu.addItem(rename)
+            if let theme = activeTheme {
+                // No "Remove Color": every section keeps its pill.
+                menu.addItem(ColorMenu.makeSetColorItem(
+                    targetID: section.section.id, theme: theme, target: self,
+                    setColor: #selector(contextSetSectionColor(_:)),
+                    customColor: #selector(contextCustomSectionColor(_:)),
+                    removeColor: nil))
+            }
             let delete = NSMenuItem(title: "Delete Section",
                                     action: #selector(contextDeleteSection(_:)), keyEquivalent: "")
             delete.target = self; delete.representedObject = section.section.id
@@ -897,6 +938,7 @@ extension SidebarController: NSOutlineViewDataSource, NSOutlineViewDelegate {
         let row = (outline.makeView(withIdentifier: id, owner: self) as? FocusHighlightRowView)
             ?? { let r = FocusHighlightRowView(); r.identifier = id; return r }()
         row.accentColor = accentFill
+        row.sectionTint = (item as? SectionNode).flatMap { resolvedColor($0.section.color) }
         // Load-bearing, not defensive belt-and-braces: `reloadData(forRowIndexes:columnIndexes:)`
         // — which the 1s agent-state poll (`reloadRowsPreservingSelection()`) calls every
         // tick — re-vends row views, and `makeView(withIdentifier:)` can hand a row a
