@@ -112,9 +112,15 @@ public struct SidebarSection: Codable, Equatable, Identifiable {
     public var name: String
     public var isCollapsed: Bool
     public var repoIDs: [String]
+    /// Serialized `IdentityColorValue` tinting the header's background pill. nil only
+    /// for pre-colour configs; the store backfills those on load, so in practice every
+    /// section has one.
+    public var color: String?
 
-    public init(id: String, name: String, isCollapsed: Bool = false, repoIDs: [String] = []) {
+    public init(id: String, name: String, isCollapsed: Bool = false, repoIDs: [String] = [],
+                color: String? = nil) {
         self.id = id; self.name = name; self.isCollapsed = isCollapsed; self.repoIDs = repoIDs
+        self.color = color
     }
 }
 

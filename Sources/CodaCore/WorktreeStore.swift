@@ -25,6 +25,7 @@ public final class WorktreeStore {
         self.worktreeRoot = worktreeRoot
         self.state = config.load()
         reconcilePersistedLayout()
+        backfillSectionColors()
     }
 
     public func addRepository(path: String) throws -> Repository {
@@ -185,7 +186,8 @@ public final class WorktreeStore {
     /// Create an empty section, appended to the top-level order. Purely display metadata.
     @discardableResult
     public func createSection(name: String) throws -> SidebarSection {
-        let section = SidebarSection(id: UUID().uuidString, name: name)
+        let section = SidebarSection(id: UUID().uuidString, name: name,
+                                     color: IdentityColorValue.hue(nextSectionHue()).serialized)
         state.sections.append(section)
         state.rootOrder.append(.section(section.id))
         try config.save(state)
@@ -218,6 +220,17 @@ public final class WorktreeStore {
             state.rootOrder.append(contentsOf: freed)
         }
         try config.save(state)
+    }
+
+    /// Set a section's header colour (a serialized `IdentityColorValue`).
+    @discardableResult
+    public func setSectionColor(id: String, color: String) throws -> SidebarSection {
+        guard let idx = state.sections.firstIndex(where: { $0.id == id }) else {
+            throw WorktreeStoreError.sectionNotFound(id)
+        }
+        state.sections[idx].color = color
+        try config.save(state)
+        return state.sections[idx]
     }
 
     public func setSectionCollapsed(id: String, collapsed: Bool) throws {
@@ -306,6 +319,24 @@ public final class WorktreeStore {
         guard result.sections != state.sections || result.rootOrder != state.rootOrder else { return }
         state.sections = result.sections
         state.rootOrder = result.rootOrder
+        try? config.save(state)
+    }
+
+    /// The first hue (in assignment order) no section uses yet, so sections stay distinct;
+    /// once all are taken, cycle by section count.
+    private func nextSectionHue() -> IdentityHue {
+        let used = Set(state.sections.compactMap(\.color))
+        return IdentityHue.assignmentOrder.first { !used.contains(IdentityColorValue.hue($0).serialized) }
+            ?? IdentityHue.autoAssigned(index: state.sections.count)
+    }
+
+    /// Sections from pre-colour configs have no colour; give each one (in order) so every
+    /// header gets its pill. Persisted, so the assignment is stable from then on.
+    private func backfillSectionColors() {
+        guard state.sections.contains(where: { $0.color == nil }) else { return }
+        for idx in state.sections.indices where state.sections[idx].color == nil {
+            state.sections[idx].color = IdentityColorValue.hue(nextSectionHue()).serialized
+        }
         try? config.save(state)
     }
 

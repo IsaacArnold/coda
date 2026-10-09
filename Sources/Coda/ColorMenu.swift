@@ -43,14 +43,14 @@ enum ColorMenu {
     }
 
     /// A top-level "Set Color" item whose submenu is the active theme's hue
-    /// swatches, a "Custom…" pin, and "Remove Color".
+    /// swatches, a "Custom…" pin, and "Remove Color" (omitted when `removeColor` is nil).
     ///
     /// A hue swatch's `representedObject` is `["id": targetID, "value": serialized]`
     /// where `serialized` is an `IdentityColorValue.hue` (it follows the theme).
     /// "Custom…" and "Remove Color" carry the bare `targetID`.
     static func makeSetColorItem(targetID: String, theme: TerminalTheme, target: AnyObject,
                                  setColor: Selector, customColor: Selector,
-                                 removeColor: Selector) -> NSMenuItem {
+                                 removeColor: Selector?) -> NSMenuItem {
         let colorItem = NSMenuItem(title: "Set Color", action: nil, keyEquivalent: "")
         let colorMenu = NSMenu()
         for hue in IdentityHue.allCases {
@@ -65,10 +65,12 @@ enum ColorMenu {
         custom.target = target
         custom.representedObject = targetID
         colorMenu.addItem(custom)
-        let remove = NSMenuItem(title: "Remove Color", action: removeColor, keyEquivalent: "")
-        remove.target = target
-        remove.representedObject = targetID
-        colorMenu.addItem(remove)
+        if let removeColor {
+            let remove = NSMenuItem(title: "Remove Color", action: removeColor, keyEquivalent: "")
+            remove.target = target
+            remove.representedObject = targetID
+            colorMenu.addItem(remove)
+        }
         colorItem.submenu = colorMenu
         return colorItem
     }
