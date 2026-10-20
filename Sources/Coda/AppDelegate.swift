@@ -429,6 +429,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         diffItem.canCollapse = true
         diffItem.isCollapsed = true                       // default closed (Q8)
         diffItem.minimumThickness = 280
+        // Sidebar-behavior items auto-collapse when a live resize squeezes the window and are
+        // auto-revealed by NSSplitView when it widens again — which pops the closed diff pane
+        // open on corner drags, screen moves, or left-sidebar toggles. Only the user opens it.
+        // (macOS 13 has no opt-out, so the bug remains there.)
+        if #available(macOS 14.0, *) { diffItem.canCollapseFromWindowResize = false }
         diffPaneItem = diffItem
         splitVC = NSSplitViewController()
         splitVC.addSplitViewItem(sidebarItem)
