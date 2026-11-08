@@ -209,6 +209,27 @@ public struct GitWorktree {
         try git(repo, ["stash", "apply", "stash@{\(index)}"])
     }
 
+    /// `git status --porcelain` verbatim — a cheap fingerprint of the working tree.
+    public func statusPorcelain(repo: String) throws -> String {
+        try git(repo, ["status", "--porcelain"])
+    }
+
+    /// Paths with unresolved merge conflicts (e.g. after a clashing `stash pop`).
+    public func conflictedFiles(repo: String) throws -> [String] {
+        try git(repo, ["-c", "core.quotePath=false", "diff", "--name-only", "--diff-filter=U"])
+            .split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+    }
+
+    /// Re-file `stash@{index}` under a new reflog message (git has no in-place rename): drop
+    /// the entry, then store the same commit again with the new message. Drop must come first —
+    /// `stash store` of the commit already at the top of refs/stash is a silent no-op.
+    public func stashRelabel(repo: String, index: Int, message: String) throws {
+        let sha = try git(repo, ["rev-parse", "stash@{\(index)}"])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        try git(repo, ["stash", "drop", "stash@{\(index)}"])
+        try git(repo, ["stash", "store", "-m", message, sha])
+    }
+
     public func stashDrop(repo: String, index: Int) throws {
         try git(repo, ["stash", "drop", "stash@{\(index)}"])
     }
