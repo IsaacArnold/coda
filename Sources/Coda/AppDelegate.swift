@@ -625,7 +625,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             self.refreshSidebar(select: self.shownWorktreeID)
             if self.selectedWorktree?.repoID == repoID {
                 self.scheduleDiffRefresh()
-                self.branchLabel?.stringValue = self.currentBranches[repoID] ?? ""
+                if let wt = self.selectedWorktree { self.branchLabel?.stringValue = self.liveBranch(of: wt) }
             }
         }
         for repo in store.state.repositories {
@@ -897,7 +897,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             branchPickerButton?.isEnabled = false
             return
         }
-        branchLabel?.stringValue = currentBranches[s.repoID] ?? s.branch
+        branchLabel?.stringValue = liveBranch(of: s)
         branchPickerButton?.isEnabled = true
 
         let list = surfaces.surfaces(for: s.id)
@@ -1585,17 +1585,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return
         }
 
-        guard let repo = selectedRepo() else { return }
+        // Act on the checkout the user is looking at — a linked worktree's own folder, not the
+        // repo's main folder (for the synthesized main checkout these are the same path).
+        guard let wt = selectedWorktree else { return }
+        let dir = wt.worktreePath
         let git = store.git
+        let switcher = BranchSwitcher(git: git)
 
         let branches: [Branch]
-        let stashes: [Stash]
         do {
-            branches = try git.branches(repo: repo.path)
-            stashes = try git.stashList(repo: repo.path)
+            branches = try git.branches(repo: dir)
         } catch {
             return
         }
+        let stashed = (try? switcher.branchesWithAutoStash(in: dir)) ?? []
 
         let panel = BranchPickerPanel(
             contentRect: NSRect(x: 0, y: 0, width: BranchPickerPanel.panelWidth, height: 200),
@@ -1603,67 +1606,101 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         self.branchPickerPanel = panel
 
         panel.onCheckout = { [weak self] branch in
-            self?.handleBranchCheckout(branch, repo: repo)
+            self?.handleBranchCheckout(branch, in: wt)
         }
-
-        panel.onStashAction = { [weak self] action in
-            self?.handleStashAction(action, repo: repo)
+        panel.onRestoreStash = { [weak self] in
+            self?.handleRestoreStash(in: wt)
         }
 
         guard let button = branchPickerButton else { return }
-        panel.show(relativeTo: button, branches: branches, stashes: stashes)
+        panel.show(relativeTo: button, branches: branches, stashedBranches: stashed)
     }
 
-    private func handleBranchCheckout(_ branch: Branch, repo: Repository) {
+    private func handleBranchCheckout(_ branch: Branch, in wt: Worktree) {
+        // Close the picker first: every outcome below is a modal alert, which would steal key
+        // from the panel (and dismiss it) anyway.
+        branchPickerPanel?.dismiss()
+        guard !branch.isHead else { return }
         let git = store.git
+        let switcher = BranchSwitcher(git: git)
+        let dir = wt.worktreePath
+        let target = branch.isRemote ? branch.shortName : branch.name
         do {
-            let dirty = try git.hasUncommittedChanges(repo: repo.path)
-            if dirty {
-                branchPickerPanel?.showConfirmation(
-                    message: "Uncommitted changes. Stash and switch?",
-                    onConfirm: { [weak self] in
-                        do {
-                            try git.stashSave(repo: repo.path, message: "Auto-stash before switching to \(branch.shortName)")
-                            try git.checkout(repo: repo.path, branch: branch.isRemote ? branch.shortName : branch.name)
-                            self?.branchPickerPanel?.dismiss()
-                        } catch let error {
-                            self?.branchPickerPanel?.showError(error.localizedDescription)
-                        }
-                    })
-            } else {
-                try git.checkout(repo: repo.path, branch: branch.isRemote ? branch.shortName : branch.name)
-                branchPickerPanel?.dismiss()
+            if try git.hasUncommittedChanges(repo: dir) {
+                let from = (try? git.currentBranch(repo: dir)) ?? "this branch"
+                let alert = NSAlert()
+                alert.messageText = "Stash your changes and switch to \(target)?"
+                alert.informativeText = "Your uncommitted changes on \(from) will be stashed. "
+                    + "When you switch back to \(from), you'll be asked whether to restore them."
+                alert.addButton(withTitle: "Stash & Switch")
+                alert.addButton(withTitle: "Cancel")
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
             }
+            _ = try switcher.switchBranch(in: dir, to: target)
+            refreshBranchLabel()
+            scheduleDiffRefresh()
         } catch {
-            branchPickerPanel?.showError(error.localizedDescription)
+            presentError(title: "Couldn't switch to \(target)", error)
+            return
         }
+        offerRestore(in: wt)
     }
 
-    private func handleStashAction(_ action: StashAction, repo: Repository) {
-        let git = store.git
-        var touchedWorkingTree = false
-        do {
-            switch action {
-            case .apply(let index):
-                try git.stashApply(repo: repo.path, index: index)
-                touchedWorkingTree = true
-            case .pop(let index):
-                try git.stashPop(repo: repo.path, index: index)
-                touchedWorkingTree = true
-            case .drop(let index):
-                try git.stashDrop(repo: repo.path, index: index)
-            }
-            let stashes = try git.stashList(repo: repo.path)
-            branchPickerPanel?.updateStashes(stashes)
-            if touchedWorkingTree { scheduleDiffRefresh() }
-        } catch {
-            branchPickerPanel?.showError(error.localizedDescription)
-        }
+    /// If the branch now checked out has changes Coda stashed when the user last left it, ask
+    /// whether to bring them back or keep them stashed.
+    private func offerRestore(in wt: Worktree) {
+        let dir = wt.worktreePath
+        let switcher = BranchSwitcher(git: store.git)
+        guard let branch = try? store.git.currentBranch(repo: dir),
+              (try? switcher.branchesWithAutoStash(in: dir))?.contains(branch) == true else { return }
+        let alert = NSAlert()
+        alert.messageText = "Restore your stashed changes on \(branch)?"
+        alert.informativeText = "You left uncommitted changes on \(branch) when you switched away. "
+            + "Restore them now, or keep them in the stash for later."
+        alert.addButton(withTitle: "Restore")
+        alert.addButton(withTitle: "Keep in Stash")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        restoreStash(for: branch, in: dir)
     }
 
-    private func selectedRepo() -> Repository? {
-        guard let wt = selectedWorktree else { return nil }
-        return store.state.repositories.first(where: { $0.id == wt.repoID })
+    /// The picker's restore bar: the user already chose to restore, so no extra prompt.
+    private func handleRestoreStash(in wt: Worktree) {
+        branchPickerPanel?.dismiss()
+        guard let branch = try? store.git.currentBranch(repo: wt.worktreePath) else { return }
+        restoreStash(for: branch, in: wt.worktreePath)
+    }
+
+    private func restoreStash(for branch: String, in dir: String) {
+        do {
+            try BranchSwitcher(git: store.git).restoreAutoStash(for: branch, in: dir)
+        } catch BranchSwitchError.partiallyRestored(let b, let conflicted, let skipped) {
+            presentError(title: "Some changes on \(b) need your attention",
+                         BranchSwitchError.partiallyRestored(b, conflicted: conflicted, skipped: skipped))
+        } catch {
+            presentError(title: "Couldn't restore your changes", error)
+        }
+        scheduleDiffRefresh()   // a clashing restore can still have touched files
+    }
+
+    private func presentError(title: String, _ error: Error) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = error.localizedDescription
+        alert.runModal()
+    }
+
+    /// The branch actually checked out in the selected worktree. The main checkout's comes from
+    /// the HEAD-watcher cache; a linked worktree has its own HEAD, so read it directly.
+    private func liveBranch(of wt: Worktree) -> String {
+        if wt.isMain { return currentBranches[wt.repoID] ?? wt.branch }
+        return (try? store.git.currentBranch(repo: wt.worktreePath)) ?? wt.branch
+    }
+
+    private func refreshBranchLabel() {
+        guard let wt = selectedWorktree else { return }
+        if wt.isMain { currentBranches[wt.repoID] = try? store.currentBranch(repoID: wt.repoID) }
+        branchLabel?.stringValue = liveBranch(of: wt)
     }
 
     @objc private func toggleDiffAction() {

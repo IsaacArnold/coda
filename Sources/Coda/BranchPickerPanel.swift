@@ -1,35 +1,25 @@
 import AppKit
 import CodaCore
 
-enum StashAction {
-    case apply(Int)
-    case pop(Int)
-    case drop(Int)
-}
-
 final class BranchPickerPanel: NSPanel, NSTextFieldDelegate {
     var onCheckout: ((Branch) -> Void)?
-    var onStashAction: ((StashAction) -> Void)?
+    /// The user asked to bring back the changes stashed when they last left the current branch.
+    var onRestoreStash: (() -> Void)?
 
     private let effectView = NSVisualEffectView()
     private let searchField = NSTextField()
+    private let restoreBar = NSView()
+    private let restoreLabel = NSTextField(labelWithString: "")
+    private let restoreButton = NSButton()
     private let scrollView = NSScrollView()
     private let tableView = HoverTableView()
-    private let stashBar = NSView()
-    private let stashDisclosure = NSButton()
-    private let stashLabel = NSTextField(labelWithString: "")
-    private let stashListView = NSStackView()
-    private let errorLabel = NSTextField(labelWithString: "")
-    private let confirmationView = NSView()
-    private let confirmLabel = NSTextField(labelWithString: "")
-    private let confirmButton = NSButton()
-    private let cancelButton = NSButton()
     private let emptyLabel = NSTextField(labelWithString: "No branches")
 
     private var allBranches: [Branch] = []
     private var filteredBranches: [Branch] = []
-    private var stashes: [Stash] = []
-    private var stashExpanded = false
+    /// Branches with changes Coda stashed when the user switched away from them.
+    private var stashedBranches: Set<String> = []
+    private var restoreBarHeight: NSLayoutConstraint?
     private var keyMonitor: Any?
 
     static let panelWidth: CGFloat = 300
@@ -37,7 +27,7 @@ final class BranchPickerPanel: NSPanel, NSTextFieldDelegate {
     static let rowHeight: CGFloat = 24
     static let sectionHeaderHeight: CGFloat = 20
     static let searchFieldHeight: CGFloat = 28
-    static let stashBarHeight: CGFloat = 32
+    static let restoreBarHeight: CGFloat = 34
     static let cornerRadius: CGFloat = 8
 
     override var canBecomeKey: Bool { true }
@@ -67,10 +57,8 @@ final class BranchPickerPanel: NSPanel, NSTextFieldDelegate {
         content.addSubview(effectView)
 
         setupSearchField(in: content)
+        setupRestoreBar(in: content)
         setupTableView(in: content)
-        setupStashBar(in: content)
-        setupConfirmationView(in: content)
-        setupErrorLabel(in: content)
         setupEmptyLabel(in: content)
         layoutSubviews(in: content)
     }
@@ -115,102 +103,57 @@ final class BranchPickerPanel: NSPanel, NSTextFieldDelegate {
         container.addSubview(scrollView)
     }
 
-    private func setupStashBar(in container: NSView) {
-        stashBar.translatesAutoresizingMaskIntoConstraints = false
-        stashBar.isHidden = true
+    private func setupRestoreBar(in container: NSView) {
+        restoreBar.translatesAutoresizingMaskIntoConstraints = false
+        restoreBar.isHidden = true
+
+        let icon = NSImageView(image: Self.stashSymbol(pointSize: 12) ?? NSImage())
+        icon.contentTintColor = .controlAccentColor
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        restoreBar.addSubview(icon)
+
+        restoreLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        restoreLabel.textColor = .labelColor
+        restoreLabel.lineBreakMode = .byTruncatingTail
+        restoreLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        restoreLabel.translatesAutoresizingMaskIntoConstraints = false
+        restoreBar.addSubview(restoreLabel)
+
+        restoreButton.title = "Restore"
+        restoreButton.bezelStyle = .rounded
+        restoreButton.controlSize = .small
+        restoreButton.keyEquivalent = ""
+        restoreButton.target = self
+        restoreButton.action = #selector(restoreClicked)
+        restoreButton.translatesAutoresizingMaskIntoConstraints = false
+        restoreBar.addSubview(restoreButton)
 
         let separator = NSBox()
         separator.boxType = .separator
         separator.translatesAutoresizingMaskIntoConstraints = false
-        stashBar.addSubview(separator)
-
-        stashDisclosure.bezelStyle = .disclosure
-        stashDisclosure.title = ""
-        stashDisclosure.state = .off
-        stashDisclosure.target = self
-        stashDisclosure.action = #selector(toggleStashExpansion)
-        stashDisclosure.translatesAutoresizingMaskIntoConstraints = false
-        stashBar.addSubview(stashDisclosure)
-
-        stashLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        stashLabel.textColor = .secondaryLabelColor
-        stashLabel.translatesAutoresizingMaskIntoConstraints = false
-        stashBar.addSubview(stashLabel)
-
-        stashListView.orientation = .vertical
-        stashListView.spacing = 2
-        stashListView.translatesAutoresizingMaskIntoConstraints = false
-        stashListView.isHidden = true
-        stashBar.addSubview(stashListView)
+        restoreBar.addSubview(separator)
 
         NSLayoutConstraint.activate([
-            separator.topAnchor.constraint(equalTo: stashBar.topAnchor),
-            separator.leadingAnchor.constraint(equalTo: stashBar.leadingAnchor, constant: 8),
-            separator.trailingAnchor.constraint(equalTo: stashBar.trailingAnchor, constant: -8),
-            stashDisclosure.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: 4),
-            stashDisclosure.leadingAnchor.constraint(equalTo: stashBar.leadingAnchor, constant: 8),
-            stashLabel.centerYAnchor.constraint(equalTo: stashDisclosure.centerYAnchor),
-            stashLabel.leadingAnchor.constraint(equalTo: stashDisclosure.trailingAnchor, constant: 4),
-            stashListView.topAnchor.constraint(equalTo: stashDisclosure.bottomAnchor, constant: 4),
-            stashListView.leadingAnchor.constraint(equalTo: stashBar.leadingAnchor, constant: 8),
-            stashListView.trailingAnchor.constraint(equalTo: stashBar.trailingAnchor, constant: -8),
-            stashListView.bottomAnchor.constraint(equalTo: stashBar.bottomAnchor, constant: -4),
+            icon.leadingAnchor.constraint(equalTo: restoreBar.leadingAnchor, constant: 12),
+            icon.centerYAnchor.constraint(equalTo: restoreBar.centerYAnchor),
+            restoreLabel.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 6),
+            restoreLabel.centerYAnchor.constraint(equalTo: restoreBar.centerYAnchor),
+            restoreButton.leadingAnchor.constraint(greaterThanOrEqualTo: restoreLabel.trailingAnchor, constant: 8),
+            restoreButton.trailingAnchor.constraint(equalTo: restoreBar.trailingAnchor, constant: -10),
+            restoreButton.centerYAnchor.constraint(equalTo: restoreBar.centerYAnchor),
+            separator.leadingAnchor.constraint(equalTo: restoreBar.leadingAnchor, constant: 8),
+            separator.trailingAnchor.constraint(equalTo: restoreBar.trailingAnchor, constant: -8),
+            separator.bottomAnchor.constraint(equalTo: restoreBar.bottomAnchor),
         ])
 
-        container.addSubview(stashBar)
+        container.addSubview(restoreBar)
     }
 
-    private func setupConfirmationView(in container: NSView) {
-        confirmationView.translatesAutoresizingMaskIntoConstraints = false
-        confirmationView.isHidden = true
-        confirmationView.wantsLayer = true
-        confirmationView.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.9).cgColor
-        confirmationView.layer?.cornerRadius = 6
-
-        confirmLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        confirmLabel.textColor = .labelColor
-        confirmLabel.lineBreakMode = .byWordWrapping
-        confirmLabel.maximumNumberOfLines = 3
-        confirmLabel.translatesAutoresizingMaskIntoConstraints = false
-        confirmationView.addSubview(confirmLabel)
-
-        confirmButton.title = "Stash & Switch"
-        confirmButton.bezelStyle = .rounded
-        confirmButton.controlSize = .small
-        confirmButton.target = self
-        confirmButton.action = #selector(confirmClicked)
-        confirmButton.translatesAutoresizingMaskIntoConstraints = false
-        confirmationView.addSubview(confirmButton)
-
-        cancelButton.title = "Cancel"
-        cancelButton.bezelStyle = .rounded
-        cancelButton.controlSize = .small
-        cancelButton.target = self
-        cancelButton.action = #selector(cancelClicked)
-        cancelButton.translatesAutoresizingMaskIntoConstraints = false
-        confirmationView.addSubview(cancelButton)
-
-        NSLayoutConstraint.activate([
-            confirmLabel.topAnchor.constraint(equalTo: confirmationView.topAnchor, constant: 8),
-            confirmLabel.leadingAnchor.constraint(equalTo: confirmationView.leadingAnchor, constant: 12),
-            confirmLabel.trailingAnchor.constraint(equalTo: confirmationView.trailingAnchor, constant: -12),
-            confirmButton.topAnchor.constraint(equalTo: confirmLabel.bottomAnchor, constant: 8),
-            confirmButton.trailingAnchor.constraint(equalTo: confirmationView.trailingAnchor, constant: -12),
-            confirmButton.bottomAnchor.constraint(equalTo: confirmationView.bottomAnchor, constant: -8),
-            cancelButton.centerYAnchor.constraint(equalTo: confirmButton.centerYAnchor),
-            cancelButton.trailingAnchor.constraint(equalTo: confirmButton.leadingAnchor, constant: -8),
-        ])
-
-        container.addSubview(confirmationView)
-    }
-
-    private func setupErrorLabel(in container: NSView) {
-        errorLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        errorLabel.textColor = .systemRed
-        errorLabel.isHidden = true
-        errorLabel.lineBreakMode = .byTruncatingTail
-        errorLabel.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(errorLabel)
+    /// The "changes tucked away" glyph used on stashed branch rows and the restore bar.
+    static func stashSymbol(pointSize: CGFloat) -> NSImage? {
+        let config = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular)
+        return NSImage(systemSymbolName: "tray.full", accessibilityDescription: "Stashed changes")?
+            .withSymbolConfiguration(config)
     }
 
     private func setupEmptyLabel(in container: NSView) {
@@ -234,41 +177,31 @@ final class BranchPickerPanel: NSPanel, NSTextFieldDelegate {
             searchField.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
             searchField.heightAnchor.constraint(equalToConstant: Self.searchFieldHeight),
 
-            scrollView.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 4),
+            restoreBar.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 4),
+            restoreBar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            restoreBar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+
+            scrollView.topAnchor.constraint(equalTo: restoreBar.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-
-            stashBar.topAnchor.constraint(equalTo: scrollView.bottomAnchor),
-            stashBar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            stashBar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            stashBar.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-
-            errorLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            errorLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-            errorLabel.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: -4),
+            scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
 
             emptyLabel.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
             emptyLabel.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
-
-            confirmationView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
-            confirmationView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
-            confirmationView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: -8),
         ])
+        let height = restoreBar.heightAnchor.constraint(equalToConstant: 0)
+        height.isActive = true
+        restoreBarHeight = height
     }
 
     // MARK: - Public API
 
-    func show(relativeTo button: NSView, branches: [Branch], stashes: [Stash]) {
+    func show(relativeTo button: NSView, branches: [Branch], stashedBranches: Set<String>) {
         self.allBranches = branches
-        self.stashes = stashes
-        self.stashExpanded = false
-        stashDisclosure.state = .off
-        stashListView.isHidden = true
-        confirmationView.isHidden = true
-        errorLabel.isHidden = true
+        self.stashedBranches = stashedBranches
         searchField.stringValue = ""
         applyFilter()
-        updateStashBar()
+        updateRestoreBar()
         updatePanelSize()
 
         guard let buttonWindow = button.window,
@@ -317,29 +250,6 @@ final class BranchPickerPanel: NSPanel, NSTextFieldDelegate {
         }
     }
 
-    func showError(_ message: String) {
-        errorLabel.stringValue = message
-        errorLabel.isHidden = false
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.errorLabel.isHidden = true
-        }
-    }
-
-    private var pendingConfirmAction: (() -> Void)?
-
-    func showConfirmation(message: String, onConfirm: @escaping () -> Void) {
-        confirmLabel.stringValue = message
-        pendingConfirmAction = onConfirm
-        confirmationView.isHidden = false
-    }
-
-    func updateStashes(_ stashes: [Stash]) {
-        self.stashes = stashes
-        updateStashBar()
-        if stashExpanded { rebuildStashList() }
-        updatePanelSize()
-    }
-
     // MARK: - NSTextFieldDelegate (live search filtering)
 
     func controlTextDidChange(_ obj: Notification) {
@@ -370,53 +280,20 @@ final class BranchPickerPanel: NSPanel, NSTextFieldDelegate {
     private var localBranches: [Branch] { filteredBranches.filter { !$0.isRemote } }
     private var remoteBranches: [Branch] { filteredBranches.filter { $0.isRemote } }
 
-    private func updateStashBar() {
-        stashBar.isHidden = stashes.isEmpty
-        stashLabel.stringValue = stashes.count == 1 ? "1 stash" : "\(stashes.count) stashes"
+    private var currentBranchName: String? {
+        allBranches.first(where: { $0.isHead })?.name
     }
 
-    private func rebuildStashList() {
-        stashListView.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        for stash in stashes {
-            let row = makeStashRow(stash)
-            stashListView.addArrangedSubview(row)
-        }
+    private var showsRestoreBar: Bool {
+        guard let current = currentBranchName else { return false }
+        return stashedBranches.contains(current)
     }
 
-    private func makeStashRow(_ stash: Stash) -> NSView {
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.spacing = 4
-
-        let label = NSTextField(labelWithString: "stash@{\(stash.id)}: \(stash.message)")
-        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        label.textColor = .labelColor
-        label.lineBreakMode = .byTruncatingTail
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        let applyBtn = makeSmallButton("Apply") { [weak self] in
-            self?.onStashAction?(.apply(stash.id))
-        }
-        let popBtn = makeSmallButton("Pop") { [weak self] in
-            self?.onStashAction?(.pop(stash.id))
-        }
-        let dropBtn = makeSmallButton("Drop") { [weak self] in
-            self?.onStashAction?(.drop(stash.id))
-        }
-
-        row.addArrangedSubview(label)
-        row.addArrangedSubview(applyBtn)
-        row.addArrangedSubview(popBtn)
-        row.addArrangedSubview(dropBtn)
-        return row
-    }
-
-    private func makeSmallButton(_ title: String, action: @escaping () -> Void) -> NSButton {
-        let button = CallbackButton(title: title, action: action)
-        button.controlSize = .mini
-        button.bezelStyle = .recessed
-        button.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        return button
+    private func updateRestoreBar() {
+        let show = showsRestoreBar
+        restoreBar.isHidden = !show
+        restoreBarHeight?.constant = show ? Self.restoreBarHeight : 0
+        restoreLabel.stringValue = "You left changes on \(currentBranchName ?? "")"
     }
 
     private func updatePanelSize() {
@@ -424,12 +301,10 @@ final class BranchPickerPanel: NSPanel, NSTextFieldDelegate {
         let sectionCount = (localBranches.isEmpty ? 0 : 1) + (remoteBranches.isEmpty ? 0 : 1)
         let tableHeight = CGFloat(branchCount) * Self.rowHeight
             + CGFloat(sectionCount) * Self.sectionHeaderHeight
-        let stashHeight: CGFloat = stashes.isEmpty ? 0 : (stashExpanded
-            ? Self.stashBarHeight + CGFloat(stashes.count) * 24 + 8
-            : Self.stashBarHeight)
+        let barHeight: CGFloat = showsRestoreBar ? Self.restoreBarHeight : 0
         let totalHeight = Self.searchFieldHeight + 12
-            + min(tableHeight, Self.maxPanelHeight - Self.searchFieldHeight - 12 - stashHeight)
-            + stashHeight
+            + min(tableHeight, Self.maxPanelHeight - Self.searchFieldHeight - 12 - barHeight)
+            + barHeight
         let clampedHeight = min(max(totalHeight, 80), Self.maxPanelHeight)
         var frame = self.frame
         let heightDelta = clampedHeight - frame.height
@@ -460,23 +335,8 @@ final class BranchPickerPanel: NSPanel, NSTextFieldDelegate {
         onCheckout?(branch)
     }
 
-    @objc private func toggleStashExpansion() {
-        stashExpanded.toggle()
-        stashDisclosure.state = stashExpanded ? .on : .off
-        stashListView.isHidden = !stashExpanded
-        if stashExpanded { rebuildStashList() }
-        updatePanelSize()
-    }
-
-    @objc private func confirmClicked() {
-        confirmationView.isHidden = true
-        pendingConfirmAction?()
-        pendingConfirmAction = nil
-    }
-
-    @objc private func cancelClicked() {
-        confirmationView.isHidden = true
-        pendingConfirmAction = nil
+    @objc private func restoreClicked() {
+        onRestoreStash?()
     }
 
     // MARK: - Table helpers
@@ -538,6 +398,16 @@ extension BranchPickerPanel: NSTableViewDataSource, NSTableViewDelegate {
             nameLabel.lineBreakMode = .byTruncatingTail
             stack.addArrangedSubview(checkmark)
             stack.addArrangedSubview(nameLabel)
+            if !branch.isRemote, stashedBranches.contains(branch.name),
+               let symbol = Self.stashSymbol(pointSize: 11) {
+                let spacer = NSView()
+                spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+                let marker = NSImageView(image: symbol)
+                marker.contentTintColor = .controlAccentColor
+                marker.toolTip = "You left uncommitted changes here. Switch back to restore them."
+                stack.addArrangedSubview(spacer)
+                stack.addArrangedSubview(marker)
+            }
             return stack
         }
     }
@@ -585,19 +455,4 @@ private final class HoverTableView: NSTableView {
         hoveredRow = -1
         onHoverChanged?(-1)
     }
-}
-
-// MARK: - CallbackButton
-
-private final class CallbackButton: NSButton {
-    private var callback: (() -> Void)?
-
-    convenience init(title: String, action: @escaping () -> Void) {
-        self.init(title: title, target: nil, action: nil)
-        self.callback = action
-        self.target = self
-        self.action = #selector(clicked)
-    }
-
-    @objc private func clicked() { callback?() }
 }
