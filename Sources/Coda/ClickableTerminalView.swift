@@ -60,6 +60,7 @@ final class ClickableTerminalView: LocalProcessTerminalView {
         }
         // After `super` so the buffer reflects this chunk before the controller reads it.
         onOutput?()
+        refreshLinkHover()
     }
 
     /// True when the running program has turned on any-event mouse tracking (DECSET 1003), i.e.
@@ -504,7 +505,7 @@ final class ClickableTerminalView: LocalProcessTerminalView {
     /// opened something.
     @discardableResult
     func handleCommandClick(_ event: NSEvent) -> Bool {
-        switch clickTarget(at: event) {
+        switch clickHit(at: viewPoint(of: event))?.target {
         case .url(let url):
             NSWorkspace.shared.open(url)
             return true
@@ -520,22 +521,93 @@ final class ClickableTerminalView: LocalProcessTerminalView {
         }
     }
 
-    /// Whether a ⌘+click at this location would open something. Used by the app's ⌘-hover
-    /// monitor to show the pointing-hand cursor over links without acting on them.
-    func linkExists(at event: NSEvent) -> Bool {
-        clickTarget(at: event) != nil
+    // MARK: - ⌘-hover underline (#87)
+
+    /// ⌘-hover at `event`: underlines exactly what a ⌘+click there would open and returns
+    /// whether there is anything (which drives the pointing-hand cursor). Called by the app's
+    /// hover monitor only while ⌘ is held.
+    ///
+    /// Where SwiftTerm already underlines the cell itself (its own ⌘-hover highlight covers
+    /// URLs, `./`/`~/`/`/` paths and OSC 8 links) we draw nothing, so there's never a double
+    /// underline. Its highlight state is module-internal, so we can't drive it for our matches.
+    func updateLinkHover(at event: NSEvent) -> Bool {
+        guard let point = viewPoint(of: event), let hit = clickHit(at: point) else {
+            clearLinkHover()
+            return false
+        }
+        let term = getTerminal()
+        let swiftTermUnderlines = term.link(at: .screen(hit.cell), mode: .explicitAndImplicit) != nil
+        setLinkUnderline(swiftTermUnderlines ? [] : hit.underline)
+        return true
     }
 
-    /// The URL or file path under `event`, or nil — the single source of truth shared by the
-    /// ⌘+click handler and the ⌘-hover cursor, so the affordance and the action never disagree.
-    ///
-    /// Only what is under the clicked cell counts (issue #79): an OSC 8 hyperlink on the cell
-    /// wins; otherwise the soft-wrapped rows around the click are joined into one logical line
-    /// and `resolveClickTarget` (CodaCore) picks the URL/path under the clicked column.
-    private func clickTarget(at event: NSEvent) -> TerminalClickTarget? {
-        guard containsClick(event) else { return nil }
-        let point = convert(event.locationInWindow, from: nil)
+    /// Removes the ⌘-hover underline (⌘ released, pointer left the link or this pane).
+    func clearLinkHover() {
+        setLinkUnderline([])
+    }
 
+    /// Re-run the hover against the pointer's current position: output and scrolling move text
+    /// under a stationary pointer, so a drawn underline would otherwise point at stale cells.
+    private func refreshLinkHover() {
+        guard linkUnderline.superview != nil, !linkUnderline.runs.isEmpty else { return }
+        guard NSEvent.modifierFlags.contains(.command), let window,
+              let hit = clickHit(at: convert(window.mouseLocationOutsideOfEventStream, from: nil))
+        else { clearLinkHover(); return }
+        let swiftTermUnderlines = getTerminal().link(at: .screen(hit.cell), mode: .explicitAndImplicit) != nil
+        setLinkUnderline(swiftTermUnderlines ? [] : hit.underline)
+    }
+
+    override func scrolled(source terminal: Terminal, yDisp: Int) {
+        super.scrolled(source: terminal, yDisp: yDisp)
+        refreshLinkHover()
+    }
+
+    private lazy var linkUnderline: LinkUnderlineOverlay = {
+        let v = LinkUnderlineOverlay(frame: bounds)
+        v.autoresizingMask = [.width, .height]
+        return v
+    }()
+
+    /// Draw (or, with `[]`, remove) underlines beneath the given screen-row column runs.
+    private func setLinkUnderline(_ runs: [RowColumns]) {
+        if runs.isEmpty && linkUnderline.superview == nil { return }
+        let cell = cellSize
+        let thickness = max(1, (cell.height / 16).rounded())
+        let rects = runs.map { run in
+            CGRect(x: CGFloat(run.columns.lowerBound) * cell.width,
+                   y: CGFloat(run.row + 1) * cell.height - thickness,
+                   width: CGFloat(run.columns.count) * cell.width,
+                   height: thickness)
+        }
+        if linkUnderline.superview == nil {
+            linkUnderline.frame = bounds
+            addSubview(linkUnderline)
+        }
+        linkUnderline.color = nativeForegroundColor
+        linkUnderline.runs = rects
+    }
+
+    /// What a ⌘+click / ⌘-hover at a view point means: the target, the clicked screen cell,
+    /// and the screen-row column runs holding the text it was read from (empty for OSC 8,
+    /// whose link SwiftTerm underlines itself).
+    private struct ClickHit {
+        let target: TerminalClickTarget
+        let cell: Position
+        let underline: [RowColumns]
+    }
+
+    private func viewPoint(of event: NSEvent) -> CGPoint? {
+        containsClick(event) ? convert(event.locationInWindow, from: nil) : nil
+    }
+
+    /// The single source of truth shared by ⌘+click, the ⌘-hover cursor and the underline, so
+    /// the affordance and the action never disagree.
+    ///
+    /// Only what is under the clicked cell counts (#79): an OSC 8 hyperlink on the cell wins;
+    /// otherwise the soft-wrapped rows around the click are joined into one logical line and
+    /// `resolveClickMatch` (CodaCore) picks the URL/path under the clicked column.
+    private func clickHit(at point: CGPoint?) -> ClickHit? {
+        guard let point, bounds.contains(point) else { return nil }
         let term = getTerminal()
         let cols = term.cols, rows = term.rows
         guard rows > 0, cols > 0 else { return nil }
@@ -544,12 +616,13 @@ final class ClickableTerminalView: LocalProcessTerminalView {
         let yFromTop = isFlipped ? point.y : (bounds.height - point.y)
         let screenRow = max(0, min(rows - 1, Int(yFromTop / cell.height)))
         let screenCol = max(0, min(cols - 1, Int(point.x / cell.width)))
+        let clicked = Position(col: screenCol, row: screenRow)
 
         // OSC 8: an explicit hyperlink on the clicked cell (Claude Code emits these) is the
         // most reliable signal there is — no guessing at token boundaries.
-        if let link = term.link(at: .screen(Position(col: screenCol, row: screenRow)), mode: .explicitOnly),
-           let hit = resolveHyperlink(link, pathKind: Self.diskPathKind) {
-            return hit
+        if let link = term.link(at: .screen(clicked), mode: .explicitOnly),
+           let target = resolveHyperlink(link, pathKind: Self.diskPathKind) {
+            return ClickHit(target: target, cell: clicked, underline: [])
         }
 
         // Rows are screen-relative here; `getText` wants absolute buffer rows, so offset by
@@ -564,9 +637,14 @@ final class ClickableTerminalView: LocalProcessTerminalView {
             TerminalRowText(cells: cells(term, screenRow: r, cols: cols),
                             continuesPrevious: r != first)
         }
-        guard let line = logicalLine(rows: rowTexts, row: screenRow - first, column: screenCol) else { return nil }
-        return resolveClickTarget(line: line.text, offset: line.offset,
-                                  baseDirs: baseDirs, pathKind: Self.diskPathKind)
+        guard let line = logicalLine(rows: rowTexts, row: screenRow - first, column: screenCol),
+              let match = resolveClickMatch(line: line.text, offset: line.offset,
+                                            baseDirs: baseDirs, pathKind: Self.diskPathKind)
+        else { return nil }
+        let underline = line.rowColumns(for: match.range).map {
+            RowColumns(row: $0.row + first, columns: $0.columns)
+        }
+        return ClickHit(target: match.target, cell: clicked, underline: underline)
     }
 
     /// Whether buffer row `bufferRow` is a soft-wrap continuation of the row above.
@@ -624,6 +702,23 @@ final class ClickableTerminalView: LocalProcessTerminalView {
         return dirs
     }
 
+}
+
+/// Non-interactive overlay that draws the ⌘-hover link underline (#87). `hitTest` returns nil
+/// so it never intercepts a click; flipped so rects are laid out from the top like cell rows.
+private final class LinkUnderlineOverlay: NSView {
+    var runs: [CGRect] = [] {
+        didSet { if runs != oldValue { needsDisplay = true } }
+    }
+    var color: NSColor = .textColor {
+        didSet { if color != oldValue { needsDisplay = true } }
+    }
+    override var isFlipped: Bool { true }
+    override func draw(_ dirtyRect: NSRect) {
+        color.setFill()
+        runs.forEach { $0.fill() }
+    }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 /// Non-interactive overlay that strokes a focus-ring border while a drag hovers the

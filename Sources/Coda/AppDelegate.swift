@@ -71,6 +71,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var hoverMonitor: Any?
     /// Whether the ⌘-hover monitor put up the pointing hand, so it knows to take it down.
     private var linkCursor = LinkCursorState()
+    /// The pane currently showing a ⌘-hover underline, so it can be cleared when hover moves on.
+    private weak var linkHoverPane: TerminalSurface?
     private var settingsWC: NSWindowController?
     // Open-in toolbar item ref, so its icon/tooltip/menu track the chosen default editor.
     private weak var openInItem: NSMenuToolbarItem?
@@ -224,8 +226,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// the hand lingered until the mouse next moved.
     private func updateLinkCursor(for event: NSEvent) {
         let pane = (window != nil && event.window === window) ? currentSurface?.paneContaining(event) : nil
-        let overLink = window?.isKeyWindow == true && event.modifierFlags.contains(.command)
-            && (pane?.linkExists(at: event) ?? false)
+        var overLink = false
+        if let pane, window?.isKeyWindow == true, event.modifierFlags.contains(.command) {
+            overLink = pane.updateLinkHover(at: event)   // also draws/clears its underline (#87)
+        }
+        // The underline lives on the pane: take it down when ⌘ is released or the pointer
+        // leaves the link or moves to another pane.
+        if let old = linkHoverPane, old !== pane || !overLink { old.clearLinkHover() }
+        linkHoverPane = overLink ? pane : nil
         switch linkCursor.update(overLink: overLink, overTerminal: pane != nil) {
         case .none: break
         case .pointingHand: DispatchQueue.main.async { NSCursor.pointingHand.set() }

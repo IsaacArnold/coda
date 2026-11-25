@@ -30,10 +30,60 @@ public struct TerminalRowText: Equatable, Sendable {
     }
 }
 
-/// Join the soft-wrapped rows around `row` into one logical line, and map the clicked
-/// `column` of `row` to a `Character` offset in it. A continuation cell of a wide character
-/// maps to that character. Nil when the row/column is out of range.
-public func logicalLine(rows: [TerminalRowText], row: Int, column: Int) -> (text: String, offset: Int)? {
+/// A resolved target plus the `Character` range of the logical line it was read from — the
+/// exact text ⌘-hover underlines (#87). Trimmed punctuation/markers are outside the range; a
+/// markdown link covers the whole `[text](target)`.
+public struct ClickMatch: Equatable, Sendable {
+    public var target: TerminalClickTarget
+    public var range: Range<Int>
+    public init(target: TerminalClickTarget, range: Range<Int>) {
+        self.target = target
+        self.range = range
+    }
+}
+
+/// A run of columns on one row, `row` indexing the rows handed to `logicalLine`.
+public struct RowColumns: Equatable, Sendable {
+    public var row: Int
+    public var columns: Range<Int>
+    public init(row: Int, columns: Range<Int>) {
+        self.row = row
+        self.columns = columns
+    }
+}
+
+/// Soft-wrapped screen rows joined into one line of text, with the clicked cell's `offset`
+/// and enough cell bookkeeping to map a character range back to screen columns.
+public struct LogicalLine: Equatable, Sendable {
+    public var text: String
+    public var offset: Int
+    /// Per character: its row (index into the input rows), first column, and width in cells.
+    var cells: [Cell]
+
+    struct Cell: Equatable, Sendable {
+        var row: Int
+        var column: Int
+        var width: Int
+    }
+
+    /// The screen cells covering `range` of `text`, one run per row (a wrapped path spans
+    /// several). Double-width characters cover both their cells. Out-of-range parts are dropped.
+    public func rowColumns(for range: Range<Int>) -> [RowColumns] {
+        let clamped = range.clamped(to: 0..<cells.count)
+        var runs: [RowColumns] = []
+        for cell in cells[clamped] {
+            let end = cell.column + cell.width
+            if let last = runs.last, last.row == cell.row, last.columns.upperBound == cell.column {
+                runs[runs.count - 1].columns = last.columns.lowerBound..<end
+            } else {
+                runs.append(RowColumns(row: cell.row, columns: cell.column..<end))
+            }
+        }
+        return runs
+    }
+}
+
+public func logicalLine(rows: [TerminalRowText], row: Int, column: Int) -> LogicalLine? {
     guard rows.indices.contains(row), rows[row].cells.indices.contains(column) else { return nil }
     var first = row
     while first > 0 && rows[first].continuesPrevious { first -= 1 }
@@ -41,14 +91,20 @@ public func logicalLine(rows: [TerminalRowText], row: Int, column: Int) -> (text
     while last + 1 < rows.count && rows[last + 1].continuesPrevious { last += 1 }
 
     var chars: [Character] = []
+    var cells: [LogicalLine.Cell] = []
     var offset = 0
     for r in first...last {
         for (c, cell) in rows[r].cells.enumerated() {
             if r == row && c == column { offset = cell == nil ? max(0, chars.count - 1) : chars.count }
-            if let ch = cell { chars.append(ch) }
+            if let ch = cell {
+                chars.append(ch)
+                cells.append(.init(row: r, column: c, width: 1))
+            } else if let prev = cells.last, prev.row == r {
+                cells[cells.count - 1].width += 1   // continuation cell of a wide character
+            }
         }
     }
-    return (String(chars), offset)
+    return LogicalLine(text: String(chars), offset: offset, cells: cells)
 }
 
 /// The target under the character at `offset` in `line`, or nil.
@@ -65,25 +121,34 @@ public func logicalLine(rows: [TerminalRowText], row: Int, column: Int) -> (text
 /// in order. `pathKind` reports whether a candidate exists and what it is.
 public func resolveClickTarget(line: String, offset: Int, baseDirs: [String],
                                pathKind: (String) -> PathKind?) -> TerminalClickTarget? {
+    resolveClickMatch(line: line, offset: offset, baseDirs: baseDirs, pathKind: pathKind)?.target
+}
+
+/// `resolveClickTarget`, plus the range of `line` the target was read from (see `ClickMatch`).
+public func resolveClickMatch(line: String, offset: Int, baseDirs: [String],
+                              pathKind: (String) -> PathKind?) -> ClickMatch? {
     let chars = Array(line)
     guard chars.indices.contains(offset), !isSeparator(chars[offset]) else { return nil }
-    func resolve(_ raw: String) -> TerminalClickTarget? {
-        resolveToken(raw, baseDirs: baseDirs, pathKind: pathKind)
+    /// Resolve the text at `span`; on a hit, the range is the spelling that matched.
+    func resolve(_ span: Range<Int>) -> ClickMatch? {
+        guard let (target, sub) = resolveToken(String(chars[span]), baseDirs: baseDirs, pathKind: pathKind)
+        else { return nil }
+        return ClickMatch(target: target, range: (span.lowerBound + sub.lowerBound)..<(span.lowerBound + sub.upperBound))
     }
 
-    if let target = markdownLinkTarget(in: chars, at: offset), let hit = resolve(target) {
-        return hit
+    if let link = markdownLink(in: chars, at: offset),
+       let (target, _) = resolveToken(link.target, baseDirs: baseDirs, pathKind: pathKind) {
+        return ClickMatch(target: target, range: link.extent)
     }
 
     let tokens = spaceSeparatedTokens(around: offset, in: chars)
     guard let clicked = tokens.firstIndex(where: { $0.contains(offset) }) else { return nil }
-    if let hit = resolve(String(chars[tokens[clicked]])) { return hit }
+    if let hit = resolve(tokens[clicked]) { return hit }
 
     // Spans of 2…n neighbouring tokens that include the clicked one, shortest first.
     for width in 2...max(2, tokens.count) where width <= tokens.count {
         for start in max(0, clicked - width + 1)...min(clicked, tokens.count - width) {
-            let span = tokens[start].lowerBound..<tokens[start + width - 1].upperBound
-            if let hit = resolve(String(chars[span])) { return hit }
+            if let hit = resolve(tokens[start].lowerBound..<tokens[start + width - 1].upperBound) { return hit }
         }
     }
     return nil
@@ -150,9 +215,9 @@ private func spaceSeparatedTokens(around offset: Int, in chars: [Character]) -> 
     return tokens
 }
 
-/// The `target` of a markdown link `[text](target)` whose extent covers `offset`. An
-/// optional `"title"` after the target is dropped, as are `<…>` around it.
-private func markdownLinkTarget(in chars: [Character], at offset: Int) -> String? {
+/// The markdown link `[text](target)` whose extent covers `offset`: its target (an optional
+/// `"title"` and `<…>` around it dropped) and the character range of the whole link.
+private func markdownLink(in chars: [Character], at offset: Int) -> (target: String, extent: Range<Int>)? {
     var i = 0
     while i < chars.count {
         guard chars[i] == "[", i <= offset,
@@ -163,49 +228,59 @@ private func markdownLinkTarget(in chars: [Character], at offset: Int) -> String
             var target = String(chars[(close + 2)..<end]).trimmingCharacters(in: .whitespaces)
             if let space = target.firstIndex(of: " ") { target = String(target[..<space]) }
             if target.hasPrefix("<") && target.hasSuffix(">") { target = String(target.dropFirst().dropLast()) }
-            return target.isEmpty ? nil : target
+            return target.isEmpty ? nil : (target, i..<(end + 1))
         }
         i = end + 1
     }
     return nil
 }
 
-private let lightTrim = CharacterSet(charactersIn: "\"'`()[]{}<>")
+private let lightTrim = Set<Character>("\"'`()[]{}<>")
 private let leadingNoise = Set<Character>("\"'`([{<*_~")
 private let trailingNoise = Set<Character>("\"'`)]}>*_~.,:;!?")
 
-/// Candidate spellings of a raw token, most literal first: as-is, quote/bracket-trimmed,
-/// then also emphasis-marker- and sentence-punctuation-trimmed. Each is also tried with
-/// `\ ` unescaped to a space.
-private func variants(of raw: String) -> [String] {
-    var full = Substring(raw)
-    while let c = full.first, leadingNoise.contains(c) { full = full.dropFirst() }
-    while let c = full.last, trailingNoise.contains(c) { full = full.dropLast() }
-
-    var out: [String] = []
-    for v in [raw, raw.trimmingCharacters(in: lightTrim), String(full)] {
-        for w in [v, v.replacingOccurrences(of: "\\ ", with: " ")] where !w.isEmpty && !out.contains(w) {
-            out.append(w)
+/// Candidate spellings of a raw token, most literal first — as-is, quote/bracket-trimmed, then
+/// also emphasis-marker- and sentence-punctuation-trimmed — each with the `Character` range of
+/// `raw` it occupies. Each is also tried with `\ ` unescaped to a space (same range: the escape
+/// is still on screen).
+private func variants(of raw: String) -> [(text: String, range: Range<Int>)] {
+    let chars = Array(raw)
+    func trimmed(leading: Set<Character>, trailing: Set<Character>) -> Range<Int> {
+        var lo = 0, hi = chars.count
+        while lo < hi, leading.contains(chars[lo]) { lo += 1 }
+        while hi > lo, trailing.contains(chars[hi - 1]) { hi -= 1 }
+        return lo..<hi
+    }
+    var out: [(text: String, range: Range<Int>)] = []
+    for r in [0..<chars.count, trimmed(leading: lightTrim, trailing: lightTrim),
+              trimmed(leading: leadingNoise, trailing: trailingNoise)] {
+        let v = String(chars[r])
+        for w in [v, v.replacingOccurrences(of: "\\ ", with: " ")]
+        where !w.isEmpty && !out.contains(where: { $0.text == w }) {
+            out.append((w, r))
         }
     }
     return out
 }
 
+/// The target `raw` names, with the range of `raw` holding the spelling that matched.
 private func resolveToken(_ raw: String, baseDirs: [String],
-                          pathKind: (String) -> PathKind?) -> TerminalClickTarget? {
+                          pathKind: (String) -> PathKind?) -> (TerminalClickTarget, Range<Int>)? {
     let candidates = variants(of: raw)
     // URLs: judged on the most-trimmed spelling, so `https://x.y/z.` drops the full stop.
-    if let token = candidates.last {
+    if let (token, range) = candidates.last {
         let lower = token.lowercased()
-        if lower.hasPrefix("file://") { return resolveHyperlink(token, pathKind: pathKind) }
+        if lower.hasPrefix("file://") {
+            return resolveHyperlink(token, pathKind: pathKind).map { ($0, range) }
+        }
         if lower.hasPrefix("http://") || lower.hasPrefix("https://")
             || lower.hasPrefix("localhost") || lower.hasPrefix("127.0.0.1"),
            !token.contains(" "), let url = firstWebURL(in: token) {
-            return .url(url)
+            return (.url(url), range)
         }
     }
-    for token in candidates {
-        if let hit = resolvePath(token, baseDirs: baseDirs, pathKind: pathKind) { return hit }
+    for (token, range) in candidates {
+        if let hit = resolvePath(token, baseDirs: baseDirs, pathKind: pathKind) { return (hit, range) }
     }
     return nil
 }
