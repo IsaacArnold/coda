@@ -69,6 +69,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var clickMonitor: Any?
     private var keyMonitor: Any?
     private var hoverMonitor: Any?
+    /// Whether the ⌘-hover monitor put up the pointing hand, so it knows to take it down.
+    private var linkCursor = LinkCursorState()
     private var settingsWC: NSWindowController?
     // Open-in toolbar item ref, so its icon/tooltip/menu track the chosen default editor.
     private weak var openInItem: NSMenuToolbarItem?
@@ -216,17 +218,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// hard-codes an I-beam cursor rect and seals its mouse/cursor methods (`public`, not
     /// `open`), so we can't set the cursor on the terminal view directly. Our monitor runs
     /// *before* the window re-applies that I-beam rect for the same event, so we defer the
-    /// hand cursor to the next runloop tick to land after it. When not over a link we do
-    /// nothing — SwiftTerm's I-beam rect already reasserts itself for the event.
+    /// hand cursor to the next runloop tick to land after it. Once the hand is no longer
+    /// wanted, `LinkCursorState` restores the cursor explicitly: releasing ⌘ is a
+    /// `flagsChanged` event, for which AppKit re-applies no cursor rects, so without this
+    /// the hand lingered until the mouse next moved.
     private func updateLinkCursor(for event: NSEvent) {
-        let overLink: Bool = {
-            guard window != nil, window.isKeyWindow, event.window === window,
-                  event.modifierFlags.contains(.command),
-                  let pane = currentSurface?.paneContaining(event) else { return false }
-            return pane.linkExists(at: event)
-        }()
-        guard overLink else { return }
-        DispatchQueue.main.async { NSCursor.pointingHand.set() }
+        let pane = (window != nil && event.window === window) ? currentSurface?.paneContaining(event) : nil
+        let overLink = window?.isKeyWindow == true && event.modifierFlags.contains(.command)
+            && (pane?.linkExists(at: event) ?? false)
+        switch linkCursor.update(overLink: overLink, overTerminal: pane != nil) {
+        case .none: break
+        case .pointingHand: DispatchQueue.main.async { NSCursor.pointingHand.set() }
+        case .iBeam: DispatchQueue.main.async { NSCursor.iBeam.set() }
+        case .arrow: DispatchQueue.main.async { NSCursor.arrow.set() }
+        }
     }
 
     /// The ClickableTerminalView that currently holds keyboard focus in the main window, or

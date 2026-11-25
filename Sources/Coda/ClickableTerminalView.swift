@@ -210,8 +210,7 @@ final class ClickableTerminalView: LocalProcessTerminalView {
 
     /// Maps a screen-relative cell (as produced by `cursorCell`) to a view point at the
     /// BOTTOM edge of that cell — i.e. where a completion popup should anchor to sit just
-    /// below the current line. This is the exact inverse of `clickTarget(at:)`'s forward
-    /// mapping (~lines 233–235):
+    /// below the current line. It inverts the usual point→cell mapping:
     ///   forward:  yFromTop = isFlipped ? point.y : (bounds.height - point.y)
     ///             screenRow = Int(yFromTop / cellHeight)
     /// So a point at the BOTTOM of `screenRow` has `yFromTop = (screenRow + 1) * cellHeight`;
@@ -500,14 +499,6 @@ final class ClickableTerminalView: LocalProcessTerminalView {
         return bounds.contains(convert(event.locationInWindow, from: nil))
     }
 
-    /// A ⌘-clickable target under the pointer. iTerm parity: URLs open in the browser, files
-    /// in the editor, and directories (e.g. the cwd printed in the shell prompt) in Finder.
-    private enum ClickTarget {
-        case url(URL)
-        case file(path: String, line: Int?)
-        case directory(path: String)
-    }
-
     /// Called by the app's ⌘+click monitor (SwiftTerm's `mouseDown`/`requestOpenLink`
     /// are `public` but not `open`, so we can't override them). Returns true if it
     /// opened something.
@@ -537,44 +528,90 @@ final class ClickableTerminalView: LocalProcessTerminalView {
 
     /// The URL or file path under `event`, or nil — the single source of truth shared by the
     /// ⌘+click handler and the ⌘-hover cursor, so the affordance and the action never disagree.
-    private func clickTarget(at event: NSEvent) -> ClickTarget? {
+    ///
+    /// Only what is under the clicked cell counts (issue #79): an OSC 8 hyperlink on the cell
+    /// wins; otherwise the soft-wrapped rows around the click are joined into one logical line
+    /// and `resolveClickTarget` (CodaCore) picks the URL/path under the clicked column.
+    private func clickTarget(at event: NSEvent) -> TerminalClickTarget? {
         guard containsClick(event) else { return nil }
         let point = convert(event.locationInWindow, from: nil)
 
         let term = getTerminal()
         let cols = term.cols, rows = term.rows
-        guard rows > 0, cols > 0, bounds.height > 0 else { return nil }
+        guard rows > 0, cols > 0 else { return nil }
 
-        let cellHeight = bounds.height / CGFloat(rows)
+        let cell = cellSize
         let yFromTop = isFlipped ? point.y : (bounds.height - point.y)
-        let screenRow = max(0, min(rows - 1, Int(yFromTop / cellHeight)))
-        // `getText` addresses the absolute buffer (scrollback + on-screen rows), but the
-        // click gives a screen-relative row. Add the scroll offset — `getTopVisibleRow()`
-        // is `buffer.yDisp`, the top visible buffer row — to land on the line actually under
-        // the cursor, mirroring SwiftTerm's own `bufferRow = screenRow + yDisp`. Without this,
-        // any scrollback (i.e. almost always in a busy session) read a stale line from the top
-        // of history, so URLs fell through to the file route or matched nothing.
-        let bufferRow = screenRow + term.getTopVisibleRow()
+        let screenRow = max(0, min(rows - 1, Int(yFromTop / cell.height)))
+        let screenCol = max(0, min(cols - 1, Int(point.x / cell.width)))
 
-        // Scan the clicked row plus neighbors: row math is approximate and a path/URL can
-        // wrap. `getText` clamps the upper bound itself, so only guard against negatives.
-        // A URL on a line wins over the file/directory route. Directories are only honoured on
-        // the clicked row (dr == 0): the prompt's cwd is an existing directory, and matching it
-        // from a *neighbouring* row would let it hijack a click aimed at a (non-resolving) file.
-        for dr in [0, -1, 1] {
-            let rr = bufferRow + dr
-            guard rr >= 0 else { continue }
-            let line = term.getText(start: Position(col: 0, row: rr),
-                                    end: Position(col: cols - 1, row: rr))
-            if let url = firstWebURL(in: line) {
-                return .url(url)
-            }
-            if let hit = resolvePath(in: line, allowDirectory: dr == 0) {
-                return hit.isDirectory ? .directory(path: hit.path)
-                                       : .file(path: hit.path, line: hit.line)
-            }
+        // OSC 8: an explicit hyperlink on the clicked cell (Claude Code emits these) is the
+        // most reliable signal there is — no guessing at token boundaries.
+        if let link = term.link(at: .screen(Position(col: screenCol, row: screenRow)), mode: .explicitOnly),
+           let hit = resolveHyperlink(link, pathKind: Self.diskPathKind) {
+            return hit
         }
-        return nil
+
+        // Rows are screen-relative here; `getText` wants absolute buffer rows, so offset by
+        // the top visible row (`buffer.yDisp`) — otherwise any scrollback reads a stale line.
+        let top = term.getTopVisibleRow()
+        var first = screenRow
+        while first > 0 && isSoftWrapContinuation(term, bufferRow: first + top) { first -= 1 }
+        var last = screenRow
+        while last + 1 < rows && isSoftWrapContinuation(term, bufferRow: last + 1 + top) { last += 1 }
+
+        let rowTexts = (first...last).map { r in
+            TerminalRowText(cells: cells(term, screenRow: r, cols: cols),
+                            continuesPrevious: r != first)
+        }
+        guard let line = logicalLine(rows: rowTexts, row: screenRow - first, column: screenCol) else { return nil }
+        return resolveClickTarget(line: line.text, offset: line.offset,
+                                  baseDirs: baseDirs, pathKind: Self.diskPathKind)
+    }
+
+    /// Whether buffer row `bufferRow` is a soft-wrap continuation of the row above.
+    /// SwiftTerm keeps `BufferLine.isWrapped` internal, but `getText` only inserts a newline
+    /// between two rows when the second one is NOT wrapped — so a two-row read without "\n"
+    /// means a wrap. The row itself must have content: `getText` never emits a newline for a
+    /// blank trailing row, which would otherwise glue unrelated lines together.
+    private func isSoftWrapContinuation(_ term: Terminal, bufferRow: Int) -> Bool {
+        guard bufferRow > 0 else { return false }
+        let own = term.getText(start: Position(col: 0, row: bufferRow),
+                               end: Position(col: term.cols, row: bufferRow))
+        guard !own.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        let both = term.getText(start: Position(col: 0, row: bufferRow - 1),
+                                end: Position(col: term.cols, row: bufferRow))
+        return !both.contains("\n")
+    }
+
+    /// One screen row as a cell-per-column array: `nil` for the continuation cell of a
+    /// double-width character, a space for empty cells.
+    private func cells(_ term: Terminal, screenRow: Int, cols: Int) -> [Character?] {
+        (0..<cols).map { col in
+            guard let cd = term.getCharData(col: col, row: screenRow) else { return " " }
+            if cd.width == 0 { return nil }
+            let ch = term.getCharacter(for: cd)
+            return ch == "\u{0}" ? " " : ch
+        }
+    }
+
+    /// Cell size, computed the way SwiftTerm's (internal) `computeFontDimensions` does — the
+    /// "W" advance and the line height of `font`, snapped to the pixel grid — so the clicked
+    /// column matches the drawn one even across a wide row. `bounds.width / cols` drifts:
+    /// the view's width includes the scroller and any leftover sub-cell slack.
+    private var cellSize: CGSize {
+        let f = font
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        let w = f.advancement(forGlyph: f.glyph(withName: "W")).width
+        let h = CTFontGetAscent(f) + CTFontGetDescent(f) + CTFontGetLeading(f)
+        return CGSize(width: max(1, ceil(w * scale) / scale),
+                      height: max(1, ceil(ceil(h) * scale) / scale))
+    }
+
+    private static func diskPathKind(_ path: String) -> PathKind? {
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else { return nil }
+        return isDir.boolValue ? .directory : .file
     }
 
     private var baseDirs: [String] {
@@ -588,39 +625,6 @@ final class ClickableTerminalView: LocalProcessTerminalView {
         }
         dirs.append(fallbackDirectory)
         return dirs
-    }
-
-    /// First token on the line that resolves to an existing filesystem path, with whether it's
-    /// a directory. Supports `path`, `path:line`, and `path:line:col`. When `allowDirectory` is
-    /// false, directory matches are skipped (so a neighbouring prompt's cwd can't hijack a click
-    /// aimed at a file) — the editor route ignores the line number for directories anyway.
-    private func resolvePath(in line: String,
-                             allowDirectory: Bool) -> (path: String, line: Int?, isDirectory: Bool)? {
-        let tokens = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
-        for raw in tokens {
-            // Backticks included: this terminal shows Claude's markdown output, where file
-            // paths routinely appear as `inline code`. A leading backtick would make the path
-            // fail to resolve, sending the click to a neighbouring URL/editor route instead.
-            var token = raw.trimmingCharacters(in: CharacterSet(charactersIn: "\"'`(),[]{}<>"))
-            if let r = token.range(of: "\\") { token = String(token[..<r.lowerBound]) }
-            if token.isEmpty { continue }
-
-            let parts = token.split(separator: ":", maxSplits: 2).map(String.init)
-            let pathPart = parts[0]
-            let lineNo = parts.count > 1 ? Int(parts[1]) : nil
-
-            let expanded = (pathPart as NSString).expandingTildeInPath
-            let candidates = expanded.hasPrefix("/")
-                ? [expanded]
-                : baseDirs.map { ($0 as NSString).appendingPathComponent(expanded) }
-            for candidate in candidates {
-                var isDir: ObjCBool = false
-                guard FileManager.default.fileExists(atPath: candidate, isDirectory: &isDir) else { continue }
-                if isDir.boolValue && !allowDirectory { continue }
-                return (candidate, lineNo, isDir.boolValue)
-            }
-        }
-        return nil
     }
 
 }
