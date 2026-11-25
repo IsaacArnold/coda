@@ -70,6 +70,35 @@ final class ShellIntegrationWrapperTests: XCTestCase {
                       "no history was saved anywhere, so this test proves nothing")
     }
 
+    /// ⌘ + click resolves relative paths against the cwd the shell reports via OSC 7 (#84).
+    /// Without it Coda only knows the worktree root, so after a `cd` a printed `plan.md` can't
+    /// be opened. The folder name has a space and a non-ASCII character because both must be
+    /// percent-encoded in the `file://` URL — an unencoded one is silently dropped on parse.
+    func testCurrentDirectoryIsReportedViaOSC7AfterCd() throws {
+        let run = try runZshThroughWrapper(userDotfiles: [:], commands: [
+            "mkdir -p 'My Notes/café' && cd 'My Notes/café'",
+            "echo coda-probe",
+        ])
+        let payloads = osc7Payloads(in: run.output)
+        let last = try XCTUnwrap(payloads.last,
+                                 "no OSC 7 in output:\n\(run.output.debugDescription)")
+        XCTAssertTrue(last.hasPrefix("file://"), "OSC 7 payload isn't a file URL: \(last)")
+        XCTAssertFalse(last.contains(" "), "OSC 7 payload isn't percent-encoded: \(last)")
+
+        let reported = try XCTUnwrap(directoryPath(fromOSC7: last), "unparseable: \(last)")
+        let expected = run.home.appendingPathComponent("My Notes/café")
+        XCTAssertEqual(URL(fileURLWithPath: reported).resolvingSymlinksInPath().path,
+                       expected.resolvingSymlinksInPath().path)
+    }
+
+    /// Payloads of every OSC 7 (`ESC ] 7 ; <payload>` ended by BEL or ESC \\) in `output`.
+    private func osc7Payloads(in output: String) -> [String] {
+        let pattern = try! NSRegularExpression(pattern: "\u{1b}\\]7;([^\u{07}\u{1b}]*)(?:\u{07}|\u{1b}\\\\)")
+        let ns = output as NSString
+        return pattern.matches(in: output, range: NSRange(location: 0, length: ns.length))
+            .map { ns.substring(with: $0.range(at: 1)) }
+    }
+
     // MARK: Harness
 
     /// What one wrapper run produced: everything the shell wrote, plus the throwaway home it ran
@@ -87,7 +116,8 @@ final class ShellIntegrationWrapperTests: XCTestCase {
     /// `HISTFILE` is deliberately *not* pinned here: `/etc/zshrc` would overwrite it anyway, and
     /// pinning it would hide exactly the bug
     /// `testShellHistoryIsWrittenToTheUsersHomeNotTheAppBundle` exists to catch.
-    private func runZshThroughWrapper(userDotfiles: [String: String]) throws -> Run {
+    private func runZshThroughWrapper(userDotfiles: [String: String],
+                                      commands: [String] = ["echo coda-probe"]) throws -> Run {
         guard FileManager.default.fileExists(atPath: "/bin/zsh") else {
             throw XCTSkip("no /bin/zsh on this machine")
         }
@@ -124,10 +154,12 @@ final class ShellIntegrationWrapperTests: XCTestCase {
         }
         try process.run()
 
-        // Let the dotfiles settle, run one command so a full prompt cycle is exercised, then quit.
+        // Let the dotfiles settle, run the commands so full prompt cycles are exercised, then quit.
         Thread.sleep(forTimeInterval: 1.5)
-        input.fileHandleForWriting.write("echo coda-probe\n".data(using: .utf8)!)
-        Thread.sleep(forTimeInterval: 0.75)
+        for command in commands {
+            input.fileHandleForWriting.write((command + "\n").data(using: .utf8)!)
+            Thread.sleep(forTimeInterval: 0.75)
+        }
         input.fileHandleForWriting.write("exit\n".data(using: .utf8)!)
 
         _ = done.wait(timeout: .now() + 10)
