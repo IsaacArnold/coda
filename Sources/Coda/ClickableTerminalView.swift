@@ -557,6 +557,28 @@ final class ClickableTerminalView: LocalProcessTerminalView {
         setLinkUnderline(swiftTermUnderlines ? [] : hit.underline)
     }
 
+    // MARK: - Live-resize PTY gate (#80)
+
+    /// SwiftTerm sends TIOCSWINSZ from `sizeChanged` (public, not open) on every frame of a
+    /// window drag, but takes the size from `getWindowSize()` — which IS open. Reporting the
+    /// last committed size for the duration of the drag means the kernel (which only signals
+    /// SIGWINCH on an actual change) never wakes the program mid-reflow; SwiftTerm still
+    /// re-wraps and draws its own buffer live. The final size is pushed once the drag ends.
+    private var ptyGate = LiveResizePtyGate()
+
+    override func getWindowSize() -> winsize {
+        let actual = super.getWindowSize()
+        return winsize(ptyGate.sizeToReport(actual: PtySize(actual), inLiveResize: inLiveResize))
+    }
+
+    override func viewDidEndLiveResize() {
+        super.viewDidEndLiveResize()
+        guard let process, process.running,
+              let size = ptyGate.endLiveResize(actual: PtySize(super.getWindowSize())) else { return }
+        var ws = winsize(size)
+        _ = PseudoTerminalHelpers.setWinSize(masterPtyDescriptor: process.childfd, windowSize: &ws)
+    }
+
     override func scrolled(source terminal: Terminal, yDisp: Int) {
         super.scrolled(source: terminal, yDisp: yDisp)
         refreshLinkHover()
@@ -732,4 +754,18 @@ private final class DropHighlightOverlay: NSView {
         path.stroke()
     }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+private extension PtySize {
+    init(_ ws: winsize) {
+        self.init(cols: Int(ws.ws_col), rows: Int(ws.ws_row), width: Int(ws.ws_xpixel), height: Int(ws.ws_ypixel))
+    }
+}
+
+private extension winsize {
+    init(_ size: PtySize) {
+        func clamp(_ v: Int) -> UInt16 { UInt16(clamping: max(0, v)) }
+        self.init(ws_row: clamp(size.rows), ws_col: clamp(size.cols),
+                  ws_xpixel: clamp(size.width), ws_ypixel: clamp(size.height))
+    }
 }
