@@ -312,14 +312,10 @@ final class TerminalSurface: NSViewController {
         guard let bundleZdotdir = Bundle.codaBundledResource("shell-integration/zsh"),
               FileManager.default.fileExists(atPath: bundleZdotdir.appendingPathComponent(".zshrc").path)
         else { return [:] }
-        let userZdotdir: URL
-        if let existing = ProcessInfo.processInfo.environment["ZDOTDIR"], !existing.isEmpty {
-            userZdotdir = URL(fileURLWithPath: existing)
-        } else {
-            userZdotdir = FileManager.default.homeDirectoryForCurrentUser
-        }
+        let userDir = userZdotdir(inheritedEnvironment: ProcessInfo.processInfo.environment,
+                                  home: FileManager.default.homeDirectoryForCurrentUser)
         return shellIntegrationEnv(enabled: true, shell: shell,
-                                   bundleZdotdir: bundleZdotdir, userZdotdir: userZdotdir)
+                                   bundleZdotdir: bundleZdotdir, userZdotdir: userDir)
     }
 }
 

@@ -19,6 +19,20 @@ public func shellIntegrationEnv(enabled: Bool, shell: ResolvedShell,
     ]
 }
 
+/// The user's own zsh dotfile directory — what the bundled wrapper chains as `CODA_USER_ZDOTDIR`.
+///
+/// Normally the inherited `ZDOTDIR`, else `home`. But when Coda is launched from inside a Coda
+/// terminal (`open -n` on a dev build, `open -a Coda` from a tab) the inherited `ZDOTDIR` is the
+/// *parent's wrapper*; chaining that instead of the user's dotfiles leaves the shell with no
+/// integration at all — no OSC 133, no OSC 7, and the user's `.zshrc` never runs. The parent's
+/// `CODA_USER_ZDOTDIR` (only ever set by a Coda wrapper) still names the real directory, so it wins.
+public func userZdotdir(inheritedEnvironment env: [String: String], home: URL) -> URL {
+    for key in ["CODA_USER_ZDOTDIR", "ZDOTDIR"] {
+        if let value = env[key], !value.isEmpty { return URL(fileURLWithPath: value) }
+    }
+    return home
+}
+
 /// Whether a surface's shell is actually talking to us over OSC 133.
 public enum ShellIntegrationStatus: Equatable {
     /// Too early to say — still inside the grace window, or the shell hasn't printed anything yet.
