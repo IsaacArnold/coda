@@ -47,3 +47,29 @@ if [[ -z ${CODA_OSC133_INSTALLED-} ]]; then
 	add-zsh-hook precmd  __coda_osc133_precmd
 	add-zsh-hook preexec __coda_osc133_preexec
 fi
+
+# OSC 7 current-directory reports, so ⌘ + click resolves paths relative to wherever the shell
+# has cd'd, not just the worktree root (#84). Sent on every prompt (not only on cd) so the first
+# prompt, subshells and `exec zsh` report too. The path is percent-encoded byte by byte (LC_ALL=C
+# makes ${#PWD} and $PWD[i] work on bytes), so spaces and non-ASCII survive the file:// URL.
+if [[ -z ${CODA_OSC7_INSTALLED-} ]]; then
+	CODA_OSC7_INSTALLED=1
+
+	__coda_osc7_precmd() {
+		emulate -L zsh
+		local LC_ALL=C ch hex encoded= i
+		for (( i = 1; i <= ${#PWD}; i++ )); do
+			ch=$PWD[i]
+			if [[ $ch == [A-Za-z0-9/._~-] ]]; then
+				encoded+=$ch
+			else
+				printf -v hex '%%%02X' "'$ch"
+				encoded+=$hex
+			fi
+		done
+		printf '\033]7;file://%s%s\007' "${HOST}" "$encoded"
+	}
+
+	autoload -Uz add-zsh-hook
+	add-zsh-hook precmd __coda_osc7_precmd
+fi

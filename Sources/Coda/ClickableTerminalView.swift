@@ -616,12 +616,9 @@ final class ClickableTerminalView: LocalProcessTerminalView {
 
     private var baseDirs: [String] {
         var dirs: [String] = []
-        if let cwd = currentDirectory {
-            if cwd.hasPrefix("file://"), let u = URL(string: cwd) {
-                dirs.append(u.path)
-            } else {
-                dirs.append((cwd as NSString).removingPercentEncoding ?? cwd)
-            }
+        // OSC 7 cwd (sent on every prompt by Coda's zsh integration), then the worktree root.
+        if let cwd = currentDirectory.flatMap(directoryPath(fromOSC7:)) {
+            dirs.append(cwd)
         }
         dirs.append(fallbackDirectory)
         return dirs
