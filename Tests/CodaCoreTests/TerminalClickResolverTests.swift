@@ -224,3 +224,92 @@ final class TerminalClickResolverTests: XCTestCase {
                        .file(path: "/repo/docs/plan.md", line: nil))
     }
 }
+
+/// The text ⌘-hover underlines (#87): exactly what ⌘ + click opens, mapped back to cells.
+final class TerminalClickMatchRangeTests: XCTestCase {
+    private let fs: [String: PathKind] = [
+        "/repo/docs/plan.md": .file,
+        "/repo/notes/plan.md": .file,
+        "/repo/__init__.py": .file,
+        "/repo/Sources/main.swift": .file,
+        "/repo/My Notes/plan.md": .file,
+    ]
+
+    /// The substring of `line` the match covers, clicking the first char of `needle`.
+    private func underlined(_ line: String, on needle: String) -> String? {
+        let offset = line.distance(from: line.startIndex, to: line.range(of: needle)!.lowerBound)
+        guard let m = resolveClickMatch(line: line, offset: offset, baseDirs: ["/repo"],
+                                        pathKind: { self.fs[$0] }) else { return nil }
+        return String(Array(line)[m.range])
+    }
+
+    func testPlainToken() {
+        XCTAssertEqual(underlined("see docs/plan.md now", on: "plan"), "docs/plan.md")
+    }
+
+    func testTrailingPunctuationIsNotUnderlined() {
+        XCTAssertEqual(underlined("see notes/plan.md.", on: "notes"), "notes/plan.md")
+        XCTAssertEqual(underlined("at Sources/main.swift:12:5: error", on: "main"), "Sources/main.swift:12:5")
+    }
+
+    func testMarkersAndQuotesAreNotUnderlined() {
+        XCTAssertEqual(underlined("**docs/plan.md**", on: "docs"), "docs/plan.md")
+        XCTAssertEqual(underlined("see `docs/plan.md`.", on: "docs"), "docs/plan.md")
+        XCTAssertEqual(underlined("│docs/plan.md│ done", on: "docs"), "docs/plan.md")
+    }
+
+    func testNameThatResolvesAsWrittenIsUnderlinedWhole() {
+        XCTAssertEqual(underlined("open __init__.py", on: "__init"), "__init__.py")
+    }
+
+    func testMarkdownLinkUnderlinesTheWholeLink() {
+        XCTAssertEqual(underlined("read [The plan](docs/plan.md) first", on: "The"), "[The plan](docs/plan.md)")
+    }
+
+    func testPathWithSpaces() {
+        XCTAssertEqual(underlined("open My Notes/plan.md now", on: "Notes"), "My Notes/plan.md")
+        XCTAssertEqual(underlined(#"open My\ Notes/plan.md now"#, on: "Notes"), #"My\ Notes/plan.md"#)
+    }
+
+    func testURL() {
+        XCTAssertEqual(underlined("see https://example.com/x.", on: "example"), "https://example.com/x")
+    }
+
+    func testMatchTargetAgreesWithResolveClickTarget() {
+        let line = "read [The plan](docs/plan.md) first"
+        XCTAssertEqual(resolveClickMatch(line: line, offset: 6, baseDirs: ["/repo"], pathKind: { self.fs[$0] })?.target,
+                       resolveClickTarget(line: line, offset: 6, baseDirs: ["/repo"], pathKind: { self.fs[$0] }))
+    }
+
+    // MARK: logical line → per-row columns
+
+    private func row(_ s: String, wrapped: Bool = false) -> TerminalRowText {
+        TerminalRowText(cells: s.map { Optional($0) }, continuesPrevious: wrapped)
+    }
+
+    func testRangeOnOneRow() {
+        let line = logicalLine(rows: [row("see a.md now")], row: 0, column: 4)!
+        XCTAssertEqual(line.rowColumns(for: 4..<8), [RowColumns(row: 0, columns: 4..<8)])
+    }
+
+    func testRangeAcrossAWrap() {
+        let rows = [row("$ ls"), row("wrote docs/p"), row("lan.md.", wrapped: true)]
+        let line = logicalLine(rows: rows, row: 2, column: 1)!
+        // "docs/plan.md" is offsets 6..<18 of "wrote docs/plan.md."
+        XCTAssertEqual(line.rowColumns(for: 6..<18),
+                       [RowColumns(row: 1, columns: 6..<12), RowColumns(row: 2, columns: 0..<6)])
+    }
+
+    func testWideCharactersCoverBothCells() {
+        let rows = [TerminalRowText(cells: ["日", nil, " ", "a", ".", "m", "d"], continuesPrevious: false)]
+        let line = logicalLine(rows: rows, row: 0, column: 0)!
+        XCTAssertEqual(line.rowColumns(for: 0..<1), [RowColumns(row: 0, columns: 0..<2)])
+        XCTAssertEqual(line.rowColumns(for: 2..<6), [RowColumns(row: 0, columns: 3..<7)])
+    }
+
+    func testEmptyOrOutOfRangeIsEmpty() {
+        let line = logicalLine(rows: [row("abc")], row: 0, column: 0)!
+        XCTAssertEqual(line.rowColumns(for: 1..<1), [])
+        XCTAssertEqual(line.rowColumns(for: 2..<9), [RowColumns(row: 0, columns: 2..<3)])
+    }
+}

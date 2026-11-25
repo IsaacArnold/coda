@@ -204,9 +204,15 @@ final class TerminalSurface: NSViewController {
         terminal?.containsClick(event) ?? false
     }
 
-    /// Whether a ⌘+click here would open a link/file — drives the ⌘-hover pointer cursor.
-    func linkExists(at event: NSEvent) -> Bool {
-        terminal?.linkExists(at: event) ?? false
+    /// ⌘-hover: underline what a ⌘+click here would open; returns whether there's anything,
+    /// which drives the pointing-hand cursor.
+    func updateLinkHover(at event: NSEvent) -> Bool {
+        terminal?.updateLinkHover(at: event) ?? false
+    }
+
+    /// Remove this pane's ⌘-hover underline.
+    func clearLinkHover() {
+        terminal?.clearLinkHover()
     }
 
     /// Last classified agent state, reused by `currentAgentState()` while the terminal is
